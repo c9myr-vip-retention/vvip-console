@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console Design Pass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --page:#F3F4F6; --paper:#FFFFFF; --ink:#1B1F27; --ink2:#566070; --rule:#DDE1E7; --mark:#2F5FA8;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --page:#14171C; --paper:#1B1F26; --ink:#E6E9EE; --ink2:#9AA3B2; --rule:#2C323D; --mark:#8DB4EC; }
+}
+:root[data-theme="dark"]{ --page:#14171C; --paper:#1B1F26; --ink:#E6E9EE; --ink2:#9AA3B2; --rule:#2C323D; --mark:#8DB4EC; }
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--page);color:var(--ink);font:15px/1.6 'IBM Plex Sans',system-ui,sans-serif}
+.wrap{max-width:1080px;margin:0 auto;padding:40px 16px 80px}
+h1{font-size:30px;line-height:1.15;font-weight:700;letter-spacing:-.01em}
+h2{font-size:21px;font-weight:700;margin:56px 0 10px;scroll-margin-top:16px}
+h3{font-size:15px;font-weight:600;margin:22px 0 6px}
+p,li{max-width:74ch}
+p+p{margin-top:8px}
+ul,ol{padding-left:20px}
+li{margin:3px 0}
+.lede{color:var(--ink2);margin-top:8px}
+a{color:var(--mark)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--mark);outline-offset:2px}
+.toc{background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:16px 20px;margin-top:26px}
+.toc ol{columns:2;column-gap:32px}
+@media (max-width:640px){.toc ol{columns:1}}
+.rec{border-left:4px solid var(--mark);background:var(--paper);padding:14px 18px;border-radius:0 10px 10px 0;margin-top:18px}
+table.cmp{width:100%;border-collapse:collapse;background:var(--paper);border:1px solid var(--rule);border-radius:10px;overflow:hidden;font-size:14px;margin-top:10px}
+.tscroll{overflow-x:auto}
+.cmp th,.cmp td{padding:10px 12px;border-bottom:1px solid var(--rule);text-align:left;vertical-align:top}
+.cmp th{font-weight:600;color:var(--ink2);font-size:13px;background:color-mix(in srgb,var(--rule) 35%,var(--paper))}
+.cmp tr:last-child td{border-bottom:none}
+.cmp td:first-child{font-weight:600;white-space:nowrap}
+.sw{display:inline-flex;align-items:center;gap:6px;margin:2px 10px 2px 0;font-size:13px;white-space:nowrap}
+.sw i{width:14px;height:14px;border-radius:3px;display:inline-block;border:1px solid rgba(128,128,128,.35)}
+.clash{color:#C0392B;font-weight:600}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .clash{color:#FF8A80}}
+:root[data-theme="dark"] .clash{color:#FF8A80}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px}
+@media (max-width:860px){.pair{grid-template-columns:1fr}}
+.cap{font-size:13px;color:var(--ink2);margin:0 0 6px;font-weight:600}
+.note{font-size:13px;color:var(--ink2);margin-top:8px}
+.batch{background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:14px 18px;margin-top:12px}
+.batch h3{margin:0 0 4px}
+.batch .meta{font-size:13px;color:var(--ink2)}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:999px;border:1px solid var(--rule);margin-left:6px;vertical-align:1px}
+
+/* ─── BEFORE: faithful copy of the live console rules ─── */
+.before{--bg:#0B0E13;--panel:#12161E;--panel2:#171C26;--line:#232A37;--txt:#E7EAF0;--dim:#8B94A7;--gold:#D4AF37;
+  background:var(--bg);color:var(--txt);font-family:'Space Grotesk',system-ui,sans-serif;padding:14px;border-radius:10px;font-size:13px;line-height:1.35}
+.before .wl-band{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--cc);border-radius:12px;overflow:hidden;margin-bottom:12px}
+.before .wl-head{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.before .wl-hname{font-weight:700;letter-spacing:.06em;font-size:13px;color:var(--cc)}
+.before .wl-hdesc{font-size:12px;color:var(--dim)}
+.before .wl-hcount{margin-left:auto;font-size:13px;font-weight:600;background:var(--panel2);border:1px solid var(--line);padding:2px 11px;border-radius:20px}
+.before .wl-row{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #1B2130}
+.before .wl-row:last-child{border-bottom:none}
+.before .wl-row.act{padding:13px 14px}
+.before .wl-row.done{opacity:.5}
+.before .b-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.before .wl-main{flex:1;min-width:0}
+.before .wl-name{font-weight:600;display:flex;align-items:center;gap:6px;font-size:13px;flex-wrap:wrap}
+.before .wl-row.act .wl-name{font-size:15px}
+.before .wl-bt{font-size:11px;color:var(--dim);font-weight:400}
+.before .wl-instr{font-size:12px;color:var(--dim);margin-top:1px}
+.before .wl-row.act .wl-instr{color:#FCA5A5;font-size:12.5px}
+.before .wl-amt{font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:14px;min-width:96px;text-align:right}
+.before .wl-row.act .wl-amt{font-size:15px}
+.before .st-tag{font-size:10px;font-weight:600;color:var(--sc);border:1px solid var(--sc);padding:2px 7px;border-radius:6px}
+.before .cooling{font-size:10px;font-weight:700;color:#7DD3FC;border:1px solid #0C4A6E;background:#082F49;padding:1px 6px;border-radius:5px}
+.before .chk{width:13px;height:13px;border:1px solid #3a4356;border-radius:4px;opacity:.55;flex-shrink:0}
+.before .whale{color:var(--gold)}
+
+/* ─── AFTER: proposed tokens ─── */
+.after{--bg:#0E1116;--panel:#151A22;--panel2:#1B212B;--line:#2A3240;--txt:#E8EBF0;--dim:#9AA3B5;
+  --brandmark:#C9A646;--select:#E9E3D3;
+  --band-act:#FF6A3D;--band-today:#E39A4B;--band-win:#B79A7C;
+  --neg:#F2727F;--pos:#4CC38A;
+  background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;
+  padding:14px;border-radius:10px;font-size:13.5px;line-height:1.4}
+.after .band{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:12px;position:relative}
+.after .band::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--spine,3px);background:var(--cc)}
+.after .band.act{--spine:6px;background:color-mix(in srgb,var(--cc) 5%,var(--panel))}
+.after .band.today{--spine:4px}
+.after .band.win{--spine:2px}
+.after .bhead{display:flex;align-items:baseline;gap:10px;padding:12px 16px 10px 20px;flex-wrap:wrap}
+.after .bname{font-weight:700;font-size:16px;color:var(--txt)}
+.after .band.act .bname{font-size:18px}
+.after .bdesc{font-size:12.5px;color:var(--dim)}
+.after .bprog{margin-left:auto;font-size:13px;color:var(--dim)}
+.after .bprog b{color:var(--txt);font-weight:600}
+.after .bbar{height:2px;background:var(--line);margin:0 16px 0 20px}
+.after .bbar i{display:block;height:100%;background:var(--cc)}
+.after .row{display:grid;grid-template-columns:18px 1fr auto auto;align-items:center;gap:12px;padding:10px 16px 10px 20px;border-top:1px solid var(--line)}
+.after .row:first-of-type{border-top:none}
+.after .row:focus-visible{outline:2px solid var(--select);outline-offset:-2px}
+.after .row.done .who,.after .row.done .why{color:var(--dim)}
+.after .row.done .amt{color:var(--dim)}
+.after .box{width:18px;height:18px;border:1.5px solid #4A5466;border-radius:4px}
+.after .who{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.after .band.act .who{font-size:15px}
+.after .id{font-family:'IBM Plex Mono',monospace;font-weight:400;font-size:12px;color:var(--dim)}
+.after .bt{font-size:12px;color:var(--dim);font-weight:400}
+.after .bdot{display:inline-block;width:7px;height:7px;border-radius:2px;vertical-align:1px;margin-right:4px}
+.after .why{font-size:12.5px;color:#C4CBD8;margin-top:2px}
+.after .flag{font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:4px;background:color-mix(in srgb,var(--fc) 16%,transparent);color:var(--fc)}
+.after .amt{font-weight:600;font-size:14.5px;text-align:right;min-width:90px}
+.after .amt.neg{color:var(--neg)}
+.after .st{font-size:12px;font-weight:600;color:var(--sc);display:inline-flex;align-items:center;gap:5px}
+.after .st i{width:7px;height:7px;border-radius:50%;background:var(--sc)}
+.after .whale{color:var(--brandmark)}
+@media (max-width:560px){.after .row{grid-template-columns:18px 1fr;}.after .row .st,.after .row .amt{grid-column:2;text-align:left}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Console design pass: before, after, and why</h1>
+<p class="lede">VVIP Tracker console (<code>src/App.jsx</code>). Proposal for review, 30 Sep 2026. Nothing is built yet. Sample rows below are invented, not real players.</p>
+
+<nav class="toc" aria-label="Contents">
+<ol>
+  <li><a href="#rec">Recommendation</a></li>
+  <li><a href="#problems">What's wrong today</a></li>
+  <li><a href="#colour">Colour: before vs after</a></li>
+  <li><a href="#type">Type: before vs after</a></li>
+  <li><a href="#daily">Daily queue: side by side</a></li>
+  <li><a href="#a11y">Accessibility fixes</a></li>
+  <li><a href="#batches">Batch plan</a></li>
+  <li><a href="#same">What does not change</a></li>
+  <li><a href="#risks">Risks</a></li>
+  <li><a href="#decide">Decisions for you</a></li>
+</ol>
+</nav>
+
+<h2 id="rec">1. Recommendation</h2>
+<div class="rec">
+<p>Do it in six small batches, starting with foundations, then colour meaning, then the Daily queue. Ship and check each batch before the next.</p>
+<p>The biggest win isn't prettier. It's that <b>colour currently means five different things at once</b>, so an agent can't trust a red or an orange at a glance. Fixing that makes the queue faster to scan. The restyle rides on top.</p>
+</div>
+
+<h2 id="problems">2. What's wrong today</h2>
+<ul>
+  <li><b>Colour collisions.</b> Bands, classes, statuses, money and brands all draw from the same pool. The same red means ACT NOW, TOP LOSS, NO RESPONSE and negative money.</li>
+  <li><b>Gold does too many jobs.</b> It's the logo, the selected filter, the checked box, the hover, the snapshot date and the primary button. Nothing stands out because everything gold stands out.</li>
+  <li><b>212 hard-coded hex colours</b> sit outside the token list, spread across component styles. Any future change means hunting them down one by one.</li>
+  <li><b>Worklist rows are clickable <code>div</code>s</b>, so they can't be reached with Tab at all. Focus rings fall back to browser defaults. (The 5 <code>outline:none</code> rules each swap in a coloured border, so those inputs do show focus.)</li>
+  <li><b>13 px checkboxes at 55% opacity.</b> Hard to see and easy to miss-click during bulk selection.</li>
+  <li><b>24 ALL-CAPS tracked labels.</b> Slower to read than sentence case, and they flatten hierarchy: headers and chips shout at the same volume.</li>
+  <li><b>Monospace for every number.</b> Mono is wide, so amounts eat width. Tabular figures in the body font line up just as well and save space.</li>
+</ul>
+
+<h2 id="colour">3. Colour: before vs after</h2>
+<p>Rule for after: <b>each colour channel carries one meaning only.</b> Urgency uses one warm ramp. Days-since-deposit uses one cold ramp (longer silent = deeper blue). Money keeps red and green. Selection and focus use ivory, which carries no data meaning.</p>
+<div class="tscroll">
+<table class="cmp">
+<thead><tr><th>Channel</th><th>Before</th><th>After</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Urgency bands</td>
+<td><span class="sw"><i style="background:#EF4444"></i>ACT</span><span class="sw"><i style="background:#F97316"></i>TODAY</span><span class="sw"><i style="background:#FBBF24"></i>WIN-BACK</span><br><span class="clash">ACT = TOP LOSS red. TODAY = DSLD 30+ orange. WIN-BACK = RESPONDED yellow.</span></td>
+<td><span class="sw"><i style="background:#FF6A3D"></i>ACT</span><span class="sw"><i style="background:#E39A4B"></i>TODAY</span><span class="sw"><i style="background:#B79A7C"></i>WIN-BACK</span><br>Plus spine width 6 / 4 / 2 px.</td>
+<td>One ramp that fades with urgency. Width backs up colour, so it still reads for colour-blind agents.</td></tr>
+<tr><td>Quiet-days classes</td>
+<td><span class="sw"><i style="background:#FDBA74"></i>DSLD 7+</span><span class="sw"><i style="background:#FB923C"></i>14+</span><span class="sw"><i style="background:#F97316"></i>30+</span><span class="sw"><i style="background:#F59E0B"></i>GRACE</span><br><span class="clash">Four near-identical oranges.</span></td>
+<td><span class="sw"><i style="background:#A9C8E8"></i>DSLD 7+</span><span class="sw"><i style="background:#6FA3DE"></i>14+</span><span class="sw"><i style="background:#4A87DB"></i>30+</span><span class="sw"><i style="background:#8893A7"></i>WATCH</span></td>
+<td>"Going cold" reads as blue. Darker = colder, so 7, 14 and 30 are ordered by eye, not by reading the label.</td></tr>
+<tr><td>Event classes</td>
+<td><span class="sw"><i style="background:#F59E0B"></i>GRACE</span><span class="sw"><i style="background:#EF4444"></i>TOP LOSS</span><span class="sw"><i style="background:#22C55E"></i>TOP DEP</span><span class="sw"><i style="background:#22D3EE"></i>BLOCKED</span></td>
+<td><span class="sw"><i style="background:#E8C547"></i>GRACE</span><span class="sw"><i style="background:#F2727F"></i>TOP LOSS</span><span class="sw"><i style="background:#4CC38A"></i>TOP DEP</span><span class="sw"><i style="background:#B58CFF"></i>BLOCKED</span></td>
+<td>TOP LOSS and TOP DEP now match the money colours on purpose. GRACE is the only yellow: a deadline.</td></tr>
+<tr><td>Contact status</td>
+<td><span class="sw"><i style="background:#A78BFA"></i>ASSIGNED</span><span class="sw"><i style="background:#38BDF8"></i>CONTACTED</span><span class="sw"><i style="background:#FBBF24"></i>RESPONDED</span><span class="sw"><i style="background:#4ADE80"></i>RECOVERED</span><span class="sw"><i style="background:#F87171"></i>NO RESP</span><br><span class="clash">ASSIGNED = WATCH purple. NO RESPONSE looks like an alarm.</span></td>
+<td><span class="sw"><i style="background:#8A94A6"></i>ASSIGNED</span><span class="sw"><i style="background:#56B6C2"></i>CONTACTED</span><span class="sw"><i style="background:#3FA7A0"></i>RESPONDED</span><span class="sw"><i style="background:#4CC38A"></i>RECOVERED</span><span class="sw"><i style="background:#7A8294"></i>NO RESP</span></td>
+<td>A pipeline: grey to teal to green as the player moves forward. No response is a normal outcome, not an error, so it goes quiet.</td></tr>
+<tr><td>Selection and focus</td>
+<td><span class="sw"><i style="background:#D4AF37"></i>gold (also logo, dates, buttons)</span></td>
+<td><span class="sw"><i style="background:#E9E3D3"></i>ivory</span><span class="sw"><i style="background:#C9A646"></i>gold = logo only</span></td>
+<td>"You picked this" shouldn't compete with data colours. Gold stays as the Group B mark.</td></tr>
+<tr><td>Base surfaces</td>
+<td><span class="sw"><i style="background:#0B0E13"></i>bg</span><span class="sw"><i style="background:#12161E"></i>panel</span><span class="sw"><i style="background:#8B94A7"></i>dim text</span></td>
+<td><span class="sw"><i style="background:#0E1116"></i>bg</span><span class="sw"><i style="background:#151A22"></i>panel</span><span class="sw"><i style="background:#9AA3B5"></i>dim text</span></td>
+<td>Barely changed on purpose, agents are used to it. Slight lift cuts glare on long shifts. Dim text contrast goes up.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="type">4. Type: before vs after</h2>
+<div class="tscroll">
+<table class="cmp">
+<thead><tr><th>Role</th><th>Before</th><th>After</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Interface</td><td style="font-family:'Space Grotesk'">Space Grotesk. Quirky numerals: 1,236,480</td><td style="font-family:'IBM Plex Sans';font-variant-numeric:tabular-nums">IBM Plex Sans, tabular figures: 1,236,480</td><td>Plex Sans is built for dense screens. Tabular figures make amounts line up in columns.</td></tr>
+<tr><td>Numbers</td><td style="font-family:'IBM Plex Mono'">Plex Mono everywhere</td><td style="font-family:'IBM Plex Sans';font-variant-numeric:tabular-nums">Plex Sans tabular</td><td>Same alignment, about 15% narrower. More room for the instruction text.</td></tr>
+<tr><td>Player IDs</td><td style="font-family:'IBM Plex Mono'">Plex Mono</td><td style="font-family:'IBM Plex Mono'">Plex Mono, kept</td><td>IDs get pasted into BO. Mono keeps 0/O and 1/l apart. This is the one place it earns its keep.</td></tr>
+<tr><td>Labels</td><td style="font-family:'Space Grotesk';letter-spacing:.12em;font-size:11px">SNAPSHOT · TABLE HEADERS</td><td style="font-family:'IBM Plex Sans';font-size:12.5px;font-weight:600">Snapshot, table headers</td><td>Sentence case reads faster. Class names (TOP LOSS, GRACE) stay in caps because they're the team's vocabulary.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="daily">5. Daily queue: side by side</h2>
+<p>Same three sample players in both. Left copies the live CSS rules. Right is the proposal.</p>
+<div class="pair">
+<div>
+<p class="cap">Before</p>
+<div class="before">
+  <div class="wl-band" style="--cc:#EF4444">
+    <div class="wl-head"><span class="wl-hname">ACT NOW</span><span class="wl-hdesc">Cooling whales, deadlines &amp; big losses</span><span class="wl-hcount">3</span></div>
+    <div class="wl-row act"><span class="chk"></span><span class="b-dot" style="background:#2563EB"></span>
+      <div class="wl-main"><div class="wl-name">Sample Player A <span class="whale">♛</span><span class="cooling">❄ COOLING</span><span class="wl-bt">LPK777 · Tier V</span></div>
+      <div class="wl-instr">Whale quiet 5 days. Call personally, soft tone.</div></div>
+      <span class="wl-amt">6d</span></div>
+    <div class="wl-row act"><span class="chk"></span><span class="b-dot" style="background:#DC2626"></span>
+      <div class="wl-main"><div class="wl-name">Sample Player B <span class="wl-bt">BM69 · Tier V</span></div>
+      <div class="wl-instr">Top loss today. Check in, offer support.</div></div>
+      <span class="wl-amt">RM 18,400</span></div>
+    <div class="wl-row act done"><span class="chk"></span><span class="b-dot" style="background:#16A34A"></span>
+      <div class="wl-main"><div class="wl-name">Sample Player C <span class="wl-bt">SK69 · Tier 3</span></div>
+      <div class="wl-instr">Tier deadline in 2 days.</div></div>
+      <span>✓ <span class="st-tag" style="--sc:#38BDF8">CONTACTED</span></span><span class="wl-amt">2d</span></div>
+  </div>
+</div>
+</div>
+<div>
+<p class="cap">After</p>
+<div class="after">
+  <div class="band act" style="--cc:var(--band-act)">
+    <div class="bhead"><span class="bname">Act now</span><span class="bdesc">Cooling whales, deadlines and big losses</span><span class="bprog"><b>1</b> of 3 done</span></div>
+    <div class="bbar"><i style="width:33%"></i></div>
+    <div class="row" tabindex="0"><span class="box"></span>
+      <div><div class="who">Sample Player A <span class="whale">♛</span><span class="flag" style="--fc:#5F9AD6">Cooling</span><span class="bt"><span class="bdot" style="background:#2563EB"></span>LPK777, Tier V</span></div>
+      <div class="why">Whale quiet 5 days. Call personally, soft tone.</div></div>
+      <span></span><span class="amt">6 days</span></div>
+    <div class="row" tabindex="0"><span class="box"></span>
+      <div><div class="who">Sample Player B <span class="bt"><span class="bdot" style="background:#DC2626"></span>BM69, Tier V</span></div>
+      <div class="why">Top loss today. Check in, offer support.</div></div>
+      <span></span><span class="amt neg">RM 18,400</span></div>
+    <div class="row done" tabindex="0"><span class="box" style="border-color:#E9E3D3;background:#E9E3D3"></span>
+      <div><div class="who">Sample Player C <span class="bt"><span class="bdot" style="background:#16A34A"></span>SK69, Tier 3</span></div>
+      <div class="why">Tier deadline in 2 days.</div></div>
+      <span class="st" style="--sc:#56B6C2"><i></i>Contacted</span><span class="amt">2 days</span></div>
+  </div>
+</div>
+</div>
+</div>
+<p class="note">What changed and why:</p>
+<ul class="note">
+  <li><b>Band header shows progress</b> ("1 of 3 done" + thin bar) instead of a bare count. Agents see how much is left without scrolling.</li>
+  <li><b>Band weight by urgency.</b> Act now gets the thickest spine and a faint tint. Win-back stays light. Your eye lands on the top band first.</li>
+  <li><b>Done rows dim the text, not the whole row.</b> Today the status tag fades to 50% too, so you can't read what was logged.</li>
+  <li><b>Amounts in money colour</b> only when it's money. "6d" becomes "6 days": clearer for new juniors, same width in tabular figures.</li>
+  <li><b>Checkbox 18 px, full opacity.</b> Bigger target for bulk select.</li>
+  <li><b>Rows reachable by Tab</b> with a visible focus ring; Enter opens the drawer.</li>
+</ul>
+
+<h2 id="a11y">6. Accessibility fixes (in batch 0)</h2>
+<ul>
+  <li>One shared <code>:focus-visible</code> ring (ivory, 2 px) in place of browser defaults.</li>
+  <li>Worklist rows, cards and drill rows get <code>tabIndex</code> and Enter/Space handlers (<code>role="button"</code> on non-table rows). Esc closes the player drawer, except while typing.</li>
+  <li>Respect <code>prefers-reduced-motion</code> for the drawer slide and any transitions.</li>
+  <li>Dim text contrast from about 5.9:1 to about 6.8:1 on panels.</li>
+  <li>Class and band colours paired with a second cue (spine width, label, or icon), so nothing relies on colour alone.</li>
+</ul>
+
+<h2 id="batches">7. Batch plan</h2>
+<p>Each batch: I build it, you check it in the browser pane (you log in, I screenshot), then you approve the Pages deploy. The next batch starts after that.</p>
+
+<div class="batch"><h3>Batch 0. Foundations <span class="tag">low visual change</span></h3>
+<p>Fold the 212 hard-coded colours into named tokens. Add focus ring, keyboard rows, reduced motion. Swap fonts to Plex Sans and Plex Mono (same family, one font load).</p>
+<p class="meta">Why first: every later batch becomes a token edit, not a hunt. Risk: low, mostly invisible.</p></div>
+
+<div class="batch"><h3>Batch 1. Colour meaning <span class="tag">high value</span></h3>
+<p>Apply the channel rules in section 3 to <code>CLASSES</code>, <code>ST_COLOR</code>, <code>WL_BANDS</code> and money colours. Gold goes back to logo only; ivory becomes selection.</p>
+<p class="meta">Why: the collisions are the real usability problem. Risk: agents relearn a few colours. Brief the team in one message before it ships.</p></div>
+
+<div class="batch"><h3>Batch 2. Daily queue <span class="tag">agents live here</span></h3>
+<p>Band headers with progress, urgency spine weights, row density, done-row treatment, bigger checkbox, selection bar, filter chips, rail plaques.</p>
+<p class="meta">Why: highest daily use. Risk: medium. No button moves, same click targets.</p></div>
+
+<div class="batch"><h3>Batch 3. Player drawer</h3>
+<p>Clearer section order (who, why now, what to say, log outcome), status buttons as one segmented control, money calendar legibility.</p>
+<p class="meta">Why: second most used surface. Risk: medium.</p></div>
+
+<div class="batch"><h3>Batch 4. Dashboard and Performance</h3>
+<p>KPI tiles, By CS, By Class and By Brand tables, scorecard. Class table now shows real bands thanks to the live-band fix.</p>
+<p class="meta">Why: management-facing. Risk: low.</p></div>
+
+<div class="batch"><h3>Batch 5. Changes, Campaigns, Settings, Login, mobile</h3>
+<p>Carry the system through the remaining tabs. Check phone width.</p>
+<p class="meta">Why: consistency. Risk: low.</p></div>
+
+<h2 id="same">8. What does not change</h2>
+<ul>
+  <li>No tab, button, filter or workflow moves. Same clicks, same order.</li>
+  <li>Class names, band names and business rules stay exactly as they are.</li>
+  <li>Dark theme stays. No light mode unless you ask.</li>
+  <li>Brand colours per brand stay (they identify brands, agents know them).</li>
+</ul>
+
+<h2 id="risks">9. Risks</h2>
+<ul>
+  <li><b>Relearning colours.</b> Batch 1 changes what agents are used to. Mitigation: one short team brief with the old vs new chips.</li>
+  <li><b>Live tool.</b> Every batch deploys to production. Mitigation: small batches, you approve each deploy, and I roll back from git if anything breaks.</li>
+  <li><b>No visual check without login.</b> I can't type your password. You log in once in the browser pane per batch.</li>
+  <li><b>ACT orange vs TOP LOSS coral</b> are both warm. They never share a spot (band spine vs row chip), but tell me if they look too close on your screen.</li>
+</ul>
+
+<h2 id="decide">10. Decisions for you</h2>
+<ol>
+  <li>Approve the batch order, or reorder it.</li>
+  <li>Approve the colour channel rules in section 3 (the biggest change agents will notice).</li>
+  <li>OK to switch fonts to IBM Plex Sans?</li>
+  <li>"6d" to "6 days" in the amount column: yes or no?</li>
+</ol>
+
+</div>
+</body>
+</html>

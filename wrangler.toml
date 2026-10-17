@@ -1,0 +1,21 @@
+name = "groupb-tracker-api"
+main = "worker/index.js"
+compatibility_date = "2024-01-01"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "groupb-tracker-db"
+database_id = "b817fdac-dd63-440b-8c58-869663beeec1"
+
+# Secrets (set via CLI, never in this file):
+#   wrangler secret put SESSION_SECRET
+#   wrangler secret put PASSWORD_SALT
+#   wrangler secret put INGEST_TOKEN     <- new, for the Sheets feeder
+
+[vars]
+ENVIRONMENT = "production"
+
+# Cron: hourly contact-log automation (auto-RECOVERED reactivation + 6h auto-NO_RESPONSE)
+[triggers]
+crons = ["0 * * * *", "15 4 * * *"]   # hourly jobs + 12:15 MYT feeder kick-off (FEEDER_CRON)

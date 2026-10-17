@@ -1,0 +1,29 @@
+# dependencies (rebuilt from package.json — never commit)
+node_modules/
+
+# wrangler local cache + state (machine-local; contains account id)
+.wrangler/
+
+# local Claude settings
+.claude/settings.local.json
+
+# backups & one-off dumps
+*.bak
+*_bak.*
+*.orig
+backup_*.sql
+telegram_import.sql
+
+# logs & OS/editor junk
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+
+# NOTE: dist/ is intentionally committed — the Pages deploy serves it.
+
+# build output (rebuilt by npm run build / deploy, never commit)
+dist/
+
+# local exports and reports
+exports/

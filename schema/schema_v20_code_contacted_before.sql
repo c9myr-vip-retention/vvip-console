@@ -1,0 +1,23 @@
+-- ============================================================
+-- groupb-tracker · Schema v20 · attribution flag on code claims
+-- ADDITIVE — adds ONE nullable column to code_assignments.
+-- Does not touch any other table. Safe with --remote.
+--
+-- Why: the campaign proposal (§3.5 step 5, §7.5) rests on
+-- "offer before deposit, so every recovered deposit is
+-- attributable". Until now nothing recorded whether CS had
+-- actually contacted the player before handing over the code,
+-- so that claim could not be audited after the fact.
+--
+--   NULL = released before this column existed (unknown)
+--   1    = a contact_log entry existed when the code was released
+--   0    = released with no prior contact on record
+--
+-- Stamped server-side at release, never sent by the client, so
+-- it reflects what the database actually knew at that moment.
+-- Deliberately NOT a block: a player standing in Livechat with a
+-- qualifying deposit still gets their code. It is a measurement,
+-- not a gate.
+-- ============================================================
+
+ALTER TABLE code_assignments ADD COLUMN contacted_before INTEGER;

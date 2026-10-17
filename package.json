@@ -1,0 +1,23 @@
+{
+  "name": "groupb-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy:worker": "wrangler deploy",
+    "deploy:pages": "vite build && wrangler pages deploy dist --project-name=groupb-tracker --branch=production"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "xlsx": "^0.18.5",
+    "xlsx-js-style": "^1.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^4.4.0",
+    "wrangler": "^3.0.0"
+  }
+}
