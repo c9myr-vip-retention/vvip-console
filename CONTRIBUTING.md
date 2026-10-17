@@ -66,7 +66,7 @@ Pick one, one branch each:
 2. **Add tests and a linter.** There are none today. Start with unit tests for `classifyAll`, the core business logic.
 3. **Upgrade wrangler** from 3.x to 4.x and check `npm run build` still works. Deploy testing stays with Aldo.
 4. **Copy consistency.** Instruction text still says things like "Whale quiet 6d" while the amount column says "6 days". Make day counts consistent.
-5. **Split `App.jsx`** (about 6,800 lines) into one file per tab. Only after task 2, so the tests catch breakage.
+5. **Split `App.jsx`** (about 7,100 lines) into one file per tab. Only after task 2, so the tests catch breakage.
 
 ## Where to learn the system
 

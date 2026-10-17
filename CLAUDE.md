@@ -85,7 +85,7 @@ Single `fetch` handler, manual `if (path === ... && method === ...)` routing, no
 - `_bak.js` / `_bak.toml` files are backups — ignore them.
 
 ### Frontend (`src/App.jsx`)
-Entire app — logic, all components, and CSS (`<Style>` injects a `<style>` block) — is in this one ~6,800-line file. Tabs: **Dashboard** (management KPIs, trends), **Daily** (the `Queue` worklist/table + per-player `Drawer`), **Changes** (day-over-day movers), **Campaigns**, **Performance** (save-rate stats from `contact_log`), **Settings** (user admin). Colours are CSS tokens on `:root` (see `docs/design/console-design-pass.html`); clickable rows use the `tap()` keyboard helper.
+Entire app — logic, all components, and CSS (`<Style>` injects a `<style>` block) — is in this one ~7,100-line file. Tabs: **Dashboard** (management KPIs, trends), **Daily** (the `Queue` worklist/table + per-player `Drawer`), **Changes** (day-over-day movers), **Campaigns**, **Performance** (save-rate stats from `contact_log`), **Settings** (user admin). Colours are CSS tokens on `:root` (see `docs/design/console-design-pass.html`); clickable rows use the `tap()` keyboard helper.
 
 - **`API_BASE` is hardcoded** at the top of `App.jsx` (currently `https://groupb-tracker-api.viprtn.workers.dev`). It must match the deployed Worker URL — update it if the Worker subdomain changes.
 - Session token lives in `localStorage` under `session_token`.
