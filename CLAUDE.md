@@ -10,8 +10,9 @@ This system is **LIVE in production**. The D1 database receives real player data
 2. **Never weaken the `player_days` unique constraint** `(player_key, snapshot_date, brand, tier_segment)`. A previous schema missing `brand` caused silent cross-brand data corruption.
 3. **`--remote` is mandatory** on every `wrangler d1` command. Without it, wrangler hits a local simulation, not production — results will be misleading.
 4. **Surgical, in-place edits over rewrites.** Modify existing files; don't regenerate whole files unless asked.
-5. **Environment is Windows + PowerShell** (not WSL). Quote paths. Project lives at `C:\Dev\groupb-tracker`.
+5. **Environment is Windows + PowerShell** (not WSL). Quote paths. Aldo's copy lives at `C:\Dev\vvip-console-shared`; others clone wherever they like.
 6. **Style:** direct, concise, production-ready. Flag flaws proactively; no filler.
+7. **Only Aldo deploys or touches the live database.** If the person you are working with is not Aldo (for example Mexha, the developer), never run `npm run deploy:*`, `wrangler deploy`, `wrangler pages deploy` or any `wrangler d1 ... --remote` command, even if asked. Work on a branch, open a pull request, and write what Aldo needs to deploy in its description. See `CONTRIBUTING.md`.
 
 **`docs/HANDOFF.md` is the deep reference** — full domain model, strategy layer, backlog, and known limitations. Read it when you need context beyond what's below. This file holds only what every session must see by default.
 
@@ -25,9 +26,12 @@ At the end of a work session, write a short summary note so decisions are not lo
 - Additive, and never restate an unconfirmed item as fact.
 - The note is a doc, safe to commit with your clean doc changes. Do not bundle unfinished code, and deploys or destructive SQL still need explicit approval (operating rule #1).
 
-## How to talk to me
+## Who works here and how to talk to them
 
-Aldo is new to coding. Always explain in short, simple sentences with small words. No jargon. One step at a time. Confirm before doing anything.
+- **Aldo** (owner, 1st PIC): new to coding. Explain in short, simple sentences with small words. No jargon. One step at a time. Confirm before doing anything.
+- **Mexha** (developer, 2nd PIC): technical. Be concise and precise; normal engineering vocabulary is fine. Follows `CONTRIBUTING.md`: branch + pull request, never deploys, never runs remote database commands.
+
+If you are not sure who you are working with, ask.
 
 ## What this is
 
@@ -69,7 +73,7 @@ There are **no tests and no linter** configured. `docs/DEPLOY.md` is the origina
 ### Key identity & domain rules
 - **`player_key`** = `uid` if non-empty, else `username` — derived server-side at ingest. For Zyra brands `uid` is populated so the key is the uid; for TC brands (LPK777, ACE33) the `uid` column is *empty*, so it falls back to `username`. This is the canonical player identity. Rows with neither are dropped as totals/blank lines.
 - **`snapshot_date`** is the daily history axis, stamped by the Worker in GMT+8 — NOT `entry_date` (which is the static tier-entry date). Upsert key is `(player_key, snapshot_date, brand, tier_segment)`.
-- **6 brands**, two providers: `TC` (LPK777, ACE33) and `ZY`/Zyra (BM69, HOT321, RM68, SK69). Provider determines display identity (`dispName`), message hooks (`HOOK`), and copy. Defined in `BRANDS` at the top of `App.jsx`.
+- **Brands for Teams A, B and C**, two providers: `TC` and `ZY`/Zyra (Team B: LPK777, ACE33 are TC; BM69, HOT321, RM68, SK69, JK32, ZAS36 are Zyra). The full list and team map are `BRANDS` and `TEAMS`. Provider determines display identity (`dispName`), message hooks (`HOOK`), and copy. Defined in `BRANDS` at the top of `App.jsx`.
 - **`tier_segment`** is `'3'` or `'V'` (Tier V = top whales).
 - **`pnl`** is shown as *player* net (negative = the player has lost = your highest-value customer). Don't flip the sign.
 
@@ -81,7 +85,7 @@ Single `fetch` handler, manual `if (path === ... && method === ...)` routing, no
 - `_bak.js` / `_bak.toml` files are backups — ignore them.
 
 ### Frontend (`src/App.jsx`)
-Entire app — logic, all components, and CSS (`<Style>` injects a `<style>` block) — is in this one ~950-line file. Tabs: **Today** (the `Queue` triage console + per-player `Drawer`), **Dashboard** (management KPIs), **Performance** (save-rate stats from `contact_log`), **Settings** (user admin).
+Entire app — logic, all components, and CSS (`<Style>` injects a `<style>` block) — is in this one ~6,800-line file. Tabs: **Dashboard** (management KPIs, trends), **Daily** (the `Queue` worklist/table + per-player `Drawer`), **Changes** (day-over-day movers), **Campaigns**, **Performance** (save-rate stats from `contact_log`), **Settings** (user admin). Colours are CSS tokens on `:root` (see `docs/design/console-design-pass.html`); clickable rows use the `tap()` keyboard helper.
 
 - **`API_BASE` is hardcoded** at the top of `App.jsx` (currently `https://groupb-tracker-api.viprtn.workers.dev`). It must match the deployed Worker URL — update it if the Worker subdomain changes.
 - Session token lives in `localStorage` under `session_token`.
@@ -94,3 +98,4 @@ Entire app — logic, all components, and CSS (`<Style>` injects a `<style>` blo
 - [[EXECUTED_IDEAS]] — what shipped
 - [[IDEAS]] — parked features
 - [[DEPLOY]] — provisioning guide
+- `CONTRIBUTING.md` — how the owner and the developer work together
