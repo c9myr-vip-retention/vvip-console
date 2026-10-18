@@ -47,9 +47,9 @@ export const REPORT_PHRASES = {
     "Both tiers of {brand} fell short of normal: {today} vs {avg} on average, {pct}% below",
   ],
   tier_down_other_fine: [
-    "Tier {tier} deposit {pct}% below its 7-day average ({today} vs {avg}); Tier {other} is fine ({otherPct})",
-    "The drop is in Tier {tier}: {today} vs {avg} on average ({pct}% below). Tier {other} is holding ({otherPct})",
-    "Tier {tier} is {pct}% under normal ({today} vs {avg}), while Tier {other} is steady ({otherPct})",
+    "Tier {tier} deposit {pct}% below its 7-day average ({today} vs {avg}); Tier {other} is close to normal ({otherPct})",
+    "The drop is in Tier {tier}: {today} vs {avg} on average ({pct}% below). Tier {other} is near normal ({otherPct})",
+    "Tier {tier} is {pct}% under normal ({today} vs {avg}), while Tier {other} stays close to normal ({otherPct})",
   ],
   tier_down_other_down: [
     "Tier {tier} deposit {pct}% below its 7-day average ({today} vs {avg}); Tier {other} also down ({otherPct})",
@@ -157,9 +157,10 @@ export const REPORT_PHRASES = {
   plan_priority: [
     "{brand} · Tier {tier}{then}",
   ],
+  // Only used when the priority is Tier V — cooling whales are always Tier V. {whales} = "1 cooling whale" / "4 cooling whales".
   plan_action_cool: [
-    "Personal check-in with {brand} Tier {tier} top losers + its {cool} cooling whale(s)",
-    "Call {brand} Tier {tier}'s top losers first, then its {cool} cooling whale(s)",
+    "Personal check-in with {brand} Tier {tier} top losers + its {whales}",
+    "Call {brand} Tier {tier}'s top losers first, then its {whales}",
   ],
   plan_action: [
     "Personal check-in with {brand} Tier {tier} top losers",
@@ -176,20 +177,27 @@ export const REPORT_PHRASES = {
     "Push contact volume back to ~{avg} a day",
     "Get contacts back up to ~{avg} a day",
   ],
-  act4_grace: [
-    "{n} players with a tier deadline in 3 days or less → remind them before they drop",
-    "{n} players face a tier deadline within 3 days → remind them today",
+  // Section 4 lists only what is NEW today, with names, so it doesn't repeat day after day.
+  act4_comeback: [
+    "{n} players came back on {date} → welcome-back, small ask; biggest: {names}",
+    "Welcome back the {n} players who returned on {date}, starting with {names}",
+    "{n} comebacks on {date} → warm welcome, keep the ask small; top: {names}",
   ],
-  act4_fragile: [
-    "{n} players came back in the last 14 days → soft welcome-back, small ask",
-    "{n} recent comebacks (last 14 days) → warm welcome-back, keep the ask small",
+  act4_v7: [
+    "{n} Tier V players hit 7 days quiet today → personal approach: {names}",
+    "{n} Tier V players just went 7 days without a deposit → reach out personally: {names}",
+    "Personal approach for the {n} Tier V players who reached 7 days quiet today: {names}",
   ],
-  act4_vzero: [
-    "{n} Tier V players with no deposit this month → personal approach",
-    "{n} Tier V players haven't deposited this month → reach out personally",
+  act4_deadline: [
+    "{n} players drop tier by tomorrow without a deposit → remind them: {names}",
+    "Tier deadline tomorrow for {n} players → remind them today: {names}",
+  ],
+  act4_thank: [
+    "Thank {name} ({brand}) for +{gap} on {date}",
+    "Send a thank-you to {name} ({brand}): +{gap} on {date}",
   ],
   act4_none: [
-    "No extra action from today's data",
+    "Nothing new to act on from today's data",
   ],
 
   /* ── Section 5: system checks ─────────────────────────────────────── */
@@ -202,6 +210,9 @@ export const REPORT_PHRASES = {
   ],
   concern_late: [
     "Data late today: {brands}",
+  ],
+  concern_eng_missing: [
+    "Livechat & Telegram numbers not synced for {date} yet",
   ],
   concern_new: [
     "New situation(s) without wording yet: {keys}",

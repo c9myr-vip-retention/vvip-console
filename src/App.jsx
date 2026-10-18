@@ -2122,10 +2122,11 @@ function buildDailyReport({ curRows, prevRows, snap, prevSnap, brandOrder, lastM
   p("");
   p("**Tomorrow's Plan**");
   if (pr1) {
-    const pCool = cooling.filter((r) => r.brand === pr1.b).length;
+    // Cooling whales are Tier V, so they only join the plan when the priority itself is Tier V.
+    const pCool = pr1.t === "V" ? cooling.filter((r) => r.brand === pr1.b).length : 0;
     const sev = pr1.gap <= -30000 || pr1.pct <= -25 ? "High" : big(pr1, -1) ? "Medium" : "Low";
     p(`- Priority Brand / Segment: ${D}${say("plan_priority", { brand: pr1.b, tier: pr1.t, then: nextUp.length ? ` (then ${nextUp.map((u) => `${u.b} Tier ${u.t}`).join(" and ")})` : "" })}`);
-    p(`- Planned Action: ${D}${pCool ? say("plan_action_cool", { brand: pr1.b, tier: pr1.t, cool: pCool }) : say("plan_action", { brand: pr1.b, tier: pr1.t })}`);
+    p(`- Planned Action: ${D}${pCool ? say("plan_action_cool", { brand: pr1.b, tier: pr1.t, whales: `${pCool} cooling whale${pCool > 1 ? "s" : ""}` }) : say("plan_action", { brand: pr1.b, tier: pr1.t })}`);
     p(`- Expected Result / Target: ${D}${say("plan_target", { brand: pr1.b, tier: pr1.t, today: money(pr1.today), avg: money(pr1.avg) })}`);
     p(`- Priority: ${D}${sev}`);
   } else {
@@ -2134,14 +2135,24 @@ function buildDailyReport({ curRows, prevRows, snap, prevSnap, brandOrder, lastM
   p(`- Follow-up Date / Time: ${D}${say("plan_followup", { date: tmr })}`);
   p("");
   p("**Possible Actions**");
-  const grace = curRows.filter((r) => r._cls === "GRACE").length;
-  const fragile = curRows.filter((r) => r._fragile).length;
-  const vZero = curRows.filter((r) => r.tier_segment === "V" && !(Number(r.monthly_deposit) > 0)).length;
+  // Only what is NEW today, with names — standing counts (all comebacks this fortnight, all Tier V
+  // with no deposit this month) read the same every day and were dropped. A line with nothing new is left out.
+  const top3 = (rs, by) => [...rs].sort(by).slice(0, 3).map((r) => `${dispName(r)} (${r.brand})`).join(", ");
+  const comebacks = curRows.filter((r) => (r.group_name || "").startsWith("Reactivated"));   // came back on the report day
+  const v7 = curRows.filter((r) => r.tier_segment === "V" && r._dsld === 7);                   // went 7 days quiet today
+  const deadline = curRows.filter((r) => r._graceDays != null && r._graceDays >= 0 && r._graceDays <= 1);
+  const prevDep = {};
+  (prevRows || []).forEach((r) => { prevDep[`${r.player_key}|${r.brand}`] = Number(r.daily_deposit) || 0; });
+  const cbKeys = new Set(comebacks.map((r) => `${r.player_key}|${r.brand}`));
+  const thank = hasPrev ? curRows.filter((r) => !cbKeys.has(`${r.player_key}|${r.brand}`))
+    .map((r) => ({ r, up: (Number(r.daily_deposit) || 0) - (prevDep[`${r.player_key}|${r.brand}`] || 0) }))
+    .filter((x) => x.up >= 5000).sort((a, z) => z.up - a.up)[0] : null;
   const act4 = [];
   if (avgC && nC < avgC * 0.8) act4.push(say("act4_volume", { avg: int(avgC) }));
-  if (grace) act4.push(say("act4_grace", { n: grace }));
-  if (fragile) act4.push(say("act4_fragile", { n: fragile }));
-  if (vZero) act4.push(say("act4_vzero", { n: vZero }));
+  if (deadline.length) act4.push(say("act4_deadline", { n: deadline.length, names: top3(deadline, (a, z) => (a.pnl ?? 0) - (z.pnl ?? 0)) }));
+  if (v7.length) act4.push(say("act4_v7", { n: v7.length, names: top3(v7, (a, z) => (a.pnl ?? 0) - (z.pnl ?? 0)) }));
+  if (comebacks.length) act4.push(say("act4_comeback", { n: comebacks.length, date: curL, names: top3(comebacks, (a, z) => (z.daily_deposit || 0) - (a.daily_deposit || 0)) }));
+  if (thank) act4.push(say("act4_thank", { name: dispName(thank.r), brand: thank.r.brand, gap: money(thank.up), date: curL }));
   (act4.length ? act4 : [say("act4_none")]).forEach((s) => p(`- ${D}${s}`));
   p("");
 
@@ -2153,10 +2164,13 @@ function buildDailyReport({ curRows, prevRows, snap, prevSnap, brandOrder, lastM
   const concerns = [];
   if (nNoAuto && nNoAuto / nC > 0.8) concerns.push(say("concern_auto", { auto: nNoAuto, n: nC }));
   if (late.length) concerns.push(say("concern_late", { brands: late.join(", ") }));
+  if (!engOn) concerns.push(say("concern_eng_missing", { date: curL }));
   const fresh = newPatterns();     // situations the code met with no wording in the phrase book
   if (fresh.length) concerns.push(say("concern_new", { keys: fresh.join(", ") }));
+  // Telegram reach changes slowly, so it is a Monday reminder, not a daily line.
+  const monday = (() => { const [y, m, d] = snap.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay() === 1; })();
   p("## 5. SUPPORT / IDEAS / FEEDBACK");
-  p(`- Support Needed: ${reach.length ? D + say("support_tg", { list: reach.slice(0, 2).map((x) => `${x.b} (${Math.round(x.pct)}% reach)`).join(" and ") }) : ""}`);
+  p(`- Support Needed: ${monday && reach.length ? D + say("support_tg", { list: reach.slice(0, 2).map((x) => `${x.b} (${Math.round(x.pct)}% reach)`).join(" and ") }) : ""}`);
   p(`- Challenge / Concern: ${concerns.length ? D + concerns.join(" · ") : ""}`);
   p("- Improvement Idea:");
   p("- Other Comments:");
