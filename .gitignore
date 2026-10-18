@@ -27,3 +27,7 @@ dist/
 
 # local exports and reports
 exports/
+
+# local preview config (test values only, never commit)
+.dev.vars
+.env.local

@@ -12,6 +12,7 @@ database_id = "b817fdac-dd63-440b-8c58-869663beeec1"
 #   wrangler secret put SESSION_SECRET
 #   wrangler secret put PASSWORD_SALT
 #   wrangler secret put INGEST_TOKEN     <- new, for the Sheets feeder
+#   wrangler secret put WIDGET_LARK      <- JSON: the widget's Lark base + bonus table ids (see worker/index.js "Lark bonus tables")
 
 [vars]
 ENVIRONMENT = "production"
