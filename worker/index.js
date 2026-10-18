@@ -271,6 +271,12 @@ const GRACE_CACHE = new Map();          // brand -> { at, map }
 const GRACE_CACHE_MS = 5 * 60 * 1000;
 let WL_TOKEN = { key: "", token: "", exp: 0 };
 
+// The Lark tables' Brand column holds the SHORT code (FUN, VS, SPIN, PP …), not the console's full name (FUN36 …).
+// WIDGET_LARK can set "brandStyle":"full" to send full names instead, or "brandMap":{"FUN36":"FUN"} to override one brand.
+function wlBrand(cfg, brand) {
+  if (cfg.brandMap && cfg.brandMap[brand]) return cfg.brandMap[brand];
+  return cfg.brandStyle === "full" ? brand : String(brand).replace(/\d+$/, "");
+}
 function widgetLarkCfg(env) {
   try { const c = JSON.parse(env.WIDGET_LARK || ""); return c && c.base && c.tables ? c : null; } catch (e) { return null; }
 }
@@ -364,7 +370,8 @@ async function wlOptionMap(env, cfg, table, fieldName) {
 }
 
 // Same answer shape as the widget's own lookup, so summarizeWidgetLookup() below turns it into a list.
-async function widgetLookup(env, cfg, uname, brand) {
+async function widgetLookup(env, cfg, uname, consoleBrand) {
+  const brand = wlBrand(cfg, consoleBrand);          // what the Lark tables call this brand
   const T = cfg.tables || {}, warnings = [];
   const st = (r, f) => wlText(r && r.fields[f]).trim();
   const lower = (s) => s.toLowerCase();
@@ -442,7 +449,7 @@ const GRACE_RAW = new Map();
 async function graceRowsRaw(env, cfg, brand) {
   const hit = GRACE_RAW.get(brand);
   if (hit && Date.now() - hit.at < GRACE_CACHE_MS) return hit.rows;
-  const rows = await wlSearch(env, cfg, cfg.tables.grace, [{ field_name: "Brand", operator: "is", value: [brand] }], 20);
+  const rows = await wlSearch(env, cfg, cfg.tables.grace, [{ field_name: "Brand", operator: "is", value: [wlBrand(cfg, brand)] }], 20);
   GRACE_RAW.set(brand, { at: Date.now(), rows });
   return rows;
 }
@@ -1338,6 +1345,7 @@ const LARK_BRAND = (() => {
   for (const team of Object.values(TEAM_BRANDS)) for (const full of team) m[full.replace(/\d+$/, "")] = full;
   return m;
 })();
+const LARK_BRAND_UP = Object.fromEntries(Object.entries(LARK_BRAND).map(([k, v]) => [k.toUpperCase(), v]));   // case-insensitive lookup
 
 // Pull a plain string from a Lark field value (text, number, rich-text array,
 // select object, url object, or a formula {type,value} wrapper).
@@ -1832,6 +1840,14 @@ export default {
       const key = request.headers.get("x-widget-token") || "";
       if (!env.WIDGET_API_KEY || !(await safeEqual(key, env.WIDGET_API_KEY))) return err("unauthorized", 401);
       const known = new Set(Object.values(TEAM_BRANDS).flat());
+      // The widget sends the brand as Lark spells it (the SHORT code: FUN, VS, SPIN, PP …). Accept the short code or the
+      // full name, any case, and use the full console brand from here on. Unknown → "" (rejected below / 404).
+      const normBrand = (raw) => {
+        const s = String(raw || "").trim().toUpperCase();
+        if (!s) return "";
+        for (const f of known) if (f.toUpperCase() === s) return f;
+        return LARK_BRAND_UP[s] || "";
+      };
       // The widget sends the username/uid it looked up (lower-cased) and the brand; map that to the console's
       // stored player_key (TC brands key on username, Zyra on uid) so the note lands on the right profile.
       const resolve = async (raw, brand) => {
@@ -1843,7 +1859,7 @@ export default {
         return hit ? hit.player_key : null;
       };
       if (path === "/api/ext/notes" && method === "GET") {
-        const brand = (url.searchParams.get("brand") || "").trim();
+        const brand = normBrand(url.searchParams.get("brand"));
         const pk = await resolve(url.searchParams.get("player_key"), brand);
         if (!pk) return err("player not found in the console", 404);
         const notes = await env.DB.prepare(
@@ -1853,7 +1869,7 @@ export default {
       }
       if (path === "/api/ext/note" && method === "POST") {
         let b; try { b = await request.json(); } catch (e) { return err("invalid_json"); }
-        const brand = String((b && b.brand) || "").trim();
+        const brand = normBrand(b && b.brand);
         const note = String((b && b.note) || "").trim();
         let author = cleanAgentName(b && b.author);
         if (!note) return err("note is empty");
@@ -1886,7 +1902,7 @@ export default {
          Attribution is inside the line: "[widget · <name> · <MYT time>] <text>". */
       if (path === "/api/ext/action" && method === "POST") {
         let b; try { b = await request.json(); } catch (e) { return err("invalid_json"); }
-        const brand = String((b && b.brand) || "").trim();
+        const brand = normBrand(b && b.brand);
         const note = String((b && b.note) || "").trim();
         let author = cleanAgentName(b && b.author);
         if (!note) return err("note is empty");
@@ -1922,7 +1938,7 @@ export default {
         return ok({ saved: true, player_key: row.player_key, snapshot_date: snap.d, appended: !!(hit && hit.note) });
       }
       if (path === "/api/ext/actions" && method === "GET") {
-        const brand = (url.searchParams.get("brand") || "").trim();
+        const brand = normBrand(url.searchParams.get("brand"));
         const pk = await resolve(url.searchParams.get("player_key"), brand);
         if (!pk) return err("player not found in the console", 404);
         const rows = await env.DB.prepare(
