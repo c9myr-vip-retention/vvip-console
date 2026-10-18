@@ -29,6 +29,15 @@ const TEAM_BRANDS = {
   C: ["SPIN321", "MY36", "VS96", "ONG66", "RUSH33", "MAX39", "OMG67", "AC69", "OG"],
 };
 
+// Staff team moves. `on` = first day on the new team (MYT). Work before it stays with the old
+// team's brands; By CS in the old team also shows an extra "<user> · Team <to>" row for the work
+// since the move, and both teams mark the row. Add a line here for each future move.
+const STAFF_MOVES = [
+  { user: "quinton", from: "A", to: "B", on: "2026-10-18" },
+  { user: "jason",   from: "B", to: "A", on: "2026-10-18" },
+  { user: "mexha",   from: "C", to: "A", on: "2026-10-18" },
+];
+
 /* ══ CAMPAIGN ROTATION CALENDAR ═══════════════════════════════════════════════
    Whose day it is, and which tier, computed from the date — nothing stored.
 
@@ -1943,7 +1952,40 @@ export default {
             AND strftime('%Y-%m', pd.snapshot_date) = ?
           GROUP BY rec.agent, rec.player_key, rec.brand, rec.tier_segment`).bind(month, ...pf.b, month).all(),
       ]);
-      return ok({ month, logs: logs.results, reactivation: react.results || [] });
+      // Staff who moved OUT of the viewed team: their work on the new team's brands since the move,
+      // returned separately so By CS can show it as an extra "<agent> · Team X" row (and only there —
+      // By Class / By Brand stay this team's own brands).
+      const viewT = canManage ? (TEAM_BRANDS[reqTeam] ? reqTeam : null) : user.team;
+      const moves = STAFF_MOVES.filter((m) => m.on.slice(0, 7) <= month && (m.from === viewT || m.to === viewT));
+      const away = [];
+      for (const m of moves.filter((x) => x.from === viewT)) {
+        const nb = TEAM_BRANDS[m.to] || [];
+        if (!nb.length) continue;
+        const ph = nb.map(() => "?").join(",");
+        const [al, ar] = await Promise.all([
+          env.DB.prepare(`
+            SELECT snapshot_date, contacted_at, player_key, brand, tier_segment, class, assigned_to, status, updated_by
+            FROM contact_log WHERE assigned_to = ? AND brand IN (${ph})
+              AND substr(COALESCE(contacted_at, snapshot_date),1,7) = ? AND substr(COALESCE(contacted_at, snapshot_date),1,10) >= ?`
+          ).bind(m.user, ...nb, month, m.on).all(),
+          env.DB.prepare(`
+            WITH rec AS (
+              SELECT player_key, brand, tier_segment FROM contact_log
+              WHERE status = 'RECOVERED' AND assigned_to = ? AND brand IN (${ph})
+                AND substr(COALESCE(contacted_at, snapshot_date),1,7) = ? AND substr(COALESCE(contacted_at, snapshot_date),1,10) >= ?
+              GROUP BY player_key, brand, tier_segment)
+            SELECT rec.player_key, rec.brand, rec.tier_segment,
+              MAX(CASE pd.group_name WHEN 'Reactivated 30+ Days' THEN 4 WHEN 'Reactivated 21-29 Days' THEN 3
+                WHEN 'Reactivated 14-20 Days' THEN 3 WHEN 'Reactivated 7-13 Days' THEN 2
+                WHEN 'Reactivated 3-6 Days' THEN 1 WHEN 'Reactivated 1-2 Days' THEN 1 ELSE 0 END) AS tier
+            FROM rec LEFT JOIN player_days pd ON pd.player_key = rec.player_key AND pd.brand = rec.brand
+              AND pd.tier_segment = rec.tier_segment AND pd.group_name LIKE 'Reactivated%' AND strftime('%Y-%m', pd.snapshot_date) = ?
+            GROUP BY rec.player_key, rec.brand, rec.tier_segment`
+          ).bind(m.user, ...nb, month, m.on, month).all(),
+        ]);
+        away.push({ ...m, logs: al.results || [], reactivation: ar.results || [] });
+      }
+      return ok({ month, logs: logs.results, reactivation: react.results || [], moves, away });
     }
 
     // ── GET /api/rtn/dates — available snapshot dates (history depth) ─────────

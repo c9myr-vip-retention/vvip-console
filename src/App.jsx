@@ -3195,7 +3195,7 @@ function KpiScorecard({ onDrill, data, team, children, mistakeList, viewTeam = "
 }
 
 /* One performance table (By CS / Class / Brand) — click a row to reveal the players behind the numbers. */
-function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactPlayers }) {
+function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactPlayers, marks }) {
   const hasScore = react !== undefined;   // By CS passes the weighted reactivation map; Class/Brand don't
   const [open, setOpen] = useState(null);   // { name, status } — status null = all players; else filter the drill to that status
   const [sort, setSort] = useState({ col: hasScore ? "score" : "actioned", dir: "desc" });
@@ -3215,11 +3215,13 @@ function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactP
   if (hasScore) cols.push({ key: "score", label: "Score", status: null });
 
   const val = (r, k) => k === "score" ? (react[r.name]?.score ?? -1) : k === "name" ? r.name : (r[k] ?? 0);
-  const sorted = [...rows].sort((a, b) => {
+  // Child rows (a moved agent's new-team work) are pulled out of the sort and drawn right under their parent.
+  const kids = rows.filter((r) => r.parent);
+  const sorted = [...rows.filter((r) => !r.parent)].sort((a, b) => {
     const av = val(a, sort.col), bv = val(b, sort.col);
     const c = typeof av === "string" ? String(av).localeCompare(String(bv)) : (av - bv);
     return sort.dir === "desc" ? -c : c;
-  });
+  }).flatMap((r) => [r, ...kids.filter((k) => k.parent === r.name)]);
   const sortBy = (k) => setSort((s) => s.col === k ? { col: k, dir: s.dir === "desc" ? "asc" : "desc" } : { col: k, dir: "desc" });
   const arr = (k) => sort.col === k ? (sort.dir === "desc" ? " ▾" : " ▴") : "";
   const isFilter = (name, status) => open && open.name === name && (open.status || null) === (status || null);
@@ -3239,7 +3241,7 @@ function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactP
           const isOpen = open && open.name === r.name;
           const main = (
             <tr key={r.name} className={"perf-row" + (isOpen ? " open" : "")} {...tap(() => toggle(r.name, null), null)}>
-              <td>{isOpen ? "▾ " : "▸ "}{r.name}</td>
+              <td className={r.parent ? "perf-child" : undefined}>{r.parent ? "↳ " : (isOpen ? "▾ " : "▸ ")}{r.display || r.name}{marks && marks[r.name] ? <span className="perf-mark">{marks[r.name]}</span> : null}</td>
               {cols.map((c) => {
                 const disp = c.key === "score" ? (react[r.name]?.score ?? "—") : c.key === "save" ? (r.save + "%") : r[c.key];
                 const clickable = c.status && (r[c.key] || 0) > 0;
@@ -3314,6 +3316,8 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
   const [perfMonth, setPerfMonth] = useState("");   // which calendar month these logs cover (from server)
   const [react, setReact] = useState({});           // agent -> weighted reactivation breakdown (By CS Score column)
   const [reactPlayers, setReactPlayers] = useState({});  // "player|brand|tier" -> comeback-depth tier (drill-down band tags)
+  const [moves, setMoves] = useState([]);           // staff team moves touching this team (marks in By CS)
+  const [away, setAway] = useState([]);             // moved-out staff's work on their new team (extra By CS rows)
   const [err, setErr] = useState("");
   const [mistakes, setMistakes] = useState(null);   // { month, mistakes: [] }
   const [sel, setSel] = useState(null);             // { list:[player], index } — drawer opened from a drill row
@@ -3341,8 +3345,17 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
         if (x.tier === 4) a.b30++; else if (x.tier === 3) a.b14_29++; else if (x.tier === 2) a.b7_13++; else a.b1_6++;
         a.saves++; a.score += w;
       });
+      // Moved-out staff: their new-team work becomes its own By CS row, keyed "<user> · Team <to>".
+      const awayRows = (d.away || []).map((a) => ({ ...a, label: `${a.user} · Team ${a.to}` }));
+      awayRows.forEach((a) => (a.reactivation || []).forEach((x) => {
+        const w = x.tier === 4 ? 1.00 : x.tier === 3 ? 0.75 : x.tier === 2 ? 0.50 : 0.10;
+        byPlayer[x.player_key + "|" + x.brand + "|" + x.tier_segment] = x.tier;
+        const r = agg[a.label] || (agg[a.label] = { b1_6: 0, b7_13: 0, b14_29: 0, b30: 0, saves: 0, score: 0 });
+        if (x.tier === 4) r.b30++; else if (x.tier === 3) r.b14_29++; else if (x.tier === 2) r.b7_13++; else r.b1_6++;
+        r.saves++; r.score += w;
+      }));
       Object.values(agg).forEach((a) => { a.score = Math.round(a.score * 100) / 100; });
-      setReact(agg); setReactPlayers(byPlayer); })
+      setReact(agg); setReactPlayers(byPlayer); setMoves(d.moves || []); setAway(awayRows); })
     .catch((e) => setErr(e.message)); loadMistakes(); }, [viewTeam, selMonth]);
 
   // Export the raw contact log behind these tables: who contacted whom, status, date.
@@ -3368,9 +3381,43 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
   const contactMap = useMemo(() => { const m = {}; (contacts || []).forEach((c) => { if (c.snapshot_date === snap) m[ckey(c)] = c; }); return m; }, [contacts, snap]);
   const openPlayer = (l) => { const p = byKey[ckey(l)]; if (p) setSel({ list: [p], index: 0 }); };
 
-  const agg = (key) => {
+  // By CS only: this team's logs plus moved-out staff's new-team logs, relabelled to their own row.
+  const csLogs = useMemo(() => (logs || []).concat(...away.map((a) => a.logs.map((l) => ({ ...l, assigned_to: a.label })))), [logs, away]);
+  // Marks beside a name, only in the month the move happened, e.g. "1–17 Oct · moved to Team A".
+  const csMarks = useMemo(() => {
+    const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const m = {};
-    logs.forEach((l) => {
+    moves.filter((x) => x.on.slice(0, 7) === perfMonth).forEach((x) => {
+      const [, mo, d] = x.on.split("-").map(Number), mon = MON[mo - 1];
+      if (x.from === viewTeam) {
+        m[x.user] = d > 1 ? `until ${d - 1} ${mon}` : `moved to Team ${x.to}`;
+        m[`${x.user} · Team ${x.to}`] = `since ${d} ${mon}`;
+      } else if (x.to === viewTeam) m[x.user] = `joined from Team ${x.from} · ${d} ${mon}`;
+    });
+    return m;
+  }, [moves, perfMonth, viewTeam]);
+
+  // Moved staff show in By CS from day one, even before their first contact on the new side.
+  const csRows = () => {   // called from the JSX, after agg() below exists
+    if (!logs) return [];
+    const rows = agg("assigned_to", csLogs);
+    const have = new Set(rows.map((r) => r.name));
+    const want = [...away.map((a) => a.label), ...moves.filter((x) => x.to === viewTeam && x.on.slice(0, 7) === perfMonth).map((x) => x.user)];
+    want.filter((n) => !have.has(n)).forEach((name) =>
+      rows.push({ name, assigned: 0, contacted: 0, responded: 0, recovered: 0, no_response: 0, actioned: 0, save: 0 }));
+    // New-team rows hang under the agent's own row, shown as "↳ Team A".
+    away.forEach((a) => {
+      const r = rows.find((x) => x.name === a.label);
+      if (r) { r.parent = a.user; r.display = `Team ${a.to}`; }
+    });
+    // A child with no parent row this month (no old-team work) stands on its own.
+    rows.forEach((r) => { if (r.parent && !rows.some((x) => x.name === r.parent && !x.parent)) { delete r.parent; r.display = r.name; } });
+    return rows;
+  };
+
+  const agg = (key, src = logs) => {
+    const m = {};
+    src.forEach((l) => {
       const k = l[key] || "—";
       m[k] = m[k] || { assigned: 0, contacted: 0, responded: 0, recovered: 0, no_response: 0 };
       if (l.status === "ASSIGNED") m[k].assigned++;
@@ -3405,7 +3452,7 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
         )}
         {!err && logs && logs.length === 0 && <div className="bigmsg">No outcomes logged for {perfMonth || "this month"}.</div>}
         {!err && logs && logs.length > 0 && (<>
-          <PerfBlock title="By CS" rows={agg("assigned_to")} logs={logs} keyField="assigned_to" onOpen={openPlayer} liveSet={liveSet} react={react} reactPlayers={reactPlayers} />
+          <PerfBlock title="By CS" rows={csRows()} logs={csLogs} keyField="assigned_to" onOpen={openPlayer} liveSet={liveSet} react={react} reactPlayers={reactPlayers} marks={csMarks} />
           <PerfBlock title="By Class" rows={agg("class")} logs={logs} keyField="class" onOpen={openPlayer} liveSet={liveSet} />
           <PerfBlock title="By Brand" rows={agg("brand")} logs={logs} keyField="brand" onOpen={openPlayer} liveSet={liveSet} />
         </>)}
@@ -6806,6 +6853,8 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .lc-unassigned{margin-top:20px;border:1px dashed var(--line);border-radius:10px;padding:12px 14px}
 .lc-date{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:5px 8px;font-size:12px;font-family:inherit;color-scheme:dark}
 .lc-empty{border:1px dashed var(--line);border-radius:12px;padding:34px 20px;text-align:center;margin-top:8px}
+.perf-mark{margin-left:8px;font-size:11px;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:4px;padding:1px 6px;white-space:nowrap}
+.perf-tbl td.perf-child{padding-left:28px;color:var(--dim)}
 .perf-row{cursor:pointer;transition:background .1s}.perf-row:hover{background:var(--panel2)}.perf-row.open{background:var(--panel2)}
 .perf-drill>td{padding:0 10px 10px;border-bottom:1px solid var(--line-soft)}
 .perf-players{display:flex;flex-direction:column;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;max-height:280px;overflow:auto}
