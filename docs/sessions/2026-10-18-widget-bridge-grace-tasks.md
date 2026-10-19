@@ -1,6 +1,6 @@
 # 2026-10-18 · Widget bridge, Lark bonus reads, Grace Tasks, table tools
 
-Built locally on branch `feat/paste-list-tick`, tested against a local D1 and a fake Lark. **Not deployed.**
+Built on branch `feat/paste-list-tick`, tested against a local D1 and a fake Lark, then **deployed to production on 2026-10-18** by Aldo's account (`14e65f2d…`): Worker version `c59dc7ae` (features), Pages `23fd4294` (screens), Worker version `4a857b09` (brand fix). Rollback target before this work: Worker `3cb62ff0`. The branch is pushed; the pull request is not merged into `main`.
 
 ## What was built
 - **Table tools (Daily → Table):** "Paste list" (username/UID + brand lines tick those players), a tick-all header checkbox, and Grace "not activated" / "activated" toggle buttons. GRACE WATCH in the Table view shows Not activated / Activated / No live Grace row dividers.
@@ -15,9 +15,13 @@ Built locally on branch `feat/paste-list-tick`, tested against a local D1 and a 
 - The widget's `author` ("96 Raven - VIP RTN SNR MY") is cleaned to a first name and matched to a console username when one exists; stored as "<name> (widget)".
 - `/api/ext/action` appends a `[widget · name · time]` line to today's `contact_log` note and never changes status, assignee, `updated_by` or `updated_at` (those drive auto NO_RESPONSE, the 48h cooldown and auto-assign pins). No row yet: created with status NULL.
 
+## After the deploy
+- Brand fix (live): the widget sends Lark's SHORT brand code (FUN, VS, SPIN, PP, LPK …). `/api/ext/*` accepts the short code or the full name (any case) and stores the full brand; the Lark reads send Lark the short code (`brandStyle` / `brandMap` overrides in `WIDGET_LARK`). Without this, brands with digits found nothing.
+- Widget notes verified end to end by the user: a Relationship note and an Action log entry for FUN / 34904 both saved.
+- Deploy needs `CLOUDFLARE_ACCOUNT_ID=14e65f2d50852aa895d2f46d673f7209` (wrangler lists two accounts) and no `.env.local` when building Pages.
+
 ## Open items
-- Deploy (Worker, then Pages) from a machine logged into the Cloudflare account that owns `groupb-tracker-api`. Secrets `WIDGET_API_KEY` and `WIDGET_LARK` are already set there.
-- Verify against real Lark: one player who reloaded, one who did not. The console's Lark app needs "Can view" on any table that errors.
+- Verify Grace Tasks, the Grace buttons and the drawer Bonuses card on real Lark data: one player who reloaded, one who did not. The console's Lark app needs "Can view" on any table that errors.
 - Widget side (separate repo): its Grace amount reading looks wrong for the real text (takes the year); the "Time of inspection" header may be spelled "inspectiion". `CONSOLE_NOTE_TOKEN` must equal `WIDGET_API_KEY`.
 - Not done: Worklist dividers for the Grace split (tags only).
 
