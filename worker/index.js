@@ -1471,6 +1471,9 @@ async function larkTelegramSync(env, opts = {}) {
   const token = await larkToken(env);
   const found = new Map();                                                 // "brand|player_key" → row (one link per player)
   let seen = 0, noKey = 0, noBrand = 0, noUrl = 0;
+  // Tally: every row whose "Telegram combine" cell is NOT empty ends up in exactly one of these buckets.
+  const tally = { linkCells: 0, saved: 0, duplicates: 0, unusable: 0, noBrandWithLink: 0, noKeyWithLink: 0 };
+  const unusableSample = [];
   const skippedBrands = {};
   for (const viewId of PNL1_VIEWS) {
     for (const rec of await larkRecords(token, PNL1_TABLE, viewId)) {
@@ -1479,13 +1482,23 @@ async function larkTelegramSync(env, opts = {}) {
       const player_key = larkText(f["Username"]).trim();
       const brandCode = larkText(f["Brand"]).trim();
       const brand = LARK_BRAND[brandCode];
-      const url = normalizeLivechat(larkUrlField(f["Telegram combine"]));
-      if (!player_key) { noKey++; continue; }
-      if (!brand) { noBrand++; if (brandCode) skippedBrands[brandCode] = (skippedBrands[brandCode] || 0) + 1; continue; }
-      if (!url) { noUrl++; continue; }                                      // empty = no Telegram: nothing to store
-      found.set(`${brand}|${player_key}`, { player_key, brand, url });
+      const rawLink = larkUrlField(f["Telegram combine"]);
+      const hasCell = !!String(rawLink || "").trim();
+      const url = normalizeLivechat(rawLink);
+      if (hasCell) tally.linkCells++;
+      if (!player_key) { noKey++; if (hasCell) tally.noKeyWithLink++; continue; }
+      if (!brand) { noBrand++; if (hasCell) tally.noBrandWithLink++; if (brandCode) skippedBrands[brandCode] = (skippedBrands[brandCode] || 0) + 1; continue; }
+      if (!url) {                                                           // empty = no Telegram: nothing to store
+        noUrl++;
+        if (hasCell) { tally.unusable++; if (unusableSample.length < 5) unusableSample.push(String(rawLink).slice(0, 40)); }   // filled, but not a LiveChat chat link
+        continue;
+      }
+      const k = `${brand}|${player_key}`;
+      if (found.has(k)) tally.duplicates++;                                  // the same player listed twice: one link kept
+      found.set(k, { player_key, brand, url });
     }
   }
+  tally.saved = found.size;
   const rows = [...found.values()];
   if (!seen) return { skipped: "Lark returned no rows — nothing changed", seen };
   // Lark stores the player's USERNAME. Our identity is player_key = uid when the feed sends
@@ -1516,8 +1529,9 @@ async function larkTelegramSync(env, opts = {}) {
   const existing = (await env.DB.prepare("SELECT player_key, brand FROM player_telegram").all()).results || [];
   const keep = new Set(rows.map((r) => `${r.brand}|${r.player_key}`));
   const wouldDelete = existing.filter((e) => !keep.has(`${e.brand}|${e.player_key}`)).length;
+  tally.adds_up = tally.linkCells === tally.saved + tally.duplicates + tally.unusable + tally.noBrandWithLink + tally.noKeyWithLink;
   const stats = { views: PNL1_VIEWS, seen, withLink: rows.length, emptyLink: noUrl, remapped, noKey, noBrand, skippedBrands,
-    storedBefore: existing.length, wouldDelete };
+    tally, unusableSample, storedBefore: existing.length, wouldDelete };
   // Safety: a half-empty answer (Lark outage, lost permission, wrong view) must never wipe the links. If the new list is
   // less than half of what is stored, stop and say so; run again with ?force=1 only when that drop is real.
   if (existing.length >= 200 && rows.length < existing.length * 0.5 && !opts.force)
