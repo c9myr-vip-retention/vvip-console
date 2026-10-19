@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { buildMessage, buildInstruction, buildHooks, buildAngles, buildHistoryHooks } from "./messageLibrary";
 import { phrase, newPatterns } from "./reportPhrases";
 
@@ -8,7 +8,7 @@ import { phrase, newPatterns } from "./reportPhrases";
    sequence cards activate as daily history accumulates.
    ════════════════════════════════════════════════════════════════════ */
 
-const API_BASE = "https://groupb-tracker-api.viprtn.workers.dev";
+const API_BASE = import.meta.env.VITE_API_BASE || "https://groupb-tracker-api.viprtn.workers.dev";   // VITE_API_BASE only for a local preview
 
 const BRANDS = {
   LPK777: { p: "#7C3AED", a: "#D4AF37", txt: "#E9D5FF", prov: "TC" },
@@ -215,6 +215,40 @@ function exportQueue(rows, snap, label, contactMap) {
   copyText(rows.map((r) => r._tg ? `${dispId(r)}\t${r._tg}` : dispId(r)).join("\n"));
 }
 
+/* ── Paste-list select: "username brand" lines → ckeys to tick in the Table ──
+   Brand may be the full name (SPIN321) or the short code (spin). The player token may be the
+   username, the uid or the player_key. One pair per line; separators: space, tab, comma, ; or |. */
+const BRAND_ALIAS = (() => {
+  const m = {};
+  for (const b of Object.keys(BRANDS)) { m[b.toLowerCase()] = b; m[b.toLowerCase().replace(/\d+$/, "")] = b; }
+  return m;
+})();
+function parsePasteList(text, rows) {
+  const idx = new Map();   // "token|BRAND" -> row
+  for (const r of rows) for (const t of [r.username, r.uid, r.player_key]) {
+    const s = String(t || "").trim().toLowerCase();
+    if (s && !idx.has(`${s}|${r.brand}`)) idx.set(`${s}|${r.brand}`, r);
+  }
+  const keys = new Set(), missing = [], invalid = [];
+  const seen = new Set();
+  String(text || "").split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) return;
+    const parts = line.split(/[\s,;|]+/).filter(Boolean);
+    let bi = -1;
+    parts.forEach((p, j) => { if (BRAND_ALIAS[p.toLowerCase().replace(/[^a-z0-9]/g, "")]) bi = j; });   // last alias wins
+    const pi = parts.findIndex((_, j) => j !== bi);
+    if (parts.length < 2 || bi < 0 || pi < 0) { invalid.push(`line ${i + 1}: ${line}`); return; }
+    const brand = BRAND_ALIAS[parts[bi].toLowerCase().replace(/[^a-z0-9]/g, "")];
+    const player = parts[pi].toLowerCase();
+    if (seen.has(`${player}|${brand}`)) return;
+    seen.add(`${player}|${brand}`);
+    const hit = idx.get(`${player}|${brand}`);
+    if (hit) keys.add(ckey(hit)); else missing.push(`${parts[pi]} ${brand}`);
+  });
+  return { keys, missing, invalid, total: seen.size + invalid.length };
+}
+
 /* ── Phase-1 classification (Behavior Book precedence) ──────────── */
 function classifyAll(rows, snap) {
   // Derive player net (pnl) where the feed omitted it — only BM69 sends pnl, but every brand sends
@@ -410,6 +444,7 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
   const [tgSaving, setTgSaving] = useState(false);
   const [tgErr, setTgErr] = useState(false);     // Telegram save failed
   const [crmHist, setCrmHist] = useState(null);  // past contacts from contact_log
+  const [bonus, setBonus] = useState(null);     // widget bonus lookup: null = not asked, "loading", { programs… } or { error }
   const [livechat, setLivechat] = useState(null); // LiveChat session log (QA audit trail)
   const [lcDraft, setLcDraft] = useState("");
   const [lcBusy, setLcBusy] = useState(false);
@@ -435,7 +470,7 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
   useEffect(() => {
     let alive = true;
     const key = ckey(p);
-    setNoteDraft(""); setNotes(null);
+    setNoteDraft(""); setNotes(null); setBonus(null);
     const pq = `player_key=${encodeURIComponent(p.player_key)}&brand=${encodeURIComponent(p.brand)}`;
     // deep history hooks (session-cached)
     if (HIST_CACHE.has(key)) { setHist(HIST_CACHE.get(key)); }
@@ -461,6 +496,15 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
       .catch(() => { if (alive) setCrmHist([]); });
     return () => { alive = false; };
   }, [index]);
+  // Asked on demand (one click), not on every drawer open: each lookup is ~11 Lark reads shared with the widget.
+  async function checkBonuses() {
+    const key = ckey(p);
+    setBonus("loading");
+    try {
+      const d = await api(`/api/rtn/bonus-lookup?username=${encodeURIComponent(p.player_key)}&brand=${encodeURIComponent(p.brand)}`);
+      if (ckey(list[index]) === key) setBonus(d);
+    } catch (e) { setBonus({ error: e.message || "Lookup failed" }); }
+  }
   async function saveCrm(extra = {}) {
     const payload = { player_key: p.player_key, brand: p.brand,
       next_followup: extra.next_followup ?? followup };
@@ -618,6 +662,34 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
             </>
           ) : null;
         })()}
+
+        {/* WIDGET BONUSES — the same Lark bonus tables the Customer Approaching widget reads (read-only) */}
+        <div className="dsec">Bonuses (from widget)</div>
+        <div className="ledger">
+          {bonus === null && <button className="btn-ghost bonus-btn" onClick={checkBonuses}>Check what this player can claim</button>}
+          {bonus === "loading" && <div className="ledger-empty">Asking the widget… this can take up to ~30 s.</div>}
+          {bonus && bonus !== "loading" && bonus.error && (
+            <div className="ledger-empty">{bonus.error} <button className="btn-ghost bonus-btn" onClick={checkBonuses}>Retry</button></div>)}
+          {bonus && bonus !== "loading" && !bonus.error && (<>
+            {bonus.notVip && <div className="ledger-empty">Not in the widget's P&L master list — flagged "Not VIP" there.</div>}
+            {!bonus.notVip && (bonus.tier || bonus.customerName) && (
+              <div className="ledger-empty">{[bonus.customerName, bonus.tier && `Tier ${bonus.tier}`].filter(Boolean).join(" · ")}</div>)}
+            {bonus.programs.length === 0 && !bonus.notVip && <div className="ledger-empty">Nothing claimable right now.</div>}
+            {bonus.programs.map((g) => (
+              <div className="ledger-note" key={g.key}>
+                <span className="ln-pin">🎁</span>
+                <div className="ln-body">
+                  <div className="ln-text"><b>{g.label}</b> — {g.value}
+                    {g.key === "grace" && <span className={"bonus-tag " + (g.activated ? "on" : "off")}>{g.activated ? "ACTIVATED" : "NOT ACTIVATED"}</span>}</div>
+                  {g.expiryMs ? <div className="ln-meta">expires {new Date(g.expiryMs).toISOString().slice(0, 10)}</div> : null}
+                </div>
+              </div>
+            ))}
+            {bonus.otherBrands.length > 0 && <div className="ledger-empty">Same username also exists under: {bonus.otherBrands.join(", ")}</div>}
+            {bonus.warnings.length > 0 && <div className="ledger-empty">Some tables did not answer ({bonus.warnings.join(", ")}) — the list may be incomplete.</div>}
+            <button className="btn-ghost bonus-btn" onClick={checkBonuses}>Refresh</button>
+          </>)}
+        </div>
 
         {/* RELATIONSHIP LEDGER — person-level memory that resurfaces every contact */}
         <div className="dsec">Relationship notes</div>
@@ -1029,6 +1101,21 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
   const [q, setQ] = useState("");
   const [mine, setMine] = useState(false);
   const [graceWatch, setGraceWatch] = useState(false);
+  // Grace Period challenge state straight from the Lark Grace table (same rows the widget reads): activated vs waiting.
+  // Loaded only while GRACE WATCH is on — one read per brand on the server, cached 5 min.
+  const [graceSt, setGraceSt] = useState(null);      // { "username|BRAND": { a: 0|1, v, e } }
+  const [graceErr, setGraceErr] = useState("");
+  const [graceFilter, setGraceFilter] = useState(""); // "" | "not" (Grace not activated yet) | "act" (Grace activated) — like the ✈ On TG toggle
+  const graceNeeded = graceWatch || !!graceFilter || classes.has("GRACE");   // any view that shows Grace state loads it
+  useEffect(() => {
+    if (!graceNeeded) return;
+    let alive = true;
+    setGraceErr("");
+    api("/api/rtn/grace-status").then((d) => { if (alive) setGraceSt(d.status || {}); })
+      .catch((e) => { if (alive) { setGraceSt(null); setGraceErr(e.message || "Could not read the Grace table"); } });
+    return () => { alive = false; };
+  }, [graceNeeded, snap]);
+  const graceOf = (r) => (graceSt ? graceSt[`${String(r.player_key).toLowerCase()}|${r.brand}`] || null : null);
   const [zeroDep, setZeroDep] = useState(false);           // KPI drill: players with 0 deposit this month
   const [onTg, setOnTg] = useState(false);                 // show only players with a Telegram link (non-TG stay reachable when off)
   const [openOnly, setOpenOnly] = useState(false);         // hide players inside the 48h contact cooldown — only players open to contact now
@@ -1044,7 +1131,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
   const [selIdx, setSelIdx] = useState(null);
   const [view, setView] = useState("worklist");    // "worklist" (default) | "table" | "contacted"
   // Close the drawer when the filtered list changes, so the open index can't point at a different player.
-  useEffect(() => { setSelIdx(null); }, [brands, tier, classes, q, mine, graceWatch, zeroDep, onTg, noTgOnly, openOnly, focusKeys, sorts, view, agentFilter, pageSize, page]);
+  useEffect(() => { setSelIdx(null); }, [brands, tier, classes, q, mine, graceWatch, graceFilter, zeroDep, onTg, noTgOnly, openOnly, focusKeys, sorts, view, agentFilter, pageSize, page]);
   const [noneOpen, setNoneOpen] = useState(false);  // NO ACTION band expanded?
   const [bandAll, setBandAll] = useState({});        // { [bandKey]: true } = show all rows vs top 10
   const [showLegend, setShowLegend] = useState(false);
@@ -1052,6 +1139,14 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
   const [copiedSel, setCopiedSel] = useState(false);
   const [markBusy, setMarkBusy] = useState(false);
   const toggleSel = (k) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const [pasteOpen, setPasteOpen] = useState(false);   // Table: "Paste list" panel
+  const [pasteText, setPasteText] = useState("");
+  const [pasteMsg, setPasteMsg] = useState(null);      // { ok, missing, invalid, hidden }
+  const tickPasted = () => {
+    const res = parsePasteList(pasteText, data);
+    setSel((s) => { const n = new Set(s); res.keys.forEach((k) => n.add(k)); return n; });
+    setPasteMsg({ ok: res.keys.size, total: res.total, missing: res.missing, invalid: res.invalid });
+  };
   const copySelectedUsernames = async () => {
     const byKey = {}; data.forEach((r) => (byKey[ckey(r)] = r));
     // Per-brand identity: Zyra copies the UID, TC copies the username — same rule as dispId and Export.
@@ -1129,6 +1224,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
     if (tier !== "ALL") r = r.filter((x) => x.tier_segment === tier);
     if (graceWatch) r = r.filter((x) => x._graceDays != null && x._graceDays >= 0);
     else if (classes.size) r = r.filter((x) => classes.has(x._cls));
+    if (graceFilter && graceSt) r = r.filter((x) => { const g = graceOf(x); return !!g && (graceFilter === "act" ? g.a === 1 : g.a === 0); });
     if (mine) r = r.filter((x) => contactMap[ckey(x)]?.assigned_to === me.username);
     if (zeroDep) r = r.filter((x) => !(Number(x.monthly_deposit) > 0));
     if (onTg) r = r.filter((x) => !!x._tg);
@@ -1140,7 +1236,11 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         (x.uid || "").toLowerCase().includes(s) || (x.addressing || "").toLowerCase().includes(s));
     }
     return [...r].sort((a, b) => {
-      if (graceWatch) return (a._graceDays ?? 999) - (b._graceDays ?? 999);
+      if (graceWatch) {
+        // not activated first (the ones still to chase), then activated, then players with no live Grace row; soonest deadline within each
+        const ga = graceSt ? (graceOf(a) ? graceOf(a).a : 2) : 0, gb = graceSt ? (graceOf(b) ? graceOf(b).a : 2) : 0;
+        return (ga - gb) || ((a._graceDays ?? 999) - (b._graceDays ?? 999));
+      }
       if (sorts.length) {                          // multi-column sort: each column in order, biggest first by default
         for (const s of sorts) {
           let av, bv;
@@ -1156,7 +1256,20 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
       if (a.tier_segment !== b.tier_segment) return a.tier_segment === "V" ? -1 : 1;
       return (a.pnl ?? 0) - (b.pnl ?? 0);
     });
-  }, [data, brands, tier, classes, q, mine, graceWatch, zeroDep, onTg, noTgOnly, openOnly, cooldownSet, focusKeys, sorts, contactMap, me]);
+  }, [data, brands, tier, classes, q, mine, graceWatch, graceSt, graceFilter, zeroDep, onTg, noTgOnly, openOnly, cooldownSet, focusKeys, sorts, contactMap, me]);
+
+  // Grace separator: 0 = not activated yet, 1 = activated, 2 = no live Grace row in Lark. null when not in GRACE WATCH / not loaded.
+  const graceGroup = (r) => (graceWatch && graceSt ? (graceOf(r) ? graceOf(r).a : 2) : null);
+  const graceCounts = useMemo(() => {
+    const c = [0, 0, 0];
+    if (graceWatch && graceSt) filtered.forEach((r) => { c[graceGroup(r)]++; });
+    return c;
+  }, [filtered, graceWatch, graceSt]);
+  const GRACE_GROUP_LABEL = ["NOT ACTIVATED — still to chase", "ACTIVATED", "NO LIVE GRACE ROW IN LARK"];
+  const graceTag = (r) => {      // shown whenever Grace state is loaded (GRACE WATCH, the GRACE class, or an activated filter)
+    const g = graceNeeded && graceSt ? graceOf(r) : null;
+    return !g ? null : <span className={"bonus-tag " + (g.a ? "on" : "off")} title={g.v}>{g.a ? "ACTIVATED" : "NOT ACTIVATED"}</span>;
+  };
 
   const counts = useMemo(() => {
     const base = brands.size ? data.filter((x) => brands.has(x.brand)) : data;
@@ -1306,7 +1419,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
             {r._whale && <span className="whale" title="Top-value Tier V — personal handling only">♛</span>}<TgFlag on={r._tg} />
             {(r._cool2 || r._cooling) && <span className="cooling" title="Churn-risk from a deposit-rhythm break — act now">❄{r._cool2 ? ` RISK ${r._cool2.risk}` : " COOLING"}</span>}
             {r._fragile && <span className="frag">FRAGILE</span>}
-            <span className="wl-bt">{r.brand} · Tier {r.tier_segment}</span>
+            <span className="wl-bt">{r.brand} · Tier {r.tier_segment}</span>{graceTag(r)}
           </div>
           <div className={"wl-instr" + (rep ? " rep" : "")}>{buildInstruction(r)}</div>
         </div>
@@ -1328,7 +1441,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         <div className="stale-banner">⚠ DATA LAGGING — deposits behind other brands: {lagBrands.map((s) => `${s.brand} (through ${s.newest_dep})`).join(" · ")}. Others are current through {lagBrands[0].lead}. Re-run that sheet's feeder to refresh before trusting its 0-deposit list.</div>
       )}
 
-      <div className="rail" style={view === "logincheck" ? { display: "none" } : undefined}>
+      <div className="rail" style={(view === "logincheck" || view === "gracetasks") ? { display: "none" } : undefined}>
         {(() => {
           // Two balanced, centered rows. Fewer on top: 7 brands -> 3 above, 4 below.
           const split = Math.floor(brandOrder.length / 2);
@@ -1360,7 +1473,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         })()}
       </div>
 
-      <div className="filters-row" style={view === "logincheck" ? { display: "none" } : undefined}>
+      <div className="filters-row" style={(view === "logincheck" || view === "gracetasks") ? { display: "none" } : undefined}>
         <Dropdown label="Brand" multi
           value={brands.size === 0 ? "" : brands.size <= 2 ? [...brands].join(", ") : `${brands.size} selected`}
           onPick={(it) => { if (it.key === "all") setBrands(new Set()); else toggleBrand(it.key); }}
@@ -1391,8 +1504,9 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
           <button className={view === "assigned" ? "on" : ""} onClick={() => setView("assigned")}>Assigned</button>
           <span className="seg-div" />
           <button className={view === "logincheck" ? "on" : ""} onClick={() => setView("logincheck")}>Login Check</button>
+          <button className={view === "gracetasks" ? "on" : ""} onClick={() => setView("gracetasks")}>Grace Tasks</button>
         </div>
-        {view !== "assigned" && view !== "logincheck" && (<>
+        {view !== "assigned" && view !== "logincheck" && view !== "gracetasks" && (<>
         <button className="btn-ghost legend-q" title="What do these terms mean?" onClick={() => setShowLegend((v) => !v)}>?</button>
         <input className="search" placeholder="Search player / uid / name…" value={q} onChange={(e) => setQ(e.target.value)} />
         <div className="seg">
@@ -1403,9 +1517,15 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         <button className={"btn-ghost" + (mine ? " active" : "")} onClick={() => setMine(!mine)}>My queue</button>
         <button className={"btn-ghost" + (zeroDep ? " active" : "")} title="Only players with 0 deposit this month" onClick={() => setZeroDep(!zeroDep)}>0 dep this month</button>
         <button className={"btn-ghost" + (onTg ? " active" : "")} title="Show only players with a Telegram link (non-TG players are still here when off — copy the username and IM them)" onClick={() => { setOnTg(!onTg); setNoTgOnly(false); }}>✈ On TG</button>
+        <button className={"btn-ghost" + (graceFilter === "not" ? " active" : "")} title="Only players whose Grace Period challenge is NOT activated yet (read from the Lark Grace table)" onClick={() => setGraceFilter(graceFilter === "not" ? "" : "not")}>Grace: not activated</button>
+        <button className={"btn-ghost" + (graceFilter === "act" ? " active" : "")} title="Only players whose Grace Period challenge is already activated (read from the Lark Grace table)" onClick={() => setGraceFilter(graceFilter === "act" ? "" : "act")}>Grace: activated</button>
         <button className={"btn-ghost" + (openOnly ? " active" : "")} title="Only players open to contact — hides anyone inside the 48h contact cooldown. Churn-risk (COOLING) players stay. They drop off as you contact them." onClick={() => setOpenOnly(!openOnly)}>Open to contact</button>
         <button className="btn-ghost" title="Download filtered list as CSV + copy usernames for blast tooling"
           onClick={() => exportQueue(filtered, snap, null, contactMap)}>Export {filtered.length}</button>
+        {view === "table" && (
+          <button className={"btn-ghost" + (pasteOpen ? " active" : "")} title="Paste a list of username + brand lines to tick those players"
+            onClick={() => setPasteOpen((o) => !o)}>Paste list</button>
+        )}
         {sorts.length > 0 && (
           <button className="btn-ghost" title="Reset table to the default priority (risk) order"
             onClick={() => setSorts([])}>Clear sort{sorts.length > 1 ? ` (${sorts.length})` : ""}</button>
@@ -1418,7 +1538,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         </>)}
       </div>
 
-      {(brands.size > 0 || classes.size > 0 || graceWatch || tier !== "ALL" || q || zeroDep || onTg || noTgOnly) && (
+      {(brands.size > 0 || classes.size > 0 || graceWatch || graceFilter || tier !== "ALL" || q || zeroDep || onTg || noTgOnly) && (
         <div className="active-filters">
           <span className="af-label">Filters</span>
           {focusKeys && (
@@ -1432,6 +1552,10 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
           {onTg && (
             <span className="fchip">✈ On TG only
               <button className="fchip-x" title="Show non-TG players again" onClick={() => setOnTg(false)}>✕</button></span>
+          )}
+          {graceFilter && (
+            <span className="fchip">{graceFilter === "act" ? "Grace activated" : "Grace not activated"}
+              <button className="fchip-x" title="Clear Grace filter" onClick={() => setGraceFilter("")}>✕</button></span>
           )}
           {noTgOnly && (
             <span className="fchip">✈ No link only
@@ -1470,6 +1594,28 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         </div>
       )}
 
+      {graceNeeded && graceErr && (
+        <div className="stale-banner">Grace activation state unavailable: {graceErr}. The list still works; the activated / not activated split is hidden until the Grace table can be read.</div>
+      )}
+      {view === "table" && pasteOpen && (
+        <div className="paste-box">
+          <div className="paste-help">One player per line: <b>username or UID + brand</b> (e.g. <span className="mono">swecin spin</span>). Brand can be the short code or the full name. Ticks are added to the current selection.</div>
+          <textarea className="paste-ta" rows={6} value={pasteText} placeholder={"swecin spin\nkader007 my\n931229 rush"}
+            onChange={(e) => { setPasteText(e.target.value); setPasteMsg(null); }} />
+          <div className="paste-actions">
+            <button className="btn-gold" disabled={!pasteText.trim()} onClick={tickPasted}>Tick players</button>
+            <button className="btn-ghost" onClick={() => { setPasteText(""); setPasteMsg(null); }}>Clear text</button>
+            {pasteMsg && (() => {
+              const shown = new Set(filtered.map(ckey));
+              const hidden = [...sel].filter((k) => !shown.has(k)).length;
+              return <span className="paste-res">Ticked {pasteMsg.ok} of {pasteMsg.total}.{hidden > 0 && ` ${hidden} selected player${hidden > 1 ? "s are" : " is"} hidden by the current filters.`}</span>;
+            })()}
+          </div>
+          {pasteMsg && pasteMsg.missing.length > 0 && <div className="paste-bad"><b>Not found</b> (not in this team's snapshot, or wrong brand): {pasteMsg.missing.join(", ")}</div>}
+          {pasteMsg && pasteMsg.invalid.length > 0 && <div className="paste-bad"><b>Could not read:</b> {pasteMsg.invalid.join("; ")}</div>}
+        </div>
+      )}
+
       {sel.size > 0 && (
         <div className="sel-bar">
           <span className="sel-n">{sel.size} selected</span>
@@ -1481,6 +1627,9 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
 
       {view === "logincheck" ? (
         <LoginCheck me={me} team={team} viewDate={viewDate} viewTeam={viewTeam} />
+      ) : view === "gracetasks" ? (
+        <GraceTasks data={data} snap={snap} me={me} team={team} contactMap={contactMap}
+          onSaveContact={onSaveContact} onClearContact={onClearContact} readOnly={readOnly} />
       ) : view === "assigned" ? (
         <AssignedView rows={data} contactMap={contactMap} contacts={contacts} team={team} viewTeam={viewTeam} me={me} snap={snap}
           dates={dates} setViewDate={setViewDate} onSaveContact={onSaveContact} onClearContact={onClearContact} readOnly={readOnly} />
@@ -1488,7 +1637,17 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
       <div className="tbl-wrap">
         <table>
           <thead><tr>
-            <th className="tcheck"></th><th>Class</th><th>Player</th><th>Brand</th><th>Tier</th>
+            <th className="tcheck" onClick={(e) => e.stopPropagation()}>
+              <input type="checkbox" className="wl-check" title={`Tick all ${filtered.length} players in the current filter (all pages)`}
+                checked={filtered.length > 0 && filtered.every((r) => sel.has(ckey(r)))}
+                ref={(el) => { if (el) el.indeterminate = filtered.some((r) => sel.has(ckey(r))) && !filtered.every((r) => sel.has(ckey(r))); }}
+                onChange={() => setSel((s) => {
+                  const n = new Set(s);
+                  if (filtered.every((r) => n.has(ckey(r)))) filtered.forEach((r) => n.delete(ckey(r)));
+                  else filtered.forEach((r) => n.add(ckey(r)));
+                  return n;
+                })} />
+            </th><th>Class</th><th>Player</th><th>Brand</th><th>Tier</th>
             <Th k="_tgrank"><span title="Telegram — available players sort to the top">✈ TG</span></Th>
             <Th k="_dsld" right>DSLD</Th>
             <Th k="daily_deposit" right>Deposit today</Th>
@@ -1502,8 +1661,12 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
             {pageRows.map((r, i) => {
               const con = contactMap[ckey(r)];
               const cool = cooldownSet.has(ckey(r));
+              const gg = graceGroup(r);
+              const divider = gg !== null && (i === 0 || graceGroup(pageRows[i - 1]) !== gg);
               return (
-                <tr key={ckey(r)} className={(cool ? "cool" : "") + (sel.has(ckey(r)) ? " sel" : "")} {...tap(() => setSelIdx(i), null)}>
+                <Fragment key={ckey(r)}>
+                {divider && <tr className="grace-div"><td colSpan={13}><span className={"gd-" + gg}>{GRACE_GROUP_LABEL[gg]}</span> <b>{graceCounts[gg]}</b></td></tr>}
+                <tr className={(cool ? "cool" : "") + (sel.has(ckey(r)) ? " sel" : "")} {...tap(() => setSelIdx(i), null)}>
                   <td className="tcheck" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" className="wl-check" checked={sel.has(ckey(r))} onChange={() => toggleSel(ckey(r))} title="Select to copy username" />
                   </td>
@@ -1526,11 +1689,12 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
                   <td className="r mono">{fmt(r.daily_withdraw)}</td>
                   <td className={"r mono " + ((r.win_loss ?? 0) < 0 ? "neg" : (r.win_loss ?? 0) > 0 ? "pos" : "")}>{fmt(r.win_loss)}</td>
                   <td className="r mono">{fmt(r.pnl)}</td>
-                  <td className="r mono">{r._graceDays != null && r._graceDays >= 0 ? r._graceDays + "d" : "—"}</td>
+                  <td className="r mono">{r._graceDays != null && r._graceDays >= 0 ? r._graceDays + "d" : "—"}{graceTag(r)}</td>
                   <td>{con?.status
                     ? <span className="st-tag" style={{ "--sc": ST_COLOR[con.status] }}>{con.status.replace("_", " ")}{con.assigned_to ? ` · ${con.assigned_to}` : ""}</span>
                     : con?.assigned_to ? <span className="st-tag" style={{ "--sc": ST_COLOR.ASSIGNED }}>{con.assigned_to}</span> : <span className="dim">—</span>}</td>
                 </tr>
+                </Fragment>
               );
             })}
             {filtered.length === 0 && <tr><td colSpan="13" className="emptyrow">No players match — adjust filters.</td></tr>}
@@ -5242,6 +5406,88 @@ function AAStyle() {
    Login and Deposit are checkboxes the agent fills in real time. The deposit
    AMOUNT is never typed — it is read from the ingest and confirms next day, so
    the sheet stays a check, not a data-entry form (no hand-typed figures). */
+/* ════════ GRACE TASKS — activated, reloaded inside the window, not claimed yet ════════
+   Rule (worker graceTasksFor): window = activated date → expiry date, both from the Lark Grace table; required deposit =
+   the Grace ladder applied to the bonus in the SW Check text; deposits = the console's own daily feed (one day behind).
+   A claim never expires, so a row stays until Lark says Claimed. Read-only. */
+const GT_STATUS = {
+  reloaded:     { label: "RELOADED · NOT CLAIMED", color: "var(--pos)" },
+  same_day:     { label: "SAME-DAY RELOAD · CHECK TIME", color: "#E8C547" },
+  in_progress:  { label: "WINDOW OPEN", color: "#E8C547" },
+  not_reloaded: { label: "DID NOT RELOAD", color: "var(--dim)" },
+  unknown:      { label: "NO AMOUNT IN LARK", color: "var(--dim)" },
+};
+function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearContact, readOnly }) {
+  const [res, setRes] = useState(null);       // null = loading, { rows, notes } or { error }
+  const [filter, setFilter] = useState("reloaded");
+  const [open, setOpen] = useState(null);     // { list, index } — the player drawer
+  const load = () => { setRes(null); api("/api/rtn/grace-tasks").then(setRes).catch((e) => setRes({ error: e.message || "Could not read the Grace table" })); };
+  useEffect(load, [snap]);
+  const byKey = useMemo(() => { const m = {}; data.forEach((r) => (m[`${r.player_key}|${r.brand}|${r.tier_segment}`] = r)); return m; }, [data]);
+  const rows = res && res.rows ? res.rows : [];
+  const counts = { reloaded: 0, same_day: 0, in_progress: 0, not_reloaded: 0, unknown: 0 };
+  rows.forEach((r) => { counts[r.status]++; });
+  const shown = rows.filter((r) => (filter === "all" || r.status === filter) && byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`]);
+  const players = shown.map((r) => byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`]);
+  const chip = (k, label) => (
+    <button key={k} className={"btn-ghost" + (filter === k ? " active" : "")} onClick={() => setFilter(k)}>{label}{k !== "all" ? ` ${counts[k]}` : ` ${rows.length}`}</button>);
+  return (
+    <div className="gt-wrap">
+      <div className="gt-head">
+        <b>Grace tasks</b>
+        <span className="gt-sub">Activated in Lark, reloaded the required deposit inside the window, not claimed yet.</span>
+        <button className="btn-ghost" onClick={load}>Refresh</button>
+      </div>
+      {res && res.notes && (
+        <div className="gt-note">
+          Window = the <b>activated date</b> to the <b>expiry date</b>, both read from the Lark Grace table. Only deposits <b>after the activation day</b> count; a deposit on the activation day itself (dashed cell) could be before the activation time, so it is shown separately as "same day, check time". The required deposit follows from the bonus (Tier 3: 100→18, 200→28, 300→38, 500→58 · Tier V: 600→68 … 1000→108).
+          {" "}Deposits come from the console's daily feed, one day behind; a "–" day has not arrived yet. The claim never expires, so a row stays until Lark says Claimed.
+          {res.notes.late > 0 && <> {res.notes.late} row(s) were activated after their expiry date.</>}
+          {res.notes.noPlayer > 0 && <> {res.notes.noPlayer} Grace row(s) have no matching player in the console.</>}
+        </div>
+      )}
+      <div className="gt-filters">
+        {chip("reloaded", "Reloaded, not claimed")}{chip("same_day", "Same-day, check time")}{chip("in_progress", "Window open")}{chip("not_reloaded", "Did not reload")}{chip("unknown", "No amount")}{chip("all", "All")}
+      </div>
+      {res === null && <div className="ledger-empty">Reading the Lark Grace table…</div>}
+      {res && res.error && <div className="stale-banner">{res.error}</div>}
+      {res && !res.error && (
+        <div className="tbl-wrap"><table>
+          <thead><tr><th>Player</th><th>Brand</th><th>Tier</th><th>✈</th><th>Window</th><th>Deposit per day</th>
+            <th className="r">Deposited</th><th className="r">Required</th><th className="r">Bonus</th><th>Status</th></tr></thead>
+          <tbody>
+            {shown.map((t, i) => {
+              const p = players[i], st = GT_STATUS[t.status];
+              return (
+                <tr key={`${t.player_key}|${t.brand}|${t.end}`} {...tap(() => setOpen({ list: players, index: i }), null)}>
+                  <td className="tname"><div className="pname">{dispName(p)}</div><div className="psub">{!looksNumeric(p.addressing) ? p.addressing : ""}</div></td>
+                  <td><span className="b-dot" style={{ background: BRANDS[t.brand]?.p }} />{t.brand}</td>
+                  <td className="mono">{t.tier_segment}</td>
+                  <td>{p._tg ? <span className="tg-cell">✈</span> : <span className="tg-cell off">·</span>}</td>
+                  <td className="mono" title={t.late ? "Activated after the expiry date" : "Activated date → expiry date, from Lark"}>
+                    {t.start.slice(5)} → {t.end.slice(5)}{t.late ? " ⚠" : ""}</td>
+                  <td><div className="gt-days">{t.days.map((d) => (
+                    <span key={d.d} className={"gt-d" + (d.d === t.start ? " act" : d.dep > 0 ? " on" : "") + (d.dep === null ? " na" : "")}
+                      title={d.d === t.start ? `${d.d} · activation day: the deposit could be before or after the activation time, so it is not counted as certain` : d.d}>{d.dep === null ? "–" : fmt(d.dep)}</span>))}</div></td>
+                  <td className="r mono">{fmt(t.total)}{t.sameDay > 0 && <div className="gt-sd" title="Deposited on the activation day itself; time of day unknown">+{fmt(t.sameDay)} same day</div>}</td>
+                  <td className="r mono">{t.req == null ? "—" : fmt(t.req)}</td>
+                  <td className="r mono">{t.bonus == null ? "—" : fmt(t.bonus)}</td>
+                  <td><span className="gt-st" style={{ "--cc": st.color }} title={t.text}>{st.label}</span></td>
+                </tr>);
+            })}
+            {shown.length === 0 && <tr><td colSpan="10" className="emptyrow">Nothing in this group.</td></tr>}
+          </tbody>
+        </table></div>
+      )}
+      {open && open.list[open.index] && (
+        <Drawer list={open.list} index={open.index} setIndex={(i) => setOpen((o) => ({ ...o, index: i }))}
+          snap={snap} me={me} team={team} contact={contactMap[ckey(open.list[open.index])]}
+          onSave={onSaveContact} onClear={onClearContact} onClose={() => setOpen(null)} readOnly={readOnly} />
+      )}
+    </div>
+  );
+}
+
 const lcStatusColor = (g) => {
   const s = String(g || "");
   if (s.startsWith("Active")) return "var(--pos)";
@@ -6519,6 +6765,12 @@ td{padding:9px 8px;vertical-align:middle}
 .wl-check:checked::after{content:"";position:absolute;left:5.5px;top:2px;width:4px;height:9px;border:solid var(--accent);border-width:0 2px 2px 0;transform:rotate(45deg)}
 .sel-bar{display:flex;align-items:center;gap:12px;background:var(--panel2);border:1px solid var(--accent);border-radius:10px;padding:9px 14px;margin-bottom:14px}
 .sel-n{font-weight:700;font-size:13px;color:var(--accent)}
+.paste-box{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px}
+.paste-help{font-size:12px;color:var(--dim);margin-bottom:8px}
+.paste-ta{box-sizing:border-box;width:100%;max-width:420px;display:block;background:var(--panel);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:12px/1.4 monospace;resize:vertical}
+.paste-actions{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.paste-res{font-size:12px;color:var(--txt)}
+.paste-bad{font-size:12px;color:var(--dim);margin-top:6px;word-break:break-word}
 .sel-bar .btn-gold{padding:7px 14px}
 .btn-mark{background:color-mix(in srgb,var(--pos) 18%,var(--panel2));border:1px solid var(--pos);color:var(--pos);font-weight:700;font-size:13px;padding:7px 13px;border-radius:9px;cursor:pointer}
 .btn-mark:disabled{opacity:.5;cursor:default}
@@ -6596,6 +6848,19 @@ tbody tr.sel:hover{background:color-mix(in srgb,var(--accent) 13%,transparent)}
 .ln-meta{font-size:10px;color:var(--dim);margin-top:3px;letter-spacing:.02em}
 .ln-x{background:none;border:none;color:var(--dim);font-size:12px;cursor:pointer;padding:0 2px;line-height:1;opacity:.6}
 .ln-x:hover{opacity:1;color:var(--neg)}
+.gt-head{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}.gt-sub{color:var(--dim);font-size:12px;flex:1}
+.gt-note{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.5}
+.gt-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.gt-days{display:flex;gap:4px}.gt-d{min-width:46px;text-align:center;padding:3px 6px;border-radius:6px;border:1px solid var(--line);font-size:11px;font-family:var(--mono,monospace);color:var(--dim)}
+.gt-d.on{color:var(--pos);border-color:var(--pos)}.gt-d.na{opacity:.5}
+.gt-d.act{border-style:dashed;color:#E8C547;border-color:#E8C547}.gt-sd{font-size:10px;color:#E8C547;white-space:nowrap}
+.gt-st{font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:10px;border:1px solid var(--cc);color:var(--cc);white-space:nowrap}
+.grace-div td{background:var(--panel2);font-size:11px;letter-spacing:.06em;padding:7px 14px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);cursor:default}
+.grace-div .gd-0{color:#E8C547;font-weight:700}.grace-div .gd-1{color:var(--pos);font-weight:700}.grace-div .gd-2{color:var(--dim);font-weight:700}
+.bonus-btn{align-self:flex-start;font-size:12px;padding:6px 11px}
+.bonus-tag{margin-left:8px;font-size:10px;font-weight:700;letter-spacing:.04em;padding:2px 7px;border-radius:10px;border:1px solid var(--line)}
+.bonus-tag.on{color:var(--pos);border-color:var(--pos)}
+.bonus-tag.off{color:var(--gold, #E8C547);border-color:var(--gold, #E8C547)}
 .ledger-add{display:flex;gap:7px;margin-top:2px}
 .ledger-add input{flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
 .ledger-add .btn-ghost{white-space:nowrap}

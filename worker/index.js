@@ -259,6 +259,392 @@ async function autoCreateEvents(env, { dry = false, date } = {}) {
   return { date: today, day: plan.day, team: plan.team, tier: plan.zyra, created, skipped };
 }
 
+// ── Lark bonus tables (read-only) — the same tables the Customer Approaching widget reads ──────
+// The qualifying numbers (loss ladders, LTV ranks, Secret Wallet caps) are calculated INSIDE those
+// Lark tables; this code only finds a player's row and applies the widget's "is it still claimable"
+// rule. Ported from the widget's functions/lark-search.js (hidden(), the per-table predicates, the
+// oldest-first / newest-first pick). If the widget's rules change, change them here too.
+//
+// Config: Worker secret/var WIDGET_LARK, JSON, never committed:
+//   {"base":"<widget base app token>","tables":{"pnl":"tbl…","topPnl":"tbl…","ltv":"tbl…","grace":"tbl…",
+//     "risk":"tbl…","vip":"tbl…","special":"tbl…","tg28":"tbl…","redeem":"tbl…","mooncake":"tbl…",
+//     "vs96":"tbl…","ca":"tbl…"},
+//     "graceOpts":{"activatedField":"<Grace column holding the activated date>","windowDays":3,"lookbackDays":14}}
+//   (any table may be left out; "ca" only powers the other-brand warning; graceOpts is optional — without
+//    activatedField the Grace window start is assumed from the expiry date, see "Grace daily tasks")
+// Auth: LARK_APP_ID / LARK_APP_SECRET (or WLARK_APP_ID / WLARK_APP_SECRET if the widget uses another
+// app). That app needs "can view" on those tables. Nothing here ever writes to Lark.
+const BONUS_CACHE = new Map();          // "username|brand" -> { at, data } (per isolate; spares Lark repeat opens)
+const BONUS_CACHE_MS = 60 * 1000;
+const GRACE_CACHE = new Map();          // brand -> { at, map }
+const GRACE_CACHE_MS = 5 * 60 * 1000;
+let WL_TOKEN = { key: "", token: "", exp: 0 };
+
+// The Lark tables' Brand column holds the SHORT code (FUN, VS, SPIN, PP …), not the console's full name (FUN36 …).
+// WIDGET_LARK can set "brandStyle":"full" to send full names instead, or "brandMap":{"FUN36":"FUN"} to override one brand.
+function wlBrand(cfg, brand) {
+  if (cfg.brandMap && cfg.brandMap[brand]) return cfg.brandMap[brand];
+  return cfg.brandStyle === "full" ? brand : String(brand).replace(/\d+$/, "");
+}
+function widgetLarkCfg(env) {
+  try { const c = JSON.parse(env.WIDGET_LARK || ""); return c && c.base && c.tables ? c : null; } catch (e) { return null; }
+}
+async function wlToken(env) {
+  const id = env.WLARK_APP_ID || env.LARK_APP_ID, secret = env.WLARK_APP_SECRET || env.LARK_APP_SECRET;
+  if (!id || !secret) throw new Error("no Lark app credentials");
+  if (WL_TOKEN.key === id && Date.now() < WL_TOKEN.exp) return WL_TOKEN.token;
+  const j = await larkFetch("/open-apis/auth/v3/tenant_access_token/internal", null, {
+    method: "POST", body: JSON.stringify({ app_id: id, app_secret: secret }) });
+  WL_TOKEN = { key: id, token: j.tenant_access_token, exp: Date.now() + 60 * 60 * 1000 };
+  return j.tenant_access_token;
+}
+// Lark field value → display text (port of the widget's toDisplay): arrays join, formula/select wrappers unwrap.
+function wlText(v, optionMap) {
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.map((x) => wlText(x, optionMap)).filter(Boolean).join(", ");
+  if (typeof v === "object") {
+    if ("value" in v) return wlText(v.value, optionMap);
+    if ("text" in v) { const s = String(v.text); return optionMap && optionMap.has(s) ? optionMap.get(s) : s; }
+    if ("name" in v) return String(v.name);
+    if ("link" in v) return String(v.link);
+    return JSON.stringify(v);
+  }
+  const s = String(v);
+  return optionMap && optionMap.has(s) ? optionMap.get(s) : s;
+}
+function wlEpoch(v) {
+  if (typeof v === "number") return v;
+  if (Array.isArray(v)) { for (const x of v) { const n = wlEpoch(x); if (n !== null) return n; } return null; }
+  if (v && typeof v === "object") {
+    if ("value" in v) return wlEpoch(v.value);
+    if ("text" in v) { const n = Number(v.text); return Number.isFinite(n) ? n : null; }
+  }
+  return null;
+}
+// Claimed / expired / failed / not eligible — the shared "nothing to claim" words (word-boundary, any position).
+const wlHidden = (v) => /\b(claimed|expired|failed|not\s+eligible|ineligible)\b/.test(String(v || "").trim().toLowerCase());
+
+async function wlSearch(env, cfg, table, conditions, maxPages = 3) {
+  const token = await wlToken(env), out = [];
+  let pt = "";
+  for (let i = 0; i < maxPages; i++) {
+    const j = await larkFetch(
+      `/open-apis/bitable/v1/apps/${cfg.base}/tables/${table}/records/search?page_size=500${pt ? "&page_token=" + encodeURIComponent(pt) : ""}`,
+      token, { method: "POST", body: JSON.stringify({ filter: { conjunction: "and", conditions }, automatic_fields: true }) });
+    out.push(...(j.data?.items || []));
+    if (!(j.data?.has_more && j.data.page_token)) break;
+    pt = j.data.page_token;
+  }
+  return out;
+}
+const wlInspection = (fields, dateField) => {
+  if (dateField) return Number(fields[dateField]) || 0;
+  const k = Object.keys(fields).find((x) => /^time of insp/i.test(x.trim()));   // the real header is spelled "Time of inspectiion"
+  return k ? Number(fields[k]) || 0 : 0;
+};
+// Pick one row, as the widget does: oldest claimable first (FIFO) unless `newest`.
+function wlPick(rows, isClaimable, { dateField, newest } = {}) {
+  const ok2 = rows.filter((r) => isClaimable(r.fields || {}));
+  if (!ok2.length) return null;
+  ok2.sort((a, b) => (wlInspection(a.fields || {}, dateField) - wlInspection(b.fields || {}, dateField))
+    || ((Number(a.created_time) || 0) - (Number(b.created_time) || 0))
+    || String(a.record_id || "").localeCompare(String(b.record_id || "")));
+  return newest ? ok2[ok2.length - 1] : ok2[0];
+}
+// Most bonus tables call the player column "Username/UID"; a few call it "Username" or "UID".
+async function wlFind(env, cfg, table, username, brand, isClaimable, opts = {}) {
+  if (!table) return null;
+  const cands = opts.usernameField ? [opts.usernameField] : ["Username/UID", "Username"];
+  let rows, lastErr;
+  for (const f of cands) {
+    try {
+      rows = await wlSearch(env, cfg, table, [
+        { field_name: f, operator: "is", value: [username] },
+        { field_name: "Brand", operator: "is", value: [brand] }]);
+      break;
+    } catch (e) { lastErr = e; if (cands.length === 1) throw e; }
+  }
+  if (!rows) throw lastErr;
+  return wlPick(rows, isClaimable, opts);
+}
+const wlOptionCache = new Map();
+async function wlOptionMap(env, cfg, table, fieldName) {
+  const key = `${table}::${fieldName}`, hit = wlOptionCache.get(key);
+  if (hit && Date.now() < hit.exp) return hit.map;
+  const j = await larkFetch(`/open-apis/bitable/v1/apps/${cfg.base}/tables/${table}/fields?page_size=100`, await wlToken(env));
+  const f = (j.data?.items || []).find((x) => x.field_name === fieldName);
+  const map = new Map(((f && f.property && f.property.options) || []).map((o) => [o.id, o.name]));
+  wlOptionCache.set(key, { map, exp: Date.now() + 10 * 60 * 1000 });
+  return map;
+}
+
+// Same answer shape as the widget's own lookup, so summarizeWidgetLookup() below turns it into a list.
+async function widgetLookup(env, cfg, uname, consoleBrand) {
+  const brand = wlBrand(cfg, consoleBrand);          // what the Lark tables call this brand
+  const T = cfg.tables || {}, warnings = [];
+  const st = (r, f) => wlText(r && r.fields[f]).trim();
+  const lower = (s) => s.toLowerCase();
+  const soft = async (label, fn, fallback = null) => {
+    try { return await fn(); } catch (e) { warnings.push(label); return fallback; }
+  };
+  const tasks = await Promise.all([
+    soft("Other-brand check", async () => {
+      if (!T.ca) return [];
+      const rows = await wlSearch(env, cfg, T.ca, [{ field_name: "Username", operator: "is", value: [uname] }], 1);
+      return [...new Set(rows.map((r) => wlText(r.fields["Brand"])).filter((b) => b && b.toUpperCase() !== brand.toUpperCase()))];
+    }, []),
+    soft("P&L tier", async () => {
+      if (!T.pnl) return { tier: "", customerName: "", notVip: false };
+      const m = await wlSearch(env, cfg, T.pnl, [
+        { field_name: "Username", operator: "is", value: [uname] },
+        { field_name: "Brand", operator: "is", value: [brand] }], 1);
+      if (!m.length) return { tier: "", customerName: "", notVip: true };
+      const tierMap = await wlOptionMap(env, cfg, T.pnl, "Tier");
+      return { tier: wlText(m[0].fields["Tier"], tierMap), customerName: wlText(m[0].fields["Tittle name"]), notVip: false };
+    }, { tier: "", customerName: "", notVip: false }),
+    soft("Top 10 P&L", () => wlFind(env, cfg, T.topPnl, uname, brand, (f) => {
+      const d = wlText(f["SW Check"]).trim();
+      return f["Claimed Copy"] !== true && !!d && !wlHidden(d);
+    })),
+    soft("LTV", () => wlFind(env, cfg, T.ltv, uname, brand, (f) => {
+      const d = wlText(f["SW Checker"]).trim();
+      return /^pass\b/i.test(d) && !wlHidden(d);
+    })),
+    soft("Grace Period", () => wlFind(env, cfg, T.grace, uname, brand, (f) => !wlHidden(wlText(f["SW Check"])), { newest: true })),
+    soft("Risk Player", () => wlFind(env, cfg, T.risk, uname, brand, (f) => {
+      const s = wlText(f["Status"]).trim();
+      return !!s && !/no bonus/i.test(s) && !wlHidden(s);
+    }, { usernameField: "Username", dateField: "Date" })),
+    soft("12h VIP Booster", () => wlFind(env, cfg, T.vip, uname, brand, (f) => lower(wlText(f["Status"]).trim()) === "eligible")),
+    soft("Special Reload", () => wlFind(env, cfg, T.special, uname, brand, (f) => lower(wlText(f["Status"]).trim()) === "eligible angpao")),
+    soft("Telegram RM28", () => wlFind(env, cfg, T.tg28, uname, brand, (f) => lower(wlText(f["Status"]).trim()) === "eligible")),
+    soft("Redeem Code", async () => {
+      if (!T.redeem) return null;
+      const rows = (await wlSearch(env, cfg, T.redeem, [
+        { field_name: "Username/UID", operator: "is", value: [uname] },
+        { field_name: "Brand", operator: "is", value: [brand] }])).filter((r) => !wlHidden(wlText(r.fields["Status"])));
+      return rows[rows.length - 1] || null;
+    }),
+    soft("Mooncake", () => wlFind(env, cfg, T.mooncake, uname, brand, (f) => {
+      const s = wlText(f["Status"]);
+      return !wlHidden(s) && !!s;
+    }, { usernameField: "UID" })),
+    soft("VS96 Feedback", () => wlFind(env, cfg, T.vs96, uname, brand, (f) => {
+      const s = wlText(f["Status"]).trim();
+      return !!s && !wlHidden(s);
+    })),
+  ]);
+  const [otherBrands, pnl, top, ltv, grace, risk, vip, special, tg28, redeem, moon, vs96] = tasks;
+  const row = {
+    tier: pnl.tier, customerName: pnl.customerName,
+    topPnl: top ? st(top, "SW Check") : "",
+    ltvTest: ltv ? st(ltv, "SW Checker") : "",
+    gracePeriod: grace ? st(grace, "SW Check") : "",
+    graceExpiryMs: grace ? wlEpoch(grace.fields["Expried"]) : null,   // sic — the column is spelled "Expried" in Lark
+    riskPlayer: risk ? st(risk, "Status") : "",
+    riskExpiryMs: risk ? wlEpoch(risk.fields["Date Expired"]) : null,
+    vipBooster: vip ? "Eligible" : "",
+    specialReload: special ? { recordId: special.record_id, status: st(special, "Status") } : null,
+    telegram28: tg28 ? (() => { const s = st(tg28, "Status"), a = st(tg28, "Bonus Amount"); return { recordId: tg28.record_id, status: a ? `${s} — RM${a}` : s }; })() : null,
+    redeemCode: redeem ? { recordId: redeem.record_id, status: st(redeem, "Status") } : null,
+    mooncake: moon ? st(moon, "Status") : "",
+    vs96Feedback: vs96 ? st(vs96, "Status") : "",
+  };
+  return summarizeWidgetLookup({ notVip: pnl.notVip, otherBrands, lookupWarnings: warnings, row });
+}
+
+// Every Grace row of one brand (all cycles, claimed or not), cached 5 min and shared by the two readers below.
+const GRACE_RAW = new Map();
+async function graceRowsRaw(env, cfg, brand) {
+  const hit = GRACE_RAW.get(brand);
+  if (hit && Date.now() - hit.at < GRACE_CACHE_MS) return hit.rows;
+  const rows = await wlSearch(env, cfg, cfg.tables.grace, [{ field_name: "Brand", operator: "is", value: [wlBrand(cfg, brand)] }], 20);
+  GRACE_RAW.set(brand, { at: Date.now(), rows });
+  return rows;
+}
+
+// Grace Period state for a set of brands: reads each brand's rows once, keeps the newest live row per player.
+async function graceStatusFor(env, cfg, brands) {
+  const out = {};
+  await Promise.all(brands.map(async (brand) => {
+    let map;
+    const hit = GRACE_CACHE.get(brand);
+    if (hit && Date.now() - hit.at < GRACE_CACHE_MS) map = hit.map;
+    else {
+      const rows = await graceRowsRaw(env, cfg, brand);
+      const by = new Map();
+      for (const r of rows) {
+        const f = r.fields || {};
+        const u = wlText(f["Username/UID"] ?? f["Username"]).trim().toLowerCase();
+        const sw = wlText(f["SW Check"]);
+        if (!u || wlHidden(sw)) continue;
+        const prev = by.get(u);
+        // newest live row wins (same as the widget's `newest`): later inspection date, then later creation
+        // ties broken by record id, later wins — the widget's exact order
+        const newer = !prev || (wlInspection(f) - wlInspection(prev.f)) || ((Number(r.created_time) || 0) - (Number(prev.t) || 0))
+          || String(r.record_id || "").localeCompare(String(prev.id || ""));
+        if (!prev || newer > 0) by.set(u, { f, t: r.created_time, id: r.record_id, sw });
+      }
+      map = {};
+      for (const [u, x] of by) map[u] = { a: /^\s*pass\b/i.test(x.sw) ? 0 : 1, v: x.sw, e: wlEpoch(x.f["Expried"]) };
+      GRACE_CACHE.set(brand, { at: Date.now(), map });
+    }
+    for (const [u, x] of Object.entries(map)) out[`${u}|${brand}`] = x;
+  }));
+  return out;
+}
+
+/* Grace daily tasks — "activated, reloaded the required deposit inside the window, not claimed yet".
+   Window  = from the activated date to the expiry ("Expried"), both from the Lark Grace table. The live SW Check formula
+             is: Claimed ≥ 1 → "Claimed"; no Activate Date → "Expired" / "Pass <bonus>" / "Failed"; Activate Date set →
+             "Activated : yyyy-MM-dd HH:mm - Pass - <bonus>". So the start is the "Activate Date" column when we can read
+             it (or graceOpts.activatedField), else the date inside the text. Expried = Time of inspection + 1 or 3 days
+             (end of that day) and only matters before activation, so a claim never expires.
+   Required = from the bonus through GRACE_LADDER (the text carries no deposit figure).
+   Deposit  = the player's own daily deposits from the console feed. The feed is one day behind (snapshot D carries
+             game day D−1), so game day D is read from snapshot D+1.
+   Claim    = never expires: a row stays on the list until its SW Check says Claimed (or Failed / Not eligible),
+             looking back cfg.graceOpts.lookbackDays (default 14) days past the expiry.
+   Nothing is written to Lark or to the console database. */
+// Grace bonus → the deposit that earns it (Tier 3: 100→18, 200→28, 300→38, 500→58; Tier V: 600→68 … 1000→108).
+// Overridable from WIDGET_LARK as graceOpts.ladder { "<bonus>": <deposit> } if the amounts change.
+const GRACE_LADDER = { 18: 100, 28: 200, 38: 300, 58: 500, 68: 600, 78: 700, 88: 800, 98: 900, 108: 1000 };
+const gAddDays = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+const gMytDate = (ms) => new Date(ms + 8 * 3600 * 1000).toISOString().slice(0, 10);
+async function graceTasksFor(env, cfg, brands) {
+  const opts = cfg.graceOpts || {};
+  const windowDays = Number(opts.windowDays) || 3, lookback = Number(opts.lookbackDays) || 14;
+  const today = snapshotDateMYT();
+  const notes = { noExpiry: 0, noStart: 0, noPlayer: 0, startFromColumn: 0, startFromText: 0, late: 0 };
+  const out = [];
+  await Promise.all(brands.map(async (brand) => {
+    const rows = await graceRowsRaw(env, cfg, brand);
+    const cand = new Map();
+    for (const r of rows) {
+      const f = r.fields || {};
+      const u = wlText(f["Username/UID"] ?? f["Username"]).trim().toLowerCase();
+      const sw = wlText(f["SW Check"]);
+      if (!u || !/\bactivated\b/i.test(sw)) continue;                       // still waiting to activate, or no text
+      if (/\b(claimed|failed|not\s+eligible|ineligible)\b/i.test(sw)) continue;   // already paid, or did not qualify
+      const e = wlEpoch(f["Expried"]);
+      if (e == null) { notes.noExpiry++; continue; }
+      const end = gMytDate(e);
+      // SW Check, once activated (read from the live Lark formula): "Activated : 2026-10-17 14:35 - Pass - 58"
+      //   = activation date/time, then the bonus. The deposit the player must make is NOT in the text; it follows from
+      //   the bonus through the Grace ladder (Tier 3: 100→18 … 500→58; Tier V: 600→68 … 1000→108).
+      const m = sw.match(/Activated\s*:\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}:\d{2}))?\s*-\s*Pass\s*-\s*(\d+(?:\.\d+)?)/i);
+      const actKey = opts.activatedField || Object.keys(f).find((k) => /activat/i.test(k) && !/check/i.test(k) && wlEpoch(f[k]) > 1e11);
+      const actMs = actKey ? wlEpoch(f[actKey]) : null;                      // the "Activate Date" column when present
+      const start = actMs ? gMytDate(actMs) : (m ? m[1] : null);
+      if (!start) { notes.noStart++; continue; }
+      const bonus = m ? Number(m[3]) : (Number((sw.match(/Bonus\s*[:\-]?\s*(\d+(?:\.\d+)?)/i) || [])[1]) || null);
+      const ladder = opts.ladder || GRACE_LADDER;
+      const reqText = Number((sw.match(/Deposit\s*[:\-]?\s*(\d+(?:\.\d+)?)/i) || [])[1]) || null;   // only if the text ever carries it
+      const req = reqText || (bonus != null && ladder[bonus] != null ? Number(ladder[bonus]) : null);
+      if (end < gAddDays(today, -lookback)) continue;                        // an old cycle: out of the look-back
+      const c = { u, brand, sw, start, end, startSrc: actMs ? "column" : "text", late: start > end,
+        req, bonus, id: String(r.record_id || "") };
+      const k = `${u}|${start}|${end}`, prev = cand.get(k);
+      if (!prev || c.id.localeCompare(prev.id) > 0) cand.set(k, c);          // duplicate rows for one cycle: later record wins
+    }
+    if (!cand.size) return;
+    const list = [...cand.values()];
+    const minSnap = gAddDays(list.reduce((m, c) => (c.start < m ? c.start : m), "9999-12-31"), 1);
+    const maxSnap = gAddDays(list.reduce((m, c) => (c.end > m ? c.end : m), "0000-01-01"), 1);
+    const [latestRow, pdRows] = await Promise.all([
+      env.DB.prepare("SELECT MAX(snapshot_date) AS d FROM player_days WHERE brand = ?").bind(brand).first(),
+      env.DB.prepare(`SELECT player_key, tier_segment, uid, username, snapshot_date, daily_deposit FROM player_days
+                      WHERE brand = ? AND snapshot_date BETWEEN ? AND ? ORDER BY snapshot_date`).bind(brand, minSnap, maxSnap).all(),
+    ]);
+    const latest = (latestRow && latestRow.d) || "";
+    const idx = new Map();                                                   // any alias (key / uid / username) → player
+    for (const p of (pdRows.results || [])) {
+      const key = String(p.player_key).toLowerCase();
+      let e = idx.get(key);
+      if (!e) { e = { player_key: p.player_key, tier: p.tier_segment, days: new Map() }; }
+      e.tier = p.tier_segment;
+      e.days.set(p.snapshot_date, Number(p.daily_deposit) || 0);
+      for (const a of [key, String(p.uid || "").toLowerCase(), String(p.username || "").toLowerCase()]) if (a) idx.set(a, e);
+    }
+    for (const c of list) {
+      const e = idx.get(c.u);
+      if (!e) { notes.noPlayer++; continue; }
+      if (c.startSrc === "column") notes.startFromColumn++; else notes.startFromText++;
+      if (c.late) notes.late++;
+      const days = [];
+      for (let d = c.start; d <= c.end; d = gAddDays(d, 1)) {
+        const snap = gAddDays(d, 1);
+        days.push({ d, dep: snap > latest ? null : (e.days.get(snap) || 0) });   // null = that day's feed has not arrived yet
+      }
+      // Only a reload AFTER activation counts. The console holds daily totals, not times, so:
+      //   days after the activation day  = certainly after  → `total`
+      //   the activation day itself       = could be before or after the activation time → `sameDay` (flagged, never counted as certain)
+      const total = days.reduce((s, x) => s + (x.d > c.start ? (x.dep || 0) : 0), 0);
+      const sameDay = (days.find((x) => x.d === c.start) || {}).dep || 0;
+      const windowOpen = days.some((x) => x.dep === null);
+      const status = c.req == null ? "unknown"
+        : total >= c.req ? "reloaded"
+        : (sameDay > 0 && total + sameDay >= c.req) ? "same_day"
+        : windowOpen ? "in_progress" : "not_reloaded";
+      out.push({ player_key: e.player_key, brand, tier_segment: e.tier, text: c.sw, req: c.req, bonus: c.bonus,
+        start: c.start, end: c.end, startSource: c.startSrc, late: c.late, days, total, sameDay, status });
+    }
+  }));
+  const rank = { reloaded: 0, same_day: 1, in_progress: 2, unknown: 3, not_reloaded: 4 };
+  out.sort((a, b) => (rank[a.status] - rank[b.status]) || (a.end < b.end ? 1 : a.end > b.end ? -1 : 0) || a.brand.localeCompare(b.brand));
+  return { rows: out, notes, today, windowDays, lookbackDays: lookback };
+}
+
+// Widget answer → a flat list the console can render. A program is listed only when the widget
+// found something claimable for it. Grace Period carries `activated`: the widget's own rule is
+// that a value starting "Pass" is the offer waiting to be activated, anything else is activated.
+function summarizeWidgetLookup(d) {
+  const row = d.row || {};
+  const programs = [];
+  const add = (key, label, value, extra = {}) => { if (value) programs.push({ key, label, value: String(value), ...extra }); };
+  add("topPnl", "Top 10 P&L", row.topPnl);
+  add("ltv", "LTV", row.ltvTest);
+  if (row.gracePeriod) {
+    const activated = !/^\s*pass\b/i.test(row.gracePeriod);
+    add("grace", "Grace Period", row.gracePeriod, { activated, expiryMs: row.graceExpiryMs ?? null });
+  }
+  add("risk", "Risk Player", row.riskPlayer, { expiryMs: row.riskExpiryMs ?? null });
+  add("vipBooster", "12h VIP Booster", row.vipBooster);
+  add("specialReload", "Special Reload", row.specialReload && row.specialReload.status);
+  add("telegram28", "Telegram RM28", row.telegram28 && row.telegram28.status);
+  add("redeem", "Redeem Code", row.redeemCode && row.redeemCode.status);
+  add("mooncake", "Mooncake", row.mooncake);
+  add("vs96", "VS96 Feedback", row.vs96Feedback);
+  const known = new Set(["tier", "customerName", "topPnl", "ltvTest", "gracePeriod", "graceExpiryMs", "riskPlayer",
+    "riskExpiryMs", "vipBooster", "specialReload", "telegram28", "redeemCode", "mooncake", "vs96Feedback"]);
+  for (const [k, v] of Object.entries(row)) {          // custom bonuses added from the widget's admin page
+    if (!known.has(k) && typeof v === "string") add("custom:" + k, k, v);
+  }
+  return {
+    ok: true, notVip: !!d.notVip, tier: row.tier || "", customerName: row.customerName || "",
+    otherBrands: d.otherBrands || [], warnings: d.lookupWarnings || [], programs,
+  };
+}
+
+const WIDGET_NOTES_PER_MIN = 60;        // flood cap for the widget key, across all agents
+
+// Widget "Agent Name" option → bare first name. "96 Raven - VIP RTN SNR MY" → "Raven",
+// "96 Hans-VIP RTN SNR" → "Hans", "96 Firdaus – VIP RTN JNR" → "Firdaus". A plain name passes through.
+function cleanAgentName(raw) {
+  let s = String(raw || "").replace(/[\r\n]+/g, " ").trim();
+  s = s.replace(/^\d+\s+/, "");                 // leading "96 "
+  s = s.split(/\s*[-–—]\s*/)[0];                // everything before the first dash
+  return s.replace(/\s+/g, " ").trim().slice(0, 60);
+}
+
+// Constant-time string compare (hash both sides first so length doesn't leak) for API-key checks.
+async function safeEqual(a, b) {
+  const [x, y] = await Promise.all([sha256(String(a)), sha256(String(b))]);
+  let d = 0;
+  for (let i = 0; i < x.length; i++) d |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return d === 0;
+}
+
 // ── Simple SHA-256 hash ────────────────────────────────────────────────────────
 async function sha256(text) {
   const buf = await crypto.subtle.digest(
@@ -968,6 +1354,7 @@ const LARK_BRAND = (() => {
   for (const team of Object.values(TEAM_BRANDS)) for (const full of team) m[full.replace(/\d+$/, "")] = full;
   return m;
 })();
+const LARK_BRAND_UP = Object.fromEntries(Object.entries(LARK_BRAND).map(([k, v]) => [k.toUpperCase(), v]));   // case-insensitive lookup
 
 // Pull a plain string from a Lark field value (text, number, rich-text array,
 // select object, url object, or a formula {type,value} wrapper).
@@ -1392,6 +1779,7 @@ async function autoAssignRosters(env, assignedBy = "cron") {
 export default {
   async fetch(request, env, ctx) {
     CORS = corsFor(request);
+    if (env.LARK_HOST) LARK.HOST = env.LARK_HOST;   // local preview only: point Lark calls at a mock; unset in production
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
@@ -1449,6 +1837,127 @@ export default {
     // token, not a dashboard session.
     if (path === "/api/ingest" && method === "POST") {
       return handleIngest(request, env, ctx);
+    }
+
+    // ── Widget notes API — the Customer Approaching widget adds / reads Relationship notes ──────────
+    // Authenticated by ONE shared key (WIDGET_API_KEY, header x-widget-token), not a console login:
+    // the widget's backend has already verified the agent through LiveChat and passes that agent's
+    // name as `author`. The key opens ONLY these two routes. Kept ABOVE the requireAuth gate, like
+    // /api/ingest. Notes land in the same player_notes table the console drawer shows, so they
+    // appear there at once, authored "<name> (widget)".
+    if (path === "/api/ext/note" || path === "/api/ext/notes" || path === "/api/ext/action" || path === "/api/ext/actions") {
+      const key = request.headers.get("x-widget-token") || "";
+      if (!env.WIDGET_API_KEY || !(await safeEqual(key, env.WIDGET_API_KEY))) return err("unauthorized", 401);
+      const known = new Set(Object.values(TEAM_BRANDS).flat());
+      // The widget sends the brand as Lark spells it (the SHORT code: FUN, VS, SPIN, PP …). Accept the short code or the
+      // full name, any case, and use the full console brand from here on. Unknown → "" (rejected below / 404).
+      const normBrand = (raw) => {
+        const s = String(raw || "").trim().toUpperCase();
+        if (!s) return "";
+        for (const f of known) if (f.toUpperCase() === s) return f;
+        return LARK_BRAND_UP[s] || "";
+      };
+      // The widget sends the username/uid it looked up (lower-cased) and the brand; map that to the console's
+      // stored player_key (TC brands key on username, Zyra on uid) so the note lands on the right profile.
+      const resolve = async (raw, brand) => {
+        const q = String(raw || "").trim().toLowerCase();
+        if (!q || !known.has(brand)) return null;
+        const hit = await env.DB.prepare(
+          `SELECT player_key FROM player_days WHERE brand = ? AND (lower(player_key) = ? OR lower(uid) = ? OR lower(username) = ?)
+           ORDER BY snapshot_date DESC LIMIT 1`).bind(brand, q, q, q).first();
+        return hit ? hit.player_key : null;
+      };
+      if (path === "/api/ext/notes" && method === "GET") {
+        const brand = normBrand(url.searchParams.get("brand"));
+        const pk = await resolve(url.searchParams.get("player_key"), brand);
+        if (!pk) return err("player not found in the console", 404);
+        const notes = await env.DB.prepare(
+          `SELECT id, note, created_by, created_at FROM player_notes WHERE player_key = ? AND brand = ?
+           ORDER BY created_at DESC, id DESC LIMIT 50`).bind(pk, brand).all();
+        return ok({ player_key: pk, brand, notes: notes.results || [] });
+      }
+      if (path === "/api/ext/note" && method === "POST") {
+        let b; try { b = await request.json(); } catch (e) { return err("invalid_json"); }
+        const brand = normBrand(b && b.brand);
+        const note = String((b && b.note) || "").trim();
+        let author = cleanAgentName(b && b.author);
+        if (!note) return err("note is empty");
+        if (note.length > 2000) return err("note too long (max 2000 characters)");
+        if (!author) return err("author is required");
+        // The widget's agent names look like "96 Raven - VIP RTN SNR MY"; the console login is just "raven".
+        // When the cleaned name matches a console username, use that username; otherwise keep the cleaned name.
+        const acct = await env.DB.prepare("SELECT username FROM users WHERE lower(username) = lower(?)").bind(author).first();
+        if (acct) author = acct.username;
+        if (!known.has(brand)) return err("unknown brand");
+        // Flood guard that survives across Worker instances: count the widget's own notes in the last minute.
+        const recent = await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM player_notes WHERE created_by LIKE '% (widget)' AND created_at >= datetime('now','-1 minute')").first();
+        if (recent && recent.n >= WIDGET_NOTES_PER_MIN) return err("too many notes, slow down", 429);
+        const pk = await resolve(b.player_key, brand);
+        if (!pk) return err("player not found in the console", 404);
+        await env.DB.prepare(
+          "INSERT INTO player_notes (player_key, brand, note, created_by, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
+        ).bind(pk, brand, note, `${author} (widget)`).run();
+        if (ctx) ctx.waitUntil(logAct(env, clientIp, { username: `widget:${author}`, role: "widget" }, "note", `Added note via widget · ${pk} (${brand})`));
+        return ok({ saved: true, player_key: pk });
+      }
+      /* Action log (the drawer's right-hand block = contact_log). The widget files the player's NEXT ACTION as a note on
+         today's contact_log row (latest snapshot, the row the console shows). It never sets a status or an assignee,
+         and it is written so the automations that read this table are not disturbed:
+           • an existing row keeps its status, assignee, class, updated_by AND updated_at. updated_at drives the 6h
+             auto NO_RESPONSE flip and the 48h cooldown; updated_by <> 'auto' marks a manual auto-assign pin.
+             Only `note` changes: the widget line is APPENDED (the agent's own text is never overwritten).
+           • no row yet → one is created with status NULL, no assignee, no contacted_at (it is not a contact).
+         Attribution is inside the line: "[widget · <name> · <MYT time>] <text>". */
+      if (path === "/api/ext/action" && method === "POST") {
+        let b; try { b = await request.json(); } catch (e) { return err("invalid_json"); }
+        const brand = normBrand(b && b.brand);
+        const note = String((b && b.note) || "").trim();
+        let author = cleanAgentName(b && b.author);
+        if (!note) return err("note is empty");
+        if (note.length > 2000) return err("note too long (max 2000 characters)");
+        if (!author) return err("author is required");
+        if (!known.has(brand)) return err("unknown brand");
+        const acct = await env.DB.prepare("SELECT username FROM users WHERE lower(username) = lower(?)").bind(author).first();
+        if (acct) author = acct.username;
+        const recent = await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM activity_log WHERE username LIKE 'widget:%' AND ts >= datetime('now','-1 minute')").first();
+        if (recent && recent.n >= WIDGET_NOTES_PER_MIN) return err("too many entries, slow down", 429);
+        const q = String(b.player_key || "").trim().toLowerCase();
+        const snap = await env.DB.prepare("SELECT MAX(snapshot_date) AS d FROM player_days WHERE brand = ?").bind(brand).first();
+        const row = q && snap && snap.d ? await env.DB.prepare(
+          `SELECT player_key, tier_segment FROM player_days WHERE brand = ? AND snapshot_date = ?
+             AND (lower(player_key) = ? OR lower(uid) = ? OR lower(username) = ?) LIMIT 1`).bind(brand, snap.d, q, q, q).first() : null;
+        if (!row) return err("player not found in the console's latest snapshot", 404);
+        const stamp = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+        const line = `[widget · ${author} · ${stamp}] ${note}`;
+        const key = [snap.d, row.player_key, brand, row.tier_segment];
+        const hit = await env.DB.prepare(
+          "SELECT note FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?").bind(...key).first();
+        if (hit) {
+          await env.DB.prepare(
+            "UPDATE contact_log SET note = ? WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?"
+          ).bind(hit.note ? hit.note + "\n" + line : line, ...key).run();
+        } else {
+          await env.DB.prepare(
+            `INSERT INTO contact_log (snapshot_date, player_key, brand, tier_segment, status, note, updated_by, updated_at)
+             VALUES (?, ?, ?, ?, NULL, ?, ?, datetime('now'))`).bind(...key.slice(0, 4), line, `${author} (widget)`).run();
+        }
+        if (ctx) ctx.waitUntil(logAct(env, clientIp, { username: `widget:${author}`, role: "widget" }, "contact", `Added action via widget · ${row.player_key} (${brand})`));
+        return ok({ saved: true, player_key: row.player_key, snapshot_date: snap.d, appended: !!(hit && hit.note) });
+      }
+      if (path === "/api/ext/actions" && method === "GET") {
+        const brand = normBrand(url.searchParams.get("brand"));
+        const pk = await resolve(url.searchParams.get("player_key"), brand);
+        if (!pk) return err("player not found in the console", 404);
+        const rows = await env.DB.prepare(
+          `SELECT snapshot_date, status, note, updated_by, updated_at FROM contact_log
+            WHERE player_key = ? AND brand = ? AND note IS NOT NULL AND note <> ''
+            ORDER BY snapshot_date DESC, updated_at DESC LIMIT 10`).bind(pk, brand).all();
+        return ok({ player_key: pk, brand, actions: (rows.results || []).map((r) => ({
+          note: r.note, status: r.status, created_by: r.updated_by, created_at: r.updated_at, snapshot_date: r.snapshot_date })) });
+      }
+      return err("Not found", 404);
     }
 
     // ── All routes below require auth ──────────────────────────────────────────
@@ -2012,6 +2521,55 @@ export default {
          ORDER BY snapshot_date DESC LIMIT 90`
       ).bind(pk, brand, tier).all();
       return ok({ player_key: pk, brand, tier_segment: tier, series: (series.results || []).reverse() });
+    }
+
+    // ── GET /api/rtn/bonus-lookup?username=&brand= — what the Customer Approaching widget shows ──
+    // Read-only. Reads the SAME Lark bonus tables the widget reads, with the widget's own claimable
+    // rules (see "Lark bonus tables" above). Nothing is written to Lark. `username` may be the
+    // username or the uid (the tables' Username column holds player_key); `brand` is the full brand.
+    if (path === "/api/rtn/bonus-lookup" && method === "GET") {
+      const username = (url.searchParams.get("username") || "").trim().toLowerCase();
+      const brand = (url.searchParams.get("brand") || "").trim();
+      if (!username || !brand) return err("Missing username / brand");
+      if (!brandAllowed(brand)) return err("Not your team", 403);
+      const cfg = widgetLarkCfg(env);
+      if (!cfg) return err("Bonus tables are not configured yet (WIDGET_LARK is not set on the Worker)", 503);
+      const ck = `${username}|${brand}`, now = Date.now();
+      const hit = BONUS_CACHE.get(ck);
+      if (hit && now - hit.at < BONUS_CACHE_MS) return ok({ ...hit.data, cached: true });
+      let out;
+      try { out = await widgetLookup(env, cfg, username, brand); }
+      catch (e) { return err("Lark bonus lookup failed: " + String((e && e.message) || e).slice(0, 160), 502); }
+      if (BONUS_CACHE.size > 300) BONUS_CACHE.clear();
+      BONUS_CACHE.set(ck, { at: now, data: out });
+      log(user, "bonus-lookup", `${username} (${brand})`);
+      return ok(out);
+    }
+
+    // ── GET /api/rtn/grace-status — Grace Period challenge state for the user's brands ──
+    // One Lark read per brand (cached 5 min), not one per player. { "username|brand": {a, v, e} }:
+    // a = 1 activated / 0 still waiting for the customer to activate, v = the table's own text,
+    // e = expiry (epoch ms). Only players that have a live (not Claimed/Expired) Grace row appear.
+    if (path === "/api/rtn/grace-status" && method === "GET") {
+      const cfg = widgetLarkCfg(env);
+      if (!cfg || !cfg.tables.grace) return err("Grace table is not configured yet (WIDGET_LARK)", 503);
+      const brands = (scopeBrands === null ? Object.values(TEAM_BRANDS).flat() : scopeBrands);
+      let status;
+      try { status = await graceStatusFor(env, cfg, brands); }
+      catch (e) { return err("Lark Grace read failed: " + String((e && e.message) || e).slice(0, 160), 502); }
+      return ok({ status });
+    }
+
+    // ── GET /api/rtn/grace-tasks — Grace players who reloaded inside their window but have not claimed ──
+    // Read-only. See "Grace daily tasks" above for the rule. Team-scoped like every other read.
+    if (path === "/api/rtn/grace-tasks" && method === "GET") {
+      const cfg = widgetLarkCfg(env);
+      if (!cfg || !cfg.tables.grace) return err("Grace table is not configured yet (WIDGET_LARK)", 503);
+      const brands = (scopeBrands === null ? Object.values(TEAM_BRANDS).flat() : scopeBrands);
+      let res;
+      try { res = await graceTasksFor(env, cfg, brands); }
+      catch (e) { return err("Grace tasks failed: " + String((e && e.message) || e).slice(0, 160), 502); }
+      return ok(res);
     }
 
     // ── Relationship Ledger — person-level notes that resurface daily ─────────
