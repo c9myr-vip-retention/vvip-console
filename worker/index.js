@@ -1339,7 +1339,7 @@ async function kickFeeders(env) {
 // are replaced at the next run). Link is per (player_key, brand) — Tier is not needed.
 const LARK = { HOST: "https://open.larksuite.com", BASE: "Hstmbhe1Wakn2zs9HSelYFq1gig" };
 const PNL1_TABLE = "tbl2cAhlR75Kr3iI";
-const PNL1_VIEWS = ["vewL1Mlc1w"];   // Overview — every player; the old Team A/B/C views are no longer used
+const PNL1_VIEWS = ["vewLlMlc1w"];   // Overview — every player (read from the live Lark URL; the 5th character is a lowercase L, not the digit 1). The old Team A/B/C views are no longer used
 // Lark short brand code ("LPK") → the console's full brand ("LPK777").
 const LARK_BRAND = (() => {
   const m = {};
