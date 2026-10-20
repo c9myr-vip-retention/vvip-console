@@ -502,7 +502,8 @@ async function graceStatusFor(env, cfg, brands) {
              (end of that day) and only matters before activation, so a claim never expires.
    Required = from the bonus through GRACE_LADDER (the text carries no deposit figure).
    Deposit  = the player's own daily deposits from the console feed. The feed is one day behind (snapshot D carries
-             game day D−1), so game day D is read from snapshot D+1.
+             game day D−1), so game day D is read from snapshot D+1. Per day, NOT accumulative: one single day must
+             reach the required deposit; deposits on different days are never added together.
    Claim    = never expires: a row stays on the list until its SW Check says Claimed (or Failed / Not eligible),
              looking back cfg.graceOpts.lookbackDays (default 14) days past the expiry.
    Nothing is written to Lark or to the console database. */
@@ -577,17 +578,19 @@ async function graceTasksFor(env, cfg, brands) {
         days.push({ d, dep: snap > latest ? null : (e.days.get(snap) || 0) });   // null = that day's feed has not arrived yet
       }
       // Only a reload AFTER activation counts. The console holds daily totals, not times, so:
-      //   days after the activation day  = certainly after  → `total`
+      //   days after the activation day  = certainly after  → `best`
       //   the activation day itself       = could be before or after the activation time → `sameDay` (flagged, never counted as certain)
-      const total = days.reduce((s, x) => s + (x.d > c.start ? (x.dep || 0) : 0), 0);
+      // NOT accumulative: the required deposit must be reached inside ONE day. Each day stands alone, so RM50 today
+      // + RM50 tomorrow does not qualify for a RM100 requirement. `best` = the highest single day after activation.
+      const best = days.reduce((m, x) => (x.d > c.start ? Math.max(m, x.dep || 0) : m), 0);
       const sameDay = (days.find((x) => x.d === c.start) || {}).dep || 0;
       const windowOpen = days.some((x) => x.dep === null);
       const status = c.req == null ? "unknown"
-        : total >= c.req ? "reloaded"
-        : (sameDay > 0 && total + sameDay >= c.req) ? "same_day"
+        : best >= c.req ? "reloaded"
+        : sameDay >= c.req ? "same_day"
         : windowOpen ? "in_progress" : "not_reloaded";
       out.push({ player_key: e.player_key, brand, tier_segment: e.tier, text: c.sw, req: c.req, bonus: c.bonus,
-        start: c.start, end: c.end, startSource: c.startSrc, late: c.late, days, total, sameDay, status });
+        start: c.start, end: c.end, startSource: c.startSrc, late: c.late, days, best, sameDay, status });
     }
   }));
   const rank = { reloaded: 0, same_day: 1, in_progress: 2, unknown: 3, not_reloaded: 4 };
@@ -1340,14 +1343,15 @@ async function kickFeeders(env) {
   return { kicked: urls.length, ok: results.filter((r) => r.ok).length, ms: Date.now() - t0, results };
 }
 
-// Reads the "Telegram Approaching" Base → P&L1 table, only its Team A/B/C views
-// (the Overview view holds blank-telegram rows), cleans each livechat link, and
-// upserts player_telegram. One-way: Lark is the source of truth. Link is per
-// (player_key, brand) — Tier is not needed.
+// Reads the "Telegram Approaching" Base → P&L1 table, Overview view, field "Telegram combine", cleans each
+// livechat link and MIRRORS it into player_telegram. One-way: Lark is the single source of truth.
+//   • "Telegram combine" filled → that player's Telegram link (rewritten to the shared archive form).
+//   • "Telegram combine" EMPTY  → the player has no Telegram: any stored link for them is removed.
+// So after a run player_telegram holds exactly what Lark holds (links typed by hand in the drawer or imported by CSV
+// are replaced at the next run). Link is per (player_key, brand) — Tier is not needed.
 const LARK = { HOST: "https://open.larksuite.com", BASE: "Hstmbhe1Wakn2zs9HSelYFq1gig" };
-// P&L1 table + the three team views to read (Overview vewL1Mlc1w is skipped on purpose).
 const PNL1_TABLE = "tbl2cAhlR75Kr3iI";
-const PNL1_TEAM_VIEWS = ["vewMADSF1q", "vewToNmnfj", "vewcZg2cfc"]; // Team A, Team B, Team C
+const PNL1_VIEWS = ["vewLlMlc1w"];   // Overview — every player (read from the live Lark URL; the 5th character is a lowercase L, not the digit 1). The old Team A/B/C views are no longer used
 // Lark short brand code ("LPK") → the console's full brand ("LPK777").
 const LARK_BRAND = (() => {
   const m = {};
@@ -1477,23 +1481,38 @@ async function larkTelegramSync(env, opts = {}) {
   const dryRun = !!opts.dryRun;
   if (!env.LARK_APP_ID || !env.LARK_APP_SECRET) return { skipped: "no LARK credentials" };
   const token = await larkToken(env);
-  const rows = [];
+  const found = new Map();                                                 // "brand|player_key" → row (one link per player)
   let seen = 0, noKey = 0, noBrand = 0, noUrl = 0;
+  // Tally: every row whose "Telegram combine" cell is NOT empty ends up in exactly one of these buckets.
+  const tally = { linkCells: 0, saved: 0, duplicates: 0, unusable: 0, noBrandWithLink: 0, noKeyWithLink: 0 };
+  const unusableSample = [];
   const skippedBrands = {};
-  for (const viewId of PNL1_TEAM_VIEWS) {
+  for (const viewId of PNL1_VIEWS) {
     for (const rec of await larkRecords(token, PNL1_TABLE, viewId)) {
       seen++;
       const f = rec.fields || {};
       const player_key = larkText(f["Username"]).trim();
       const brandCode = larkText(f["Brand"]).trim();
       const brand = LARK_BRAND[brandCode];
-      const url = normalizeLivechat(larkUrlField(f["Telegram combine"]));
-      if (!player_key) { noKey++; continue; }
-      if (!brand) { noBrand++; if (brandCode) skippedBrands[brandCode] = (skippedBrands[brandCode] || 0) + 1; continue; }
-      if (!url) { noUrl++; continue; }
-      rows.push({ player_key, brand, url });
+      const rawLink = larkUrlField(f["Telegram combine"]);
+      const hasCell = !!String(rawLink || "").trim();
+      const url = normalizeLivechat(rawLink);
+      if (hasCell) tally.linkCells++;
+      if (!player_key) { noKey++; if (hasCell) tally.noKeyWithLink++; continue; }
+      if (!brand) { noBrand++; if (hasCell) tally.noBrandWithLink++; if (brandCode) skippedBrands[brandCode] = (skippedBrands[brandCode] || 0) + 1; continue; }
+      if (!url) {                                                           // empty = no Telegram: nothing to store
+        noUrl++;
+        if (hasCell) { tally.unusable++; if (unusableSample.length < 5) unusableSample.push(String(rawLink).slice(0, 40)); }   // filled, but not a LiveChat chat link
+        continue;
+      }
+      const k = `${brand}|${player_key}`;
+      if (found.has(k)) tally.duplicates++;                                  // the same player listed twice: one link kept
+      found.set(k, { player_key, brand, url });
     }
   }
+  tally.saved = found.size;
+  const rows = [...found.values()];
+  if (!seen) return { skipped: "Lark returned no rows — nothing changed", seen };
   // Lark stores the player's USERNAME. Our identity is player_key = uid when the feed sends
   // one, else username. TC brands used to ship no uid, so username WAS the key and every link
   // matched. When the feeder started sending uid for those brands, player_key flipped from
@@ -1517,19 +1536,34 @@ async function larkTelegramSync(env, opts = {}) {
     if (real && real !== r.player_key) { r.player_key = real; remapped++; }
   }
 
-  const stats = { views: PNL1_TEAM_VIEWS, seen, matched: rows.length, remapped, noKey, noBrand, noUrl, skippedBrands };
-  if (dryRun) return { ...stats, dryRun: true, saved: 0, sample: rows.slice(0, 10) };
+  // What the mirror would change. Every row we are about to write gets the same `stamp`; afterwards anything without that
+  // stamp was not in Lark's list, so it is removed. (A stamp, not a long NOT IN list: D1 caps bound variables.)
+  const existing = (await env.DB.prepare("SELECT player_key, brand FROM player_telegram").all()).results || [];
+  const keep = new Set(rows.map((r) => `${r.brand}|${r.player_key}`));
+  const wouldDelete = existing.filter((e) => !keep.has(`${e.brand}|${e.player_key}`)).length;
+  tally.adds_up = tally.linkCells === tally.saved + tally.duplicates + tally.unusable + tally.noBrandWithLink + tally.noKeyWithLink;
+  const stats = { views: PNL1_VIEWS, seen, withLink: rows.length, emptyLink: noUrl, remapped, noKey, noBrand, skippedBrands,
+    tally, unusableSample, storedBefore: existing.length, wouldDelete };
+  // Safety: a half-empty answer (Lark outage, lost permission, wrong view) must never wipe the links. If the new list is
+  // less than half of what is stored, stop and say so; run again with ?force=1 only when that drop is real.
+  if (existing.length >= 200 && rows.length < existing.length * 0.5 && !opts.force)
+    return { ...stats, aborted: "Lark returned less than half of the stored links — nothing changed. Check the view, then run with force=1 if this is right.", saved: 0, deleted: 0 };
+  if (dryRun) return { ...stats, dryRun: true, saved: 0, deleted: 0, sample: rows.slice(0, 10) };
+  // UTC, with milliseconds ("2026-10-19 00:00:01.234"): every other writer uses datetime('now') (whole seconds), so no
+  // other row can ever carry exactly this marker, not even one created in the same second as the run.
+  const stamp = new Date().toISOString().slice(0, 23).replace("T", " ");
   let saved = 0;
   for (let i = 0; i < rows.length; i += 50) {
     const chunk = rows.slice(i, i + 50);
     await env.DB.batch(chunk.map((r) => env.DB.prepare(`
       INSERT INTO player_telegram (player_key, brand, url, updated_by, updated_at)
-      VALUES (?, ?, ?, 'lark', datetime('now'))
-      ON CONFLICT (player_key, brand) DO UPDATE SET url = excluded.url, updated_by = 'lark', updated_at = datetime('now')
-    `).bind(r.player_key, r.brand, r.url)));
+      VALUES (?, ?, ?, 'lark', ?)
+      ON CONFLICT (player_key, brand) DO UPDATE SET url = excluded.url, updated_by = 'lark', updated_at = excluded.updated_at
+    `).bind(r.player_key, r.brand, r.url, stamp)));
     saved += chunk.length;
   }
-  return { ...stats, saved };
+  const del = await env.DB.prepare("DELETE FROM player_telegram WHERE updated_at IS NULL OR updated_at <> ?").bind(stamp).run();   // not written by this run = not in Lark
+  return { ...stats, saved, deleted: (del.meta && del.meta.changes) || 0 };
 }
 
 // ── Daily feed-health check → Lark group bot ────────────────────────────────
@@ -2790,13 +2824,14 @@ export default {
     }
 
     // POST /api/rtn/lark-sync — pull Telegram links from the Lark Base into player_telegram (managers)
-    // ?dry=1 → count + sample only, writes nothing.
+    // ?dry=1 → counts (incl. how many stored links would be removed) + sample only, writes nothing.
+    // ?force=1 → allow a run even if Lark returns less than half of the stored links (the safety stop).
     if (path === "/api/rtn/lark-sync" && method === "POST") {
       if (!canManage) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
-        const r = await larkTelegramSync(env, { dryRun });
-        if (!dryRun) log(user, "telegram", `Lark sync · ${r.saved ?? 0} links`);
+        const r = await larkTelegramSync(env, { dryRun, force: url.searchParams.get("force") === "1" });
+        if (!dryRun) log(user, "telegram", `Lark sync · ${r.saved ?? 0} links saved · ${r.deleted ?? 0} removed`);
         return ok(r);
       } catch (e) { return err("lark sync: " + ((e && e.message) || e), 500); }
     }
