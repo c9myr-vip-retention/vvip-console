@@ -5362,6 +5362,7 @@ function AAStyle() {
 /* ════════ GRACE TASKS — activated, reloaded inside the window, not claimed yet ════════
    Rule (worker graceTasksFor): window = activated date → expiry date, both from the Lark Grace table; required deposit =
    the Grace ladder applied to the bonus in the SW Check text; deposits = the console's own daily feed (one day behind).
+   The requirement is met by ONE day's deposit (not accumulative across days).
    A claim never expires, so a row stays until Lark says Claimed. Read-only. */
 const GT_STATUS = {
   reloaded:     { label: "RELOADED · NOT CLAIMED", color: "var(--pos)" },
@@ -5393,7 +5394,7 @@ function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearCo
       </div>
       {res && res.notes && (
         <div className="gt-note">
-          Window = the <b>activated date</b> to the <b>expiry date</b>, both read from the Lark Grace table. Only deposits <b>after the activation day</b> count; a deposit on the activation day itself (dashed cell) could be before the activation time, so it is shown separately as "same day, check time". The required deposit follows from the bonus (Tier 3: 100→18, 200→28, 300→38, 500→58 · Tier V: 600→68 … 1000→108).
+          Window = the <b>activated date</b> to the <b>expiry date</b>, both read from the Lark Grace table. The required deposit must be reached <b>in one single day</b>; days are never added together (RM50 + RM50 on two days does not count). Only days <b>after the activation day</b> count; a deposit on the activation day itself (dashed cell) could be before the activation time, so it is shown separately as "same day, check time". The required deposit follows from the bonus (Tier 3: 100→18, 200→28, 300→38, 500→58 · Tier V: 600→68 … 1000→108).
           {" "}Deposits come from the console's daily feed, one day behind; a "–" day has not arrived yet. The claim never expires, so a row stays until Lark says Claimed.
           {res.notes.late > 0 && <> {res.notes.late} row(s) were activated after their expiry date.</>}
           {res.notes.noPlayer > 0 && <> {res.notes.noPlayer} Grace row(s) have no matching player in the console.</>}
@@ -5407,7 +5408,7 @@ function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearCo
       {res && !res.error && (
         <div className="tbl-wrap"><table>
           <thead><tr><th>Player</th><th>Brand</th><th>Tier</th><th>✈</th><th>Window</th><th>Deposit per day</th>
-            <th className="r">Deposited</th><th className="r">Required</th><th className="r">Bonus</th><th>Status</th></tr></thead>
+            <th className="r">Best day</th><th className="r">Required</th><th className="r">Bonus</th><th>Status</th></tr></thead>
           <tbody>
             {shown.map((t, i) => {
               const p = players[i], st = GT_STATUS[t.status];
@@ -5420,9 +5421,9 @@ function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearCo
                   <td className="mono" title={t.late ? "Activated after the expiry date" : "Activated date → expiry date, from Lark"}>
                     {t.start.slice(5)} → {t.end.slice(5)}{t.late ? " ⚠" : ""}</td>
                   <td><div className="gt-days">{t.days.map((d) => (
-                    <span key={d.d} className={"gt-d" + (d.d === t.start ? " act" : d.dep > 0 ? " on" : "") + (d.dep === null ? " na" : "")}
+                    <span key={d.d} className={"gt-d" + (d.d === t.start ? " act" : t.req != null && d.dep >= t.req ? " on" : "") + (d.dep === null ? " na" : "")}
                       title={d.d === t.start ? `${d.d} · activation day: the deposit could be before or after the activation time, so it is not counted as certain` : d.d}>{d.dep === null ? "–" : fmt(d.dep)}</span>))}</div></td>
-                  <td className="r mono">{fmt(t.total)}{t.sameDay > 0 && <div className="gt-sd" title="Deposited on the activation day itself; time of day unknown">+{fmt(t.sameDay)} same day</div>}</td>
+                  <td className="r mono" title="Highest single day after activation">{fmt(t.best)}{t.sameDay > 0 && <div className="gt-sd" title="Deposited on the activation day itself; time of day unknown">{fmt(t.sameDay)} same day</div>}</td>
                   <td className="r mono">{t.req == null ? "—" : fmt(t.req)}</td>
                   <td className="r mono">{t.bonus == null ? "—" : fmt(t.bonus)}</td>
                   <td><span className="gt-st" style={{ "--cc": st.color }} title={t.text}>{st.label}</span></td>

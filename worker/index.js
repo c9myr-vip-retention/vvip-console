@@ -493,7 +493,8 @@ async function graceStatusFor(env, cfg, brands) {
              (end of that day) and only matters before activation, so a claim never expires.
    Required = from the bonus through GRACE_LADDER (the text carries no deposit figure).
    Deposit  = the player's own daily deposits from the console feed. The feed is one day behind (snapshot D carries
-             game day D−1), so game day D is read from snapshot D+1.
+             game day D−1), so game day D is read from snapshot D+1. Per day, NOT accumulative: one single day must
+             reach the required deposit; deposits on different days are never added together.
    Claim    = never expires: a row stays on the list until its SW Check says Claimed (or Failed / Not eligible),
              looking back cfg.graceOpts.lookbackDays (default 14) days past the expiry.
    Nothing is written to Lark or to the console database. */
@@ -568,17 +569,19 @@ async function graceTasksFor(env, cfg, brands) {
         days.push({ d, dep: snap > latest ? null : (e.days.get(snap) || 0) });   // null = that day's feed has not arrived yet
       }
       // Only a reload AFTER activation counts. The console holds daily totals, not times, so:
-      //   days after the activation day  = certainly after  → `total`
+      //   days after the activation day  = certainly after  → `best`
       //   the activation day itself       = could be before or after the activation time → `sameDay` (flagged, never counted as certain)
-      const total = days.reduce((s, x) => s + (x.d > c.start ? (x.dep || 0) : 0), 0);
+      // NOT accumulative: the required deposit must be reached inside ONE day. Each day stands alone, so RM50 today
+      // + RM50 tomorrow does not qualify for a RM100 requirement. `best` = the highest single day after activation.
+      const best = days.reduce((m, x) => (x.d > c.start ? Math.max(m, x.dep || 0) : m), 0);
       const sameDay = (days.find((x) => x.d === c.start) || {}).dep || 0;
       const windowOpen = days.some((x) => x.dep === null);
       const status = c.req == null ? "unknown"
-        : total >= c.req ? "reloaded"
-        : (sameDay > 0 && total + sameDay >= c.req) ? "same_day"
+        : best >= c.req ? "reloaded"
+        : sameDay >= c.req ? "same_day"
         : windowOpen ? "in_progress" : "not_reloaded";
       out.push({ player_key: e.player_key, brand, tier_segment: e.tier, text: c.sw, req: c.req, bonus: c.bonus,
-        start: c.start, end: c.end, startSource: c.startSrc, late: c.late, days, total, sameDay, status });
+        start: c.start, end: c.end, startSource: c.startSrc, late: c.late, days, best, sameDay, status });
     }
   }));
   const rank = { reloaded: 0, same_day: 1, in_progress: 2, unknown: 3, not_reloaded: 4 };
