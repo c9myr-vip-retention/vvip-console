@@ -28,3 +28,10 @@ export const NAV = {
     ["Me", [["mine", "My performance"], ["acct", "Account"]]],
   ],
 };
+
+// Sidebar glyphs (from the mockup). Kept apart from NAV so NAV's shape stays [section, [[key, label], ...]].
+export const NAV_ICONS = {
+  dash: "◧", delta: "⇅", perf: "▤", queue: "✉", checkin: "☑", grace: "✦", players: "☷", assign: "⇄",
+  tasks: "✔", sched: "▥", proj: "▣", flows: "⇉", tpl: "❐", team: "◎", ana: "▦", bin: "🗑", set: "⚙",
+  home: "⌂", mine: "▤", acct: "⚙",
+};

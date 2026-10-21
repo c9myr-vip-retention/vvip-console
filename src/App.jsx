@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { buildMessage, buildInstruction, buildHooks, buildAngles, buildHistoryHooks } from "./messageLibrary";
 import { phrase, newPatterns } from "./reportPhrases";
+import RevampShell from "./revamp/Shell.jsx";
+import { scopeLiveCss } from "./revamp/scopeCss.js";
 
 /* ════════════════════════════════════════════════════════════════════
    GROUP B · VIP RTN CONSOLE  v2.1
@@ -3755,7 +3757,7 @@ export function TelegramImport({ viewTeam = "B" }) {
   );
 }
 
-export function Settings({ me, viewTeam = "B" }) {
+export function Settings({ me, viewTeam = "B", hideLog = false }) {
   const [users, setUsers] = useState([]);
   const [drafts, setDrafts] = useState({});   // id -> { role, can_edit, can_delete, on_leaderboard, manage_users }
   const [nu, setNu] = useState(""); const [np, setNp] = useState("");
@@ -3854,7 +3856,7 @@ export function Settings({ me, viewTeam = "B" }) {
         </div>
       </div>
       {canManage && <TelegramImport viewTeam={viewTeam} />}
-      {canManage && <ActivityLog viewTeam={viewTeam} />}
+      {canManage && !hideLog && <ActivityLog viewTeam={viewTeam} />}
       {msg && <div className="set-msg">{msg}</div>}
     </div>
   );
@@ -5689,7 +5691,20 @@ export function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
   );
 }
 
+/* Rollout flag for the revamped shell (docs/design/BUILD-CONTRACT.md section 8). OFF by default.
+   ?revamp=1 turns it on and is remembered in localStorage.revamp_ui; ?revamp=0 turns it off. */
+function readRevampFlag() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("revamp");
+    if (q === "1") localStorage.setItem("revamp_ui", "1");
+    else if (q === "0") localStorage.removeItem("revamp_ui");
+    return localStorage.getItem("revamp_ui") === "1";
+  } catch (e) { return false; }
+}
+
 export default function App() {
+  const [rv] = useState(readRevampFlag);                 // revamped shell on/off (fixed for the page's lifetime)
+  const [rvTab, setRvTab] = useState(() => { try { return sessionStorage.getItem("rv_tab") || ""; } catch (e) { return ""; } });
   const [me, setMe] = useState(null);
   const [tab, setTab] = useState("dash");
   const [drill, setDrill] = useState(null); // KPI → Daily deep-link: { brand, tier }
@@ -5780,6 +5795,20 @@ export default function App() {
   const queueRO = isPast || viewerRO;
 
   if (!me) return (<><Style /><Login onLogin={setMe} /></>);
+
+  if (rv) {
+    const signOut = () => { api("/api/logout", { method: "POST" }).catch(() => {}); localStorage.removeItem("session_token"); setMe(null); };
+    const goto = (key, params) => {
+      setDrill(params && Object.keys(params).length ? params : null);   // e.g. goto("queue", { brand }) → Contact filtered to that brand
+      setRvTab(key); try { sessionStorage.setItem("rv_tab", key); } catch (e) { /* private mode */ }
+    };
+    const ctx = {
+      me, viewTeam, board, data, teamData, teamBrands, contacts: board?.contacts || [], dates, viewDate, setViewDate, isPast,
+      readOnly: queueRO, saveContact, clearContact, loadBoard, drill, setDrill, goto,
+      setViewTeam, teamKeys: TEAM_KEYS, team: board?.team || [], health: board?.health || [], snap: board?.snapshot_date || null, loading,
+    };
+    return (<><Style scope /><RevampShell ctx={ctx} tab={rvTab || (me.manage_users ? "dash" : "home")} notices={notices} loading={loading} loadErr={loadErr} onSignOut={signOut} /></>);
+  }
 
   return (
     <>
@@ -6592,9 +6621,8 @@ export function Campaigns({ me, viewTeam }) {
 }
 
 /* ════════════════════════ STYLES ════════════════════════ */
-export function Style() {
-  return (
-    <style>{`
+export function Style({ scope = false } = {}) {   // scope: revamp shell on → live CSS applies only inside .rv-live
+  const css = `
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 :root{--bg:#0B0E13;--panel:#12161E;--panel2:#171C26;--line:#232A37;--txt:#E7EAF0;--dim:#8B94A7;--gold:#D4AF37;--neg:#F2727F;--pos:#4CC38A;
   --top-hi:#10141C;--login-hi:#141A26;--line-soft:#1B2130;--hover:#161C28;--hover-2:#1B2230;--line-hover:#2A3344;--line-strong:#3A4356;--line-zone:#2B3342;--off:#39414F;--faint:#4A5366;--mute:#5F6B7E;--slate:#94A3B8;--zone-c-line:#6F6A52;--on-accent:#FFF;--gold-line-2:#5A4A1E;--amber:#FCD34D;--amber-bg:#2A1F07;--amber-line:#7C5A12;--on-amber:#2A1907;--lc-line:#4A3D12;--lc-bg:#241D06;--warn:#FBBF24;--amber-deep:#F59E0B;--stale:#FDBA74;--stale-line:#7C2D12;--stale-bg:#2A1206;--hook-warn:#FCD9A8;--hook-warn-bg:#2A1A0B;--hook-warn-line:#7C4A12;--hook-warn-bg-hi:#33200D;--hook-warn-line-hi:#9A5F1A;--neg-soft:#FCA5A5;--neg-softer:#FECACA;--neg-strong:#EF4444;--neg-line:#7F1D1D;--neg-line-hi:#B91C1C;--bad-line:#7A2530;--neg-bg:#2A0F0F;--neg-bg-2:#240C0C;--pos-soft:#86EFAC;--pos-soft-2:#7FE7A6;--pos-muted:#86C7A0;--pos-line:#2F6B43;--pos-line-2:#14532D;--pos-bg:#0C2416;--info:#38BDF8;--info-soft:#7FD3F2;--blue-soft:#93C5FD;--blue-line:#1E40AF;--blue-line-2:#1E3A8A;--blue-bg:#10243A;--blue-bg-2:#0F1A33;--cool:#7DD3FC;--cool-line:#0C4A6E;--cool-bg:#082032;--tg:#2AABEE;--tg-lo:#1E96D4;--frag:#F9A8D4;--frag-line:#9D2463;--frag-bg:#2A0F1E;--teal:#2DD4BF;--violet:#A78BFA;
@@ -7464,6 +7492,6 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .camp-modal-btns button{flex:1;min-width:118px}
 .camp-modal-cancel{width:100%;margin-top:8px}
 @media (max-width:640px){.camp-ev{flex-direction:column;align-items:flex-start}}
-`}</style>
-  );
+`;
+  return <style>{scope ? scopeLiveCss(css) : css}</style>;
 }
