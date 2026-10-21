@@ -4,6 +4,8 @@
 // v2: adds POST /api/ingest (Google Sheets feeder → player_days)
 // ═══════════════════════════════════════════════════
 
+import { handleWork } from "./work/index.js";
+
 function corsFor(request) {
   const origin = request.headers.get("Origin") || "";
   const allowed =
@@ -2014,6 +2016,9 @@ export default {
       : allowedBrands.length === 0 ? { s: " AND 1=0", b: [] }
       : { s: ` AND ${col} IN (${allowedBrands.map(() => "?").join(",")})`, b: allowedBrands };
     const brandAllowed = (b) => allowedBrands === null || allowedBrands.includes(b);
+
+    // Work management (tasks, schedule, projects...). Routes live in worker/work/*.js.
+    { const w = await handleWork({ path, method, url, request, env, user, canManage, ok, err, log, ctx }); if (w) return w; }
 
     // Aggregate endpoints (trend/performance/kpi) accept ?team=A|B|C so a MANAGER can narrow
     // the all-teams view to one team. Non-managers stay pinned to their own team (param ignored).
