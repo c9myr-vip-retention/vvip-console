@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Schedule harness (dev only)</title>
+<!-- Dev-only: renders the Schedule page without the shell. Open /src/revamp/schedule/harness.html?role=admin|agent|viewer with `npm run dev`.
+     Stands in for revamp.css (shell-ui) with just the tokens and modal styles it needs. Not part of the production build. -->
+<style>
+:root{--bg:#0B0E13;--panel:#12161E;--panel2:#171C26;--line:#232A37;--txt:#E7EAF0;--dim:#8B94A7;--neg:#F2727F;--warn:#FBBF24;--hover-2:#1B2230;--line-hover:#2A3344;--line-strong:#3A4356;--faint:#4A5366;--neg-line:#7F1D1D;
+--accent:#E9E3D3;--accent-bg:color-mix(in srgb,var(--accent) 7%,var(--panel));--accent-line:color-mix(in srgb,var(--accent) 30%,var(--line));--on-accent-ink:#15181E}
+*{box-sizing:border-box;margin:0;padding:0}body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',system-ui,sans-serif}
+button{cursor:pointer;font-family:inherit}input,select,textarea{font-family:inherit}
+.rv-scrim{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:50}
+.rv-modal{background:var(--panel);border:1px solid var(--line-strong);border-radius:14px;max-width:96vw}
+.rv-modal .mh{padding:14px 18px;font-weight:700;border-bottom:1px solid var(--line)}.rv-modal .mb{padding:16px 18px}.rv-modal .mf{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#2a3344;border-radius:4px}::-webkit-scrollbar-button{display:none}
+</style></head>
+<body><div id="root"></div><script type="module" src="./harness.jsx"></script></body></html>

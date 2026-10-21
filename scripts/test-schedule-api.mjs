@@ -1,6 +1,6 @@
 // Local-only checks for /api/work/schedule*. Run against `npx wrangler dev --local` (never a deployed Worker):
 //   BASE=http://127.0.0.1:8799 node scripts/test-schedule-api.mjs
-// Creates admin1 (via /api/users/init, if no users yet), agent1, agent2, viewer1 (password "password123") in the LOCAL db.
+// Safe to re-run (uses unique names). Creates admin1 (via /api/users/init, if no users yet), agent1, agent2, viewer1 (password "password123") in the LOCAL db.
 const BASE = process.env.BASE || "http://127.0.0.1:8799";
 if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(BASE)) { console.error("Refusing to run against a non-local BASE"); process.exit(2); }
 const PW = "password123";
@@ -20,7 +20,9 @@ await mk("agent1", "agent", true); await mk("agent2", "agent", true); await mk("
 const a1 = await login("agent1"), a2 = await login("agent2"), v1 = await login("viewer1");
 check("logins", admin && a1 && a2 && v1);
 
-const day = (n) => { const d = new Date(Date.UTC(2026, 9, 19 + n)); return d.toISOString().slice(0, 10); };
+// a far-future week picked per run, so earlier data in the local db never collides with these checks
+const BASE_YEAR = 2100 + (Date.now() % 800);
+const day = (n) => new Date(Date.UTC(BASE_YEAR, 0, 1 + n)).toISOString().slice(0, 10);
 
 // reads: everyone, types seeded
 for (const [n, t] of [["admin", admin], ["agent", a1], ["viewer", v1]]) {
@@ -62,12 +64,12 @@ const dates = [day(2), day(3), day(4)];
 const bulk = await call(admin, "POST", "/api/work/schedule/items", { items: dates.flatMap((date) => entries.map((e) => ({ ...e, date }))) });
 check("bulk 3 dates x 2 entries -> 201 created 6", bulk.status === 201 && bulk.data.created === 6, JSON.stringify(bulk));
 const week = await call(a1, "GET", `/api/work/schedule?from=${day(0)}&to=${day(6)}`);
-const shifts = week.data.items.filter((i) => i.type_key === "shift");
+const shifts = week.data.items.filter((i) => i.type_key === "shift" && i.date >= day(0));
 check("items readable by agent, shape ok", shifts.length === 3 && shifts[0].who[0] === "agent1" && shifts[0].start_time === "09:00" && Array.isArray(shifts[0].brands) && shifts[0].repeat === "none", JSON.stringify(shifts[0]));
-const reload = week.data.items.find((i) => i.type_key === "reload");
+const reload = week.data.items.find((i) => i.type_key === "reload" && i.date >= day(0));
 check("brands + repeat stored", reload && reload.brands.join() === "LPK777,ACE33" && reload.repeat === "weekly");
 const later = await call(a1, "GET", `/api/work/schedule?from=${day(30)}&to=${day(36)}`);
-check("weekly item from earlier date still returned for a later window", later.data.items.some((i) => i.id === reload.id) && !later.data.items.some((i) => i.type_key === "shift"));
+check("weekly item from earlier date still returned for a later window", later.data.items.some((i) => i.id === reload.id) && !later.data.items.some((i) => i.type_key === "shift" && i.date >= day(0)));
 
 // update / delete
 const sid = shifts[0].id;
@@ -78,9 +80,9 @@ check("update shift to no people -> 400", (await call(admin, "POST", `/api/work/
 check("update missing item -> 404", (await call(admin, "POST", "/api/work/schedule/items/99999/update", { title: "x" })).status === 404);
 
 // types
-const t1 = await call(admin, "POST", "/api/work/schedule/types", { name: "Leave", color: "#E11D48" });
+const t1 = await call(admin, "POST", "/api/work/schedule/types", { name: "Leave " + Date.now(), color: "#E11D48" });
 check("admin create type", t1.status === 201 && t1.data.type.key.startsWith("t_") && t1.data.type.builtin === false, JSON.stringify(t1));
-check("duplicate type name -> 409", (await call(admin, "POST", "/api/work/schedule/types", { name: "leave", color: "#E11D48" })).status === 409);
+check("duplicate type name -> 409", (await call(admin, "POST", "/api/work/schedule/types", { name: t1.data.type.name.toLowerCase(), color: "#E11D48" })).status === 409);
 check("bad colour -> 400", (await call(admin, "POST", "/api/work/schedule/types", { name: "Audits", color: "red" })).status === 400);
 const withType = await call(admin, "POST", "/api/work/schedule/items", { items: [{ type_key: t1.data.type.key, date: day(1), title: "Aldo on leave", who: ["admin1"] }] });
 check("custom type usable in items", withType.status === 201);
@@ -94,10 +96,11 @@ check("agent swap on someone else's shift -> 403", (await call(a1, "POST", `/api
 check("agent swap on non-shift -> 400", (await call(a1, "POST", `/api/work/schedule/items/${reload.id}/swap`, {})).status === 400);
 check("viewer swap -> 403", (await call(v1, "POST", `/api/work/schedule/items/${mine}/swap`, {})).status === 403);
 const sw = await call(admin, "GET", "/api/work/schedule/swaps");
-check("admin lists swaps", sw.status === 200 && sw.data.swaps.length === 1 && sw.data.swaps[0].from_user === "agent1" && sw.data.swaps[0].status === "open", JSON.stringify(sw));
-check("bad swap status -> 400", (await call(admin, "POST", `/api/work/schedule/swaps/${sw.data.swaps[0].id}`, { status: "maybe" })).status === 400);
-check("approve swap", (await call(admin, "POST", `/api/work/schedule/swaps/${sw.data.swaps[0].id}`, { status: "approved" })).status === 200);
-check("decide twice -> 409", (await call(admin, "POST", `/api/work/schedule/swaps/${sw.data.swaps[0].id}`, { status: "declined" })).status === 409);
+const mySwap = sw.data.swaps?.find((x) => x.item_id === mine);
+check("admin lists swaps", sw.status === 200 && mySwap && mySwap.from_user === "agent1" && mySwap.status === "open" && sw.data.swaps.filter((x) => x.item_id === mine).length === 1, JSON.stringify(sw));
+check("bad swap status -> 400", (await call(admin, "POST", `/api/work/schedule/swaps/${mySwap.id}`, { status: "maybe" })).status === 400);
+check("approve swap", (await call(admin, "POST", `/api/work/schedule/swaps/${mySwap.id}`, { status: "approved" })).status === 200);
+check("decide twice -> 409", (await call(admin, "POST", `/api/work/schedule/swaps/${mySwap.id}`, { status: "declined" })).status === 409);
 
 // delete
 check("agent delete -> 403", (await call(a1, "POST", `/api/work/schedule/items/${sid}/delete`)).status === 403);
