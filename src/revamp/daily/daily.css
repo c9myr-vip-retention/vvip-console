@@ -1,0 +1,67 @@
+/* Contact + Players pages (daily-a). Page-specific rules only, all prefixed dl-.
+   Shared look (.btn .seg .input .search .bar .card .tw .pill .banner .top .chk) comes from revamp.css. */
+.dl-dd{position:relative;display:inline-block}
+.dl-ddp{position:absolute;top:calc(100% + 6px);left:0;z-index:30;min-width:260px;max-height:60vh;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.dl-ddp.wide{min-width:640px;max-width:92vw;max-height:none;overflow:visible}
+.dl-ddq{width:100%;box-sizing:border-box;margin-bottom:4px;padding:7px 10px;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--txt);font:inherit;font-size:12.5px}
+.dl-ddr{display:flex;gap:10px;align-items:center;padding:7px 10px;border-radius:6px;cursor:pointer;font-size:13px}
+.dl-ddr:hover{background:var(--panel)}
+.dl-ddr .g{flex:1}
+.dl-ddh{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);padding:8px 10px 4px}
+.dl-cbx{width:16px;height:16px;border:1.5px solid var(--dim);border-radius:4px;display:inline-grid;place-items:center;flex:none}
+.dl-ddr.on .dl-cbx{background:var(--accent);border-color:var(--accent)}
+.dl-ddr.on .dl-cbx::after{content:"✓";font-size:11px;color:var(--on-accent,#0B0E13);font-weight:700;line-height:1}
+.dl-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dl-cols{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 18px}
+.dl-empty{padding:10px;color:var(--dim);font-size:12.5px}
+.dl-bb{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:1px 8px;border-radius:6px;color:var(--b);background:color-mix(in srgb,var(--b) 14%,var(--panel));border:1px solid color-mix(in srgb,var(--b) 40%,var(--line))}
+.dl-cd{font-size:10.5px;color:var(--dim);border:1px dashed var(--line);border-radius:4px;padding:0 5px;margin-left:4px;white-space:nowrap}
+.dl-tag{font-size:10.5px;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 5px;margin-left:4px;white-space:nowrap}
+.dl-tag.on{color:var(--pos);border-color:color-mix(in srgb,var(--pos) 40%,var(--line))}
+.dl-flag{font-size:10.5px;margin-left:4px;white-space:nowrap}
+.dl-flag.cool{color:#7DD3FC} .dl-flag.frag{color:#F4D98A;border:1px solid color-mix(in srgb,#F4D98A 40%,var(--line));border-radius:4px;padding:0 5px}
+.dl-flag.crown{color:var(--gold)} .dl-flag.tg{color:#56B6C2}
+.dl-pill{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:2px 9px;border-radius:99px;background:color-mix(in srgb,var(--c) 14%,var(--panel));color:var(--c);border:1px solid color-mix(in srgb,var(--c) 40%,var(--line));white-space:nowrap}
+
+/* brand cards (Players) */
+.dl-bstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+@media (max-width:1100px){.dl-bstrip{grid-template-columns:repeat(2,1fr)}}
+.dl-bcp{text-align:left;display:flex;flex-direction:column;gap:3px;padding:12px 14px;border:1px solid var(--line);border-top:3px solid var(--b);border-radius:12px;color:var(--txt);cursor:pointer;font:inherit;background:linear-gradient(160deg,color-mix(in srgb,var(--b) 16%,var(--panel)),var(--panel) 70%)}
+.dl-bcp:hover,.dl-bcp.on{border-color:var(--b);box-shadow:0 0 0 1px var(--b)}
+.dl-bcp .n{font-weight:700;letter-spacing:.6px;color:var(--b);display:flex;align-items:center;gap:6px;font-size:13px}
+.dl-bcp .big{font-size:22px;font-weight:700;font-family:'IBM Plex Mono',monospace}
+.dl-bcp .big small{font-size:11px;font-weight:500;color:var(--dim);font-family:inherit;margin-left:4px}
+.dl-bcp .dep{font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--b)}
+.dl-bcp .mix{display:flex;gap:12px;margin-top:6px;font-size:12px;color:var(--dim);flex-wrap:wrap}
+.dl-bcp .mix i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.dl-bcp .mix b{color:var(--txt);font-family:'IBM Plex Mono',monospace}
+.dl-warnchip{font-size:10px;font-weight:600;color:#F4D98A;border:1px solid color-mix(in srgb,#F4D98A 40%,var(--line));border-radius:99px;padding:0 6px}
+
+/* work bands + player rows (Contact) */
+.dl-band{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:14px;overflow:hidden}
+.dl-bh{padding:11px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--panel2)}
+.dl-bh b{color:var(--cc);letter-spacing:.5px}
+.dl-bh .pr{width:90px;height:6px;border-radius:99px;background:var(--bg);overflow:hidden}
+.dl-bh .pr i{display:block;height:100%;background:var(--pos)}
+.dl-more{padding:8px 14px;border-top:1px solid var(--line);color:var(--dim);text-align:center;cursor:pointer}
+.dl-more:hover{color:var(--txt)}
+.dl-prow{display:grid;grid-template-columns:minmax(210px,1.2fr) minmax(240px,2fr) 200px 96px 190px;gap:12px;align-items:center;padding:11px 14px;border-top:1px solid var(--line);cursor:pointer;box-shadow:inset 4px 0 0 var(--b,transparent)}
+.dl-prow:hover{background:var(--panel2)} .dl-prow.done{opacity:.55}
+.dl-prow .sub{margin-top:3px;display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--dim)}
+.dl-prow .why{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--dim)}
+.dl-prow .met{text-align:right;font-weight:600;font-family:'IBM Plex Mono',monospace}
+.dl-prow .met.neg{color:var(--neg)} .dl-prow .met.pos{color:var(--pos)}
+.dl-prow .act{display:flex;gap:6px;justify-content:flex-end}
+@media (max-width:1100px){.dl-prow{grid-template-columns:1fr auto}.dl-prow .why,.dl-prow .st{display:none}}
+
+/* table (Players) */
+.dl-tbl tr.br td:first-child{box-shadow:inset 4px 0 0 var(--b,transparent)}
+.dl-tbl tr.sel{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.dl-tbl tr.div td{background:var(--panel2);color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.8px;cursor:default}
+.dl-tbl th.s{cursor:pointer;user-select:none}
+.dl-pg{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font-size:12.5px}
+.dl-pg select{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+.dl-sel{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:9px 14px;border-radius:8px;margin-bottom:12px;border:1px solid var(--line);background:var(--panel)}
+.dl-paste{display:grid;gap:8px;padding:14px}
+.dl-paste textarea{min-height:110px;resize:vertical}
+.dl-note{padding:9px 14px;border-radius:8px;margin-bottom:12px;border:1px solid color-mix(in srgb,#F4D98A 45%,var(--line));background:color-mix(in srgb,#F4D98A 8%,var(--panel));color:#F4D98A;font-size:12.5px}
