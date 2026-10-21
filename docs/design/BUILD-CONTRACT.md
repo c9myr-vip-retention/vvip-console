@@ -102,3 +102,14 @@ Dates `YYYY-MM-DD` (Malaysia time, GMT+8); timestamps UTC `YYYY-MM-DD HH:MM:SS`.
 2. Screens match the mockup (take real screenshots at 1440 wide and look at them; a CSS class clash once broke a whole page unseen).
 3. Permission rules in section 2 verified (try an agent token against an admin route: expect 403).
 4. PR into `feat/console-revamp-base` titled `<agent>: <what>`. Description: what was built, files touched, anything you could not do, anything you need from another agent, and the exact local test commands. No deploy, no remote DB.
+
+## 7. Reusing the live components (`src/App.jsx`)
+
+On the base branch every top-level function/const in `src/App.jsx` is now `export`ed (nothing else changed; `npm run build` passes). Import what you need, e.g.
+`import { Queue, Drawer, classifyAll, GraceTasks, LoginCheck, AssignedView, Delta, LostGone, Movement, Performance as LivePerformance, Settings as LiveSettings, ActivityLog, TelegramImport, BRAND_ORDER, TEAMS } from "../../App.jsx";`
+`App.jsx` will import `src/revamp/registry.js`, so the import is circular. That is fine **as long as you only use imports inside render functions/hooks, never at module top level** (no `const X = importedThing` or `styled(importedThing)` at load time).
+Reuse their logic and props; re-house and re-layout them. If an existing component is too tangled to embed (e.g. `Queue` renders its own header and filters), extract the pure parts into a helper file under your own folder and render your new layout around it. Do not duplicate `classifyAll` or the contact/grace/login-check rules.
+
+## 8. Rollout flag (shell-ui)
+
+The new shell must be **off by default** in production until Aldo approves: enable with `?revamp=1` in the URL (remember in `localStorage.revamp_ui = "1"`; `?revamp=0` turns it off). With the flag off, `App.jsx` behaves exactly as today (old tab bar, old pages). This makes the final cut-over a one-line change and keeps the live console safe.
