@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS projects (
   archived    INTEGER NOT NULL DEFAULT 0,
   created_by  TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  deleted_at  TEXT
+  deleted_at  TEXT,
+  deleted_by  TEXT
 );
 CREATE TABLE IF NOT EXISTS project_members (
   project_id INTEGER NOT NULL,
@@ -32,7 +33,8 @@ CREATE TABLE IF NOT EXISTS flows (
   admin_user  TEXT,                              -- flow administrator
   default_assignee TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  deleted_at  TEXT
+  deleted_at  TEXT,
+  deleted_by  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS task_templates (
@@ -43,7 +45,8 @@ CREATE TABLE IF NOT EXISTS task_templates (
   checklist  TEXT,                               -- JSON array of strings
   created_by TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  deleted_at TEXT
+  deleted_at TEXT,
+  deleted_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
