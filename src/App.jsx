@@ -5694,8 +5694,8 @@ export function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
   );
 }
 
-/* Rollout flag for the revamped shell (docs/design/BUILD-CONTRACT.md section 8). OFF by default.
-   ?revamp=1 turns it on and is remembered; ?revamp=0 turns it off; ?flags=reset turns every flag off. See src/flags.js. */
+/* The revamped console (docs/design/BUILD-CONTRACT.md section 8) is LIVE: on by default for everyone.
+   ?revamp=0 takes this browser back to the old console and is remembered; ?revamp=1 or ?flags=reset puts it back. See src/flags.js. */
 const readRevampFlag = () => readFlag("revamp");
 
 export default function App() {

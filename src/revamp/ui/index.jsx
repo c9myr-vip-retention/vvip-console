@@ -361,7 +361,7 @@ function optionsOf(children, out = []) {
   });
   return out;
 }
-const revampOn = () => flagOn("revamp");                                                  // same flag as App.jsx (?revamp=1)
+const revampOn = () => flagOn("revamp");                                                  // same flag as App.jsx
 export function NativeSelect({ value, defaultValue, onChange, children, className, disabled, title, style }) {
   const [own, setOwn] = useState(defaultValue === undefined ? "" : String(defaultValue));
   const controlled = value !== undefined;
