@@ -335,8 +335,26 @@ await call(A, "POST", "/api/roles/boss2/update", { sees: { mode: "all" } });
 check("setting it back to everyone", (await peopleOf(BO)).includes("mi") && (await roleOf("boss2")).sees.mode === "all");
 sql("DELETE FROM player_days WHERE player_key LIKE 'zz_vis%'");
 
+// ---- an agent is anyone with a team and "Counts as a scored CS agent", whatever their role is called ----
+r = await call(A, "POST", "/api/roles", { name: "Jnr9", base: "none" });
+await call(A, "POST", `/api/roles/${r.data.role.key}/update`, { overrides: { "kpi.scored": true, "tasks.use": true } });
+const JR = r.data.role.key;
+await call(A, "POST", "/api/users", { username: "jn9", password: PW, role_key: JR, team: "A" });
+const WR = (await call(A, "POST", "/api/roles", { name: "Watch9", base: "viewer" })).data.role.key;
+await call(A, "POST", "/api/users", { username: "vw9", password: PW, role_key: WR, team: "A" });
+const jrow = (list) => (list || []).find((x) => x.username === "jn9");
+check("a role built from nothing keeps the old role column as viewer (that is why the role name cannot decide who is an agent)", rows("SELECT role, on_leaderboard FROM users WHERE username = 'jn9'")[0].role === "viewer" && rows("SELECT on_leaderboard FROM users WHERE username = 'jn9'")[0].on_leaderboard === 1);
+r = await call(A, "GET", "/api/work/people");
+check("the people list says who is scored", jrow(r.data.people) && jrow(r.data.people).on_leaderboard === 1 && jrow(r.data.people).team === "A" && r.data.people.find((x) => x.username === "vw9").on_leaderboard === 0, JSON.stringify(r.data.people));
+r = await call(A, "GET", "/api/work/workload");
+check("the workload shows the scored agent, not the view-only one", jrow(r.data.people) && !r.data.people.some((x) => x.username === "vw9"), JSON.stringify(r.data.people.map((x) => x.username)));
+sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_sc_1', 'BM69', 'V')");
+r = await call(A, "GET", "/api/rtn/board");
+check("the board agent list carries the scored flag and team", jrow(r.data.team) && jrow(r.data.team).on_leaderboard === 1 && jrow(r.data.team).team === "A", JSON.stringify((r.data.team || []).slice(0, 3)));
+sql("DELETE FROM player_days WHERE player_key LIKE 'zz_sc%'");
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

@@ -1098,7 +1098,7 @@ async function computeAutoAssign(env, opts = {}) {
   if (!snap) return { skipped: "no snapshots", team };
 
   const picRows = await env.DB.prepare(
-    "SELECT username FROM users WHERE team=? AND role='agent' ORDER BY username"
+    "SELECT username FROM users WHERE team=? AND (role='agent' OR on_leaderboard=1) ORDER BY username"
   ).bind(team).all();
   const pics = (picRows.results || []).map((r) => r.username).filter((u) => !off.has(u));
   if (!pics.length) return { skipped: `no active PICs on team ${team}`, team, pics: [], assignments: {}, summary: {} };
@@ -1761,7 +1761,7 @@ async function autoAssignOneRoster(env, brand, tier, assignedBy) {
 
   // Eligible agents = scored Team B CS agents, derived from users (not hardcoded).
   const ag = await env.DB.prepare(
-    "SELECT username FROM users WHERE team = 'B' AND on_leaderboard = 1 AND role = 'agent' ORDER BY username"
+    "SELECT username FROM users WHERE team = 'B' AND on_leaderboard = 1 ORDER BY username"
   ).all();
   const agents = (ag.results || []).map((r) => r.username);
   if (!agents.length) return { assigned: 0, reason: "no agents" };
@@ -2286,7 +2286,7 @@ export default {
                (SELECT COUNT(*) FROM player_assignment a
                  WHERE a.brand = ? AND a.tier_segment = ? AND a.active = 1 AND a.agent = u.username) AS n
           FROM users u
-         WHERE u.team = ? AND u.on_leaderboard = 1 AND u.role = 'agent'
+         WHERE u.team = ? AND u.on_leaderboard = 1
          ORDER BY u.username
       `).bind(brand, tier, teamKey).all();
 

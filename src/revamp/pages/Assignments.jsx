@@ -48,7 +48,7 @@ export function AssignmentsPanel({ ctx }) {
   // Agents of this team (the live Assigned view calls them PICs).
   const agents = useMemo(() => {
     const names = new Set((deal?.pics || []));
-    team.filter((t) => t.role !== "admin" && t.role !== "viewer").forEach((t) => names.add(t.username));
+    team.filter((t) => t.on_leaderboard || (t.role !== "admin" && t.role !== "viewer")).forEach((t) => names.add(t.username));
     return [...names].sort();
   }, [deal, team]);
   const cap = deal?.cap || 15;

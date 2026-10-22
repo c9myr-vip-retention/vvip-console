@@ -159,9 +159,9 @@ const cleanTags = (v) => uniq((Array.isArray(v) ? v : []).map((x) => str(x, 40))
 // ── GET /people ───────────────────────────────────────────────────────────────────────────────
 async function people(c) {
   let results;
-  try { results = (await c.env.DB.prepare("SELECT username, role, role_key, team FROM users ORDER BY username COLLATE NOCASE").all()).results; }
-  catch { results = (await c.env.DB.prepare("SELECT username, role, team FROM users ORDER BY username COLLATE NOCASE").all()).results; }    // schema_v27 not run yet
-  return c.ok({ people: filterPeople(results || [], c.user, c.roles).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null })) });
+  try { results = (await c.env.DB.prepare("SELECT username, role, role_key, team, on_leaderboard FROM users ORDER BY username COLLATE NOCASE").all()).results; }
+  catch { results = (await c.env.DB.prepare("SELECT username, role, team, on_leaderboard FROM users ORDER BY username COLLATE NOCASE").all()).results; }    // schema_v27 not run yet
+  return c.ok({ people: filterPeople(results || [], c.user, c.roles).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0 })) });
 }
 
 // ── GET /tasks ────────────────────────────────────────────────────────────────────────────────
@@ -484,7 +484,7 @@ async function remove(c, id) {
 async function workload(c) {
   const db = c.env.DB, today = mytToday();
   const [users, agg, ong] = await Promise.all([
-    db.prepare("SELECT username, team, (can_edit = 1 OR manage_users = 1) AS listed FROM users").all(),     // everyone's team is known; only those who can act get a card
+    db.prepare("SELECT username, team, (can_edit = 1 OR manage_users = 1 OR on_leaderboard = 1) AS listed FROM users").all(),     // everyone's team is known; only those who can act, or are scored agents, get a card
     db.prepare(
       `SELECT assignee AS username,
               SUM(status != 'done') AS assigned,

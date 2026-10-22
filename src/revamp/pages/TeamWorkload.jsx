@@ -55,7 +55,7 @@ export default function TeamWorkload({ ctx }) {
     tapi.projects({ archived: 0 }).then((r) => setProjects(r.projects || [])).catch(() => {});
   }, []);
   const { overlays, openTask, newTask } = useTaskOverlays({ me, people, projects, tasks: [], onChange: load });
-  const viewers = useMemo(() => new Set(people.filter((p) => p.role === "viewer").map((p) => p.username)), [people]);   // view-only accounts are not agents
+  const viewers = useMemo(() => new Set(people.filter((p) => p.role === "viewer" && !p.on_leaderboard).map((p) => p.username)), [people]);   // view-only accounts are not agents
   const admin = can(me, "workload.all"), canAssign = can(me, "tasks.assign_others"), canSee = can(me, "tasks.view_all");
   const teams = useMemo(() => [...new Set((rows || []).map((p) => p.team).filter(Boolean))].sort(), [rows]);
   const pickedTeam = team || (myTeam && teams.includes(myTeam) ? myTeam : teams.includes("A") ? "A" : "all");   // own team first, Team A when they have none

@@ -46,7 +46,7 @@ export default function DashStaff({ viewTeam }) {
   }, [tick, today]);
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
 
-  const agents = useMemo(() => (people || []).filter((p) => p.role === "agent" && p.team === viewTeam).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
+  const agents = useMemo(() => (people || []).filter((p) => (p.on_leaderboard || p.role === "agent") && p.team === viewTeam).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const nOn = rows.filter((r) => r.on).length, nTask = rows.filter((r) => ongoing[r.u]).length;
