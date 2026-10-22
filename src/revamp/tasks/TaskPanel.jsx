@@ -4,6 +4,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DrawerPanel, MultiSelect, Avatar, toast } from "../ui/index.jsx";
 import { AttachButton, AttachmentView, PendingFiles, usePending } from "./Attachments.jsx";
+import { useLive } from "../live.js";
 import { tapi, canEditAnyTask, canDeleteAnyTask, canEdit, useNow, useTaskActions, ConflictBanner, StatusPill, DueBadge, CheckProg, dueInfo, elapsedSec, fmtElapsed } from "./common.jsx";
 
 const when = (ts) => {
@@ -30,6 +31,7 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
     try { const r = await tapi.task(id); setD(r); setErr(""); } catch (e) { setErr(e.message || "Could not load the task"); }
   }, [id]);
   useEffect(() => { setD(null); setConfirmDel(false); setEditDesc(null); load(); }, [load]);
+  useLive(["tasks"], load);                          // a new comment or a change by someone else shows up on its own
 
   const refresh = () => { load(); onChange && onChange(); };
   const { run, busy, conflict, clearConflict } = useTaskActions(refresh);

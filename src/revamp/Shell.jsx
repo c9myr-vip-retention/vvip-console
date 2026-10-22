@@ -7,6 +7,7 @@ import { NAV_ICONS } from "./tokens.js";
 import { can, navFor } from "./perms.js";
 import { Select, DatePick, ToastHost, Avatar, Seg } from "./ui/index.jsx";
 import { work } from "./api/work.js";
+import { useLive } from "./live.js";
 import { contactTodo } from "./shellHelpers.js";
 
 /** Ingest timestamps are UTC 'YYYY-MM-DD HH:MM:SS'; show the clock in Malaysia time (GMT+8). */
@@ -117,6 +118,8 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
     () => contactTodo(ctx.teamData, ctx.contacts, snap, isAdmin ? null : me.username).length,
     [snap, ctx.contacts, ctx.teamData, isAdmin, me.username]);
   const [tk, setTk] = useState({ open: 0, over: 0 });
+  const runTk = useRef(null);
+  useLive(["tasks"], () => runTk.current && runTk.current());
   useEffect(() => {
     let dead = false;
     const run = () => {
@@ -128,9 +131,9 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
         setTk({ open: mine.length, over: mine.filter((t) => t.due_date && t.due_date < today).length });
       }).catch(() => { if (!dead) setTk({ open: 0, over: 0 }); });   // work API not deployed / not allowed: no badge
     };
-    run();
+    run(); runTk.current = run;
     const id = setInterval(run, 60000);
-    return () => { dead = true; clearInterval(id); };
+    return () => { dead = true; runTk.current = null; clearInterval(id); };
   }, [key, isAdmin, me.username]);
   const badge = (k) => {
     if (k === "queue" && contactN) return <span className="cnt">{contactN}</span>;

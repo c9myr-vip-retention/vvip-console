@@ -9,7 +9,7 @@ const ago = (ts) => (Date.now() - new Date(String(ts).replace(" ", "T") + "Z").g
 
 export default function RecycleBin({ ctx }) {
   const admin = allowed(ctx, "bin.manage");
-  const { data, loading, error, reload } = useLoad(() => (admin ? api.bin() : Promise.resolve(null)), [admin]);
+  const { data, loading, error, reload } = useLoad(() => (admin ? api.bin() : Promise.resolve(null)), [admin], ["tasks", "projects"]);
   const [range, setRange] = useState("30"), [type, setType] = useState(""), [q, setQ] = useState(""), [del, setDel] = useState(null), [busy, setBusy] = useState(false);
   const rows = useMemo(() => (data?.items || []).filter((i) => ago(i.deleted_at) <= Number(range) && (!type || i.type === type) && (!q || `${i.name} ${i.id}`.toLowerCase().includes(q.toLowerCase()))), [data, range, type, q]);
   if (!admin) return <AdminOnly what="The Recycle bin" />;

@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
+import { useLive } from "../live.js";
 import { NAV } from "../tokens.js";
 import { PAGE_PERM, pageKeys } from "../perms.js";
 
@@ -23,6 +24,7 @@ export default function PagesPanel() {
   const [data, setData] = useState(null), [err, setErr] = useState(""), [busy, setBusy] = useState(false);
   const load = useCallback(() => { work.roles().then((r) => { setData(r); setErr(""); }, (e) => { setErr(e.message || "Could not load roles"); setData((d) => d || { roles: [], perms: [] }); }); }, []);
   useEffect(() => { load(); }, [load]);
+  useLive(["people"], load);
 
   const pages = useMemo(pageList, []);
   const label = (k) => ((data && data.perms.find((p) => p.key === k)) || {}).label || k;

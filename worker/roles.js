@@ -178,7 +178,9 @@ export async function handleRoles(c) {
         const m = b.sees && b.sees.mode;
         if (!["all", "rank", "list"].includes(m)) return c.err("sees.mode must be all, rank or list", 400);
         const list = m === "list" ? [...new Set((Array.isArray(b.sees.list) ? b.sees.list : []).filter((k) => typeof k === "string" && roles.has(k) && k !== role.key))] : [];
-        next.sees = { mode: m, list };
+        const team = b.sees.team === undefined ? ((role.sees && role.sees.team) || "all") : b.sees.team;
+        if (!["all", "own"].includes(team)) return c.err("sees.team must be all or own", 400);
+        next.sees = { mode: m, list, team };
       }
       if (b.reset) next.overrides = {};
       if (b.overrides && typeof b.overrides === "object") {
@@ -191,7 +193,7 @@ export async function handleRoles(c) {
       if (locksOut(users, users, roles, rolesAfter)) return c.err(LAST, 400);
       await db.prepare("UPDATE roles SET name = ?, base = ? WHERE key = ?").bind(next.name, next.base, role.key).run();
       if (b.sees !== undefined) {
-        try { await db.prepare("UPDATE roles SET sees = ? WHERE key = ?").bind(next.sees.mode === "all" ? null : JSON.stringify(next.sees), role.key).run(); }
+        try { await db.prepare("UPDATE roles SET sees = ? WHERE key = ?").bind(next.sees.mode === "all" && next.sees.team !== "own" ? null : JSON.stringify(next.sees), role.key).run(); }
         catch { return c.err("Who-can-see is not set up yet (schema_v29 has not been run)", 503); }
       }
       await db.prepare("DELETE FROM role_permissions WHERE role_key = ?").bind(role.key).run();

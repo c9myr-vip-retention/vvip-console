@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Avatar, Modal, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
+import { useLive } from "../live.js";
 import { hiddenPerm } from "../schedule/logic.js";
 
 const TEAMS = [{ value: "", label: "No team" }, { value: "A", label: "Team A" }, { value: "B", label: "Team B" }, { value: "C", label: "Team C" }];
@@ -10,8 +11,8 @@ const TEAMS = [{ value: "", label: "No team" }, { value: "A", label: "Team A" },
 function legacySet(u, perms) {
   const out = new Set(), mgr = !!u.manage_users;
   if (mgr) perms.forEach((p) => { if (p.defaults.admin) out.add(p.key); });
-  if (u.can_edit || mgr) ["contact.edit", "tasks.use", "schedule.swap_request"].forEach((k) => out.add(k));
-  if (u.can_delete || mgr) out.add("contact.delete");
+  if (u.can_edit || mgr) ["contact.edit", "contact.edit_own", "tasks.use", "projects.use", "schedule.swap_request"].forEach((k) => out.add(k));
+  if (u.can_delete || mgr) { out.add("contact.delete"); out.add("contact.delete_own"); }
   if (u.on_leaderboard) out.add("kpi.scored");
   return out;
 }
@@ -166,6 +167,7 @@ export default function AccountsPanel({ me }) {
     } catch (e) { setErr(e.message || "Could not load accounts"); setUsers((x) => x || []); }
   }, []);
   useEffect(() => { load(); }, [load]);
+  useLive(["people"], load);
 
   const roleOpts = roles.map((r) => ({ value: r.key, label: r.name }));
   const [ask, setAsk] = useState(null), [moving, setMoving] = useState(false);

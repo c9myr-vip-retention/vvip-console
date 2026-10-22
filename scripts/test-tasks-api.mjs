@@ -254,6 +254,28 @@ check("a view-only account cannot comment with a file (403)", (await call(V, "PO
 check("a file name is made safe", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "..\\..\\evil<script>.png", mime: "image/png", data: PNG }] })).data.comments[2].attachments[0].name === "evil_script_.png");
 check("the reset counts the attachments", (await call(A, "POST", "/api/work/tasks/clear", { preview: true })).data.counts.attachments === 3);
 
+// ---- live updates: a change bumps its area's counter, and nothing else does ----
+const pulse = async (tok) => (await call(tok, "GET", "/api/work/pulse"));
+const settle = () => new Promise((r) => setTimeout(r, 700));      // the bump runs after the response is sent
+let pu = await pulse(S);
+check("pulse is 200 with an areas object", pu.status === 200 && pu.data.areas && typeof pu.data.areas === "object", JSON.stringify(pu.data));
+check("pulse needs a sign-in (401)", (await pulse(null)).status === 401);
+const p0 = pu.data.areas;
+await call(S, "GET", "/api/work/tasks"); await call(S, "GET", "/api/work/workload"); await settle();
+check("reading does not move any counter", JSON.stringify((await pulse(S)).data.areas) === JSON.stringify(p0));
+const TP = (await call(S, "POST", "/api/work/tasks", { title: "[t] pulse" })).data.task.id; await settle();
+let p1 = (await pulse(Z)).data.areas;
+check("creating a task moves the tasks counter (and only that one)", (p1.tasks || 0) === (p0.tasks || 0) + 1 && (p1.schedule || 0) === (p0.schedule || 0), JSON.stringify([p0, p1]));
+await call(S, "POST", `/api/work/tasks/${TP}/comments`, { body: "hi" }); await settle();
+check("a comment moves it again", (await pulse(S)).data.areas.tasks === p1.tasks + 1);
+p1 = (await pulse(S)).data.areas;
+await call(V, "POST", `/api/work/tasks/${TP}/comments`, { body: "nope" }); await call(S, "POST", "/api/work/tasks", {}); await settle();
+check("a refused change (403) or a bad one (400) moves nothing", (await pulse(S)).data.areas.tasks === p1.tasks);
+await call(A, "POST", "/api/work/schedule/items", { items: [{ type_key: "reload", date: "2026-12-01", title: "[t] pulse", start_time: "10:00", end_time: "11:00", brands: [], who: [], note: "", repeat: "none" }] }); await settle();
+const p2 = (await pulse(S)).data.areas;
+check("a schedule change moves the schedule counter, not tasks", (p2.schedule || 0) === (p1.schedule || 0) + 1 && p2.tasks === p1.tasks, JSON.stringify([p1, p2]));
+sql("DELETE FROM schedule_items WHERE title = '[t] pulse'");
+
 // ---- clear all task data (a reset after testing). Runs last: it empties the task tables. ----
 for (const [who, tok] of [["agent", S], ["viewer", V]]) check(`${who} cannot clear task data (403)`, (await call(tok, "POST", "/api/work/tasks/clear", { preview: true })).status === 403);
 check("unauthenticated is 401", (await call(null, "POST", "/api/work/tasks/clear", { preview: true })).status === 401);

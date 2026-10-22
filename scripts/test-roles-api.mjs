@@ -48,7 +48,7 @@ check("an agent cannot read roles (403)", r.status === 403);
 check("unauthenticated is 401", (await call(null, "GET", "/api/roles")).status === 401);
 r = await call(A, "GET", "/api/roles");
 const keys = (r.data.perms || []).map((p) => p.key);
-check("admin reads the catalogue (41 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 41 && new Set(keys).size === 41 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
+check("admin reads the catalogue (47 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 47 && new Set(keys).size === 47 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
 check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
 check("every page has its own permission", ["page.changes", "page.performance", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.myday", "page.myperf", "page.account", "page.settings"].every((k) => keys.includes(k)));
 const agentRole = r.data.roles.find((x) => x.key === "agent"), adminRole = r.data.roles.find((x) => x.key === "admin");
@@ -91,7 +91,11 @@ check("a plain agent still cannot assign to others (lands on themself)", sara1.s
 check("supervisor cannot read roles (no users.manage) -> 403", (await call(T, "GET", "/api/roles")).status === 403);
 check("supervisor cannot read the activity log -> 403", (await call(T, "GET", "/api/activity")).status === 403);
 check("supervisor cannot list accounts -> 403", (await call(T, "GET", "/api/users")).status === 403);
-check("supervisor cannot manage projects -> 403", (await call(T, "POST", "/api/work/projects", { name: "[r] p" })).status === 403);
+const PA = (await call(A, "POST", "/api/work/projects", { name: "[r] admin's project", members: ["terry"] })).data.project.id;
+check("supervisor cannot archive or delete a project they do not own -> 403", (await call(T, "POST", `/api/work/projects/${PA}/archive`, { archived: 1 })).status === 403 && (await call(T, "POST", `/api/work/projects/${PA}/delete`)).status === 403);
+const PT = (await call(T, "POST", "/api/work/projects", { name: "[r] terry's own" })).data.project;
+check("supervisor (an agent-based role) can create and delete their own project", PT && (await call(T, "POST", `/api/work/projects/${PT.id}/delete`)).status === 200);
+sql(`DELETE FROM project_members WHERE project_id IN (${PA}, ${PT.id}); DELETE FROM projects WHERE id IN (${PA}, ${PT.id})`);;
 check("supervisor does not see every team's workload", (await call(T, "GET", "/api/work/workload")).data.people.every((p) => p.team === "B"));
 
 // ---- switch one back to the base default ----
@@ -165,7 +169,7 @@ await call(A, "POST", "/api/roles", { name: "Lead2", base: "agent" });
 await call(A, "POST", "/api/users", { username: "lena", password: PW, role_key: "lead2", team: "B" });
 r = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "lead2");
 check("a role based on Agent starts like Agent", r.start.includes("contact.delete") && !r.start.includes("schedule.manage") && r.perms.join() === r.start.join(), JSON.stringify(r));
-await call(A, "POST", "/api/roles/agent/update", { overrides: { "schedule.manage": true, "contact.delete": false } });
+await call(A, "POST", "/api/roles/agent/update", { overrides: { "schedule.manage": true, "contact.delete": false, "contact.delete_own": false } });
 r = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "lead2");
 check("edit the Agent role: Lead2 follows it", r.start.includes("schedule.manage") && !r.start.includes("contact.delete") && r.perms.includes("schedule.manage") && !r.perms.includes("contact.delete"), JSON.stringify(r));
 let dbL = rows("SELECT can_delete FROM users WHERE username = 'lena'")[0];
@@ -258,7 +262,7 @@ await call(A, "POST", "/api/users", { username: "pat", password: PW, role_key: "
 const idPia = rows("SELECT id FROM users WHERE username = 'pia'")[0].id, idPat = rows("SELECT id FROM users WHERE username = 'pat'")[0].id;
 const PIA = await login("pia"), PAT = await login("pat");
 check("two people on the same role start with the same permissions", JSON.stringify((await me(PIA)).perms.sort()) === JSON.stringify((await me(PAT)).perms.sort()));
-r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true, "contact.edit": false } });
+r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true, "contact.edit": false, "contact.edit_own": false } });
 check("give one person an extra permission and take one away", r.status === 200 && r.data.overrides["dashboard.view"] === true && r.data.overrides["contact.edit"] === false && r.data.perms.includes("dashboard.view") && !r.data.perms.includes("contact.edit"), JSON.stringify(r.data));
 let mp = await me(PIA), mt2 = await me(PAT);
 await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "page.contact": false } });
@@ -274,11 +278,11 @@ await call(A, "POST", "/api/roles/floor/update", { overrides: { "dashboard.view"
 r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true } });
 check("setting what the role already has leaves no exception", r.status === 200 && !("dashboard.view" in r.data.overrides), JSON.stringify(r.data));
 await call(A, "POST", "/api/roles/floor/update", { overrides: { "dashboard.view": null } });
-r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "contact.edit": null } });
+r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "contact.edit": null, "contact.edit_own": null } });
 check("clear one exception", r.status === 200 && !("contact.edit" in r.data.overrides) && r.data.perms.includes("contact.edit"), JSON.stringify(r.data));
 check("clearing it brings the old column back", rows("SELECT can_edit FROM users WHERE username = 'pia'")[0].can_edit === 1);
 await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "kpi.scored": false } });
-await call(A, "POST", "/api/roles/floor/update", { overrides: { "contact.delete": false } });
+await call(A, "POST", "/api/roles/floor/update", { overrides: { "contact.delete": false, "contact.delete_own": false } });
 check("editing the role keeps the exceptions and re-syncs the columns", rows("SELECT can_delete, on_leaderboard FROM users WHERE username = 'pia'")[0].can_delete === 0 && rows("SELECT on_leaderboard FROM users WHERE username = 'pia'")[0].on_leaderboard === 0 && JSON.stringify(Object.keys(JSON.parse(rows("SELECT perm_overrides FROM users WHERE username = 'pia'")[0].perm_overrides)).sort()) === JSON.stringify(["kpi.scored", "tasks.assign_others"]));
 check("unknown permission is 400", (await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "nope.nope": true } })).status === 400);
 check("unknown account is 404", (await call(A, "POST", "/api/users/perms", { id: 999999, overrides: { "dashboard.view": true } })).status === 404);
@@ -353,8 +357,112 @@ r = await call(A, "GET", "/api/rtn/board");
 check("the board agent list carries the scored flag and team", jrow(r.data.team) && jrow(r.data.team).on_leaderboard === 1 && jrow(r.data.team).team === "A", JSON.stringify((r.data.team || []).slice(0, 3)));
 sql("DELETE FROM player_days WHERE player_key LIKE 'zz_sc%'");
 
+// ---- a role can be limited to the people of its own team ----
+const OT = (await call(A, "POST", "/api/roles", { name: "OwnTeam9", base: "agent" })).data.role.key;
+await call(A, "POST", "/api/users", { username: "ow9", password: PW, role_key: OT, team: "A" });
+await call(A, "POST", "/api/users", { username: "ob9", password: PW, role_key: JR, team: "B" });
+const OW = await login("ow9");
+check("by default a role sees every team", (await peopleOf(OW)).includes("ob9") && (await roleOf(OT)).sees.team === "all");
+r = await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", list: [], team: "own" } });
+check("a role can be limited to its own team", r.status === 200 && r.data.role.sees.team === "own" && r.data.role.sees.mode === "all", JSON.stringify(r.data));
+pp = await peopleOf(OW);
+check("it then sees its own team (and itself), not the other team", pp.includes("ow9") && pp.includes("jn9") && pp.includes("vw9") && !pp.includes("ob9") && !pp.includes("aldo"), JSON.stringify(pp));
+check("the admin still sees every team", (await peopleOf(A)).includes("ob9"));
+pp = (await call(OW, "GET", "/api/work/workload")).data.people.map((x) => x.username);
+check("the workload follows it too", pp.includes("jn9") && !pp.includes("ob9"), JSON.stringify(pp));
+sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_ot_1', 'BM69', 'V')");
+r = await call(OW, "GET", "/api/rtn/board");
+check("and so does the board's agent list", (r.data.team || []).some((x) => x.username === "jn9") && !(r.data.team || []).some((x) => x.username === "ob9"), JSON.stringify((r.data.team || []).map((x) => x.username)));
+sql("DELETE FROM player_days WHERE player_key LIKE 'zz_ot%'");
+r = await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "rank" } });
+check("changing only the role limit keeps the team limit", r.status === 200 && r.data.role.sees.mode === "rank" && r.data.role.sees.team === "own", JSON.stringify(r.data.role.sees));
+check("a bad team value is 400", (await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", team: "nope" } })).status === 400);
+check("an agent cannot change it (403)", (await call(S, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", team: "all" } })).status === 403);
+await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", list: [], team: "all" } });
+check("setting it back to every team", (await peopleOf(OW)).includes("ob9") && (await roleOf(OT)).sees.team === "all" && isNull(rows(`SELECT sees FROM roles WHERE key = '${OT}'`)[0].sees));
+
+// ---- every permission comes as "own" and "any": switch the "any" one off and the person keeps working on their own things ----
+sql("UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0, perm_overrides = NULL WHERE username = 'sara'");   // sara is a plain old-settings agent again
+const OWN = (await call(A, "POST", "/api/roles", { name: "OwnOnly9", base: "agent" })).data.role.key;
+r = await call(A, "POST", `/api/roles/${OWN}/update`, { overrides: { "contact.edit": false, "contact.delete": false, "schedule.edit_own": true, "templates.own": true, "flows.own": true } });
+check("an agent role with the 'any' contact permissions off still has the 'own' ones", r.status === 200 && r.data.role.perms.includes("contact.edit_own") && r.data.role.perms.includes("contact.delete_own") && !r.data.role.perms.includes("contact.edit") && !r.data.role.perms.includes("contact.delete"), JSON.stringify(r.data.role.perms));
+await call(A, "POST", "/api/users", { username: "own9", password: PW, role_key: OWN, team: "B" });
+const O9 = await login("own9");
+let mo = await me(O9);
+check("/api/me: can_edit stays true for an own-only account, and lists the own permissions", mo.can_edit === true && has(mo, "contact.edit_own") && !has(mo, "contact.edit"), JSON.stringify(mo));
+const snap = rows("SELECT date('now','+8 hours') AS d")[0].d;
+const cp = (pk, extra = {}) => ({ snapshot_date: snap, player_key: pk, brand: "SK69", tier_segment: "V", status: "CALLED", ...extra });
+sql(`DELETE FROM contact_log WHERE player_key LIKE 'zz_own%'; DELETE FROM player_notes WHERE player_key LIKE 'zz_own%'; INSERT INTO contact_log (snapshot_date, player_key, brand, tier_segment, assigned_to, status, updated_by) VALUES ('${snap}', 'zz_own_sara', 'SK69', 'V', 'sara', 'CALLED', 'sara')`);
+check("own-only: logging a contact on an unassigned player works", (await call(O9, "POST", "/api/rtn/contact", cp("zz_own_free"))).status === 200);
+check("own-only: a player assigned to someone else is off limits (403)", (await call(O9, "POST", "/api/rtn/contact", cp("zz_own_sara"))).status === 403);
+r = await call(S, "POST", "/api/rtn/contact", cp("zz_own_free", { status: "NO ANSWER" }));
+check("own-only: the other agent (with the 'any' permission) can still do it", r.status === 200, JSON.stringify(r.data));
+check("own-only: handing a player to someone else is refused", (await call(O9, "POST", "/api/rtn/contact", cp("zz_own_mine", { assigned_to: "sara" }))).status === 403);
+check("own-only: assigning to themself is fine", (await call(O9, "POST", "/api/rtn/contact", cp("zz_own_mine", { assigned_to: "own9" }))).status === 200);
+check("own-only: once assigned to them, a player is theirs", (await call(O9, "POST", "/api/rtn/contact", cp("zz_own_mine", { assigned_to: "own9", status: "RECOVERED" }))).status === 200);
+check("own-only: clearing a contact somebody else logged is refused", (await call(O9, "POST", "/api/rtn/contact", { snapshot_date: snap, player_key: "zz_own_sara", brand: "SK69", tier_segment: "V", clear: true })).status === 403 && rows("SELECT COUNT(*) n FROM contact_log WHERE player_key = 'zz_own_sara'")[0].n === 1);
+check("own-only: clearing their own contact works", (await call(O9, "POST", "/api/rtn/contact", { snapshot_date: snap, player_key: "zz_own_mine", brand: "SK69", tier_segment: "V", clear: true })).status === 200 && rows("SELECT COUNT(*) n FROM contact_log WHERE player_key = 'zz_own_mine'")[0].n === 0);
+check("own-only: a note on someone else's player is refused", (await call(O9, "POST", "/api/rtn/notes", { player_key: "zz_own_sara", brand: "SK69", note: "x" })).status === 403);
+sql("INSERT INTO player_notes (player_key, brand, note, created_by) VALUES ('zz_own_sara', 'SK69', 'sara wrote this', 'sara')");
+const noteId = rows("SELECT id FROM player_notes WHERE player_key = 'zz_own_sara'")[0].id;
+check("own-only: deleting somebody else's note is refused", (await call(O9, "DELETE", `/api/rtn/notes/${noteId}`)).status === 403 && rows("SELECT COUNT(*) n FROM player_notes WHERE id = " + noteId)[0].n === 1);
+check("an agent with the 'any' permission can delete it", (await call(S, "DELETE", `/api/rtn/notes/${noteId}`)).status === 200);
+check("own-only: a note on a free player, then deleting it", (await call(O9, "POST", "/api/rtn/notes", { player_key: "zz_own_free", brand: "SK69", note: "mine" })).status === 200 && (await call(O9, "DELETE", `/api/rtn/notes/${rows("SELECT id FROM player_notes WHERE player_key = 'zz_own_free'")[0].id}`)).status === 200);
+sql("DELETE FROM contact_log WHERE player_key LIKE 'zz_own%'; DELETE FROM player_notes WHERE player_key LIKE 'zz_own%'");
+r = await call(A, "POST", `/api/roles/${OWN}/update`, { overrides: { "contact.edit_own": false, "contact.delete_own": false } });
+mo = await me(O9);
+check("with both versions off the account is view-only", mo.can_edit === false && (await call(O9, "POST", "/api/rtn/contact", cp("zz_own_x"))).status === 403);
+await call(A, "POST", `/api/roles/${OWN}/update`, { overrides: { "contact.edit_own": null, "contact.delete_own": null } });
+
+// schedule: items they created or are on
+const si = (who = []) => ({ items: [{ type_key: "reload", date: "2026-12-05", title: "[r] own item", start_time: "10:00", end_time: "11:00", brands: [], who, note: "", repeat: "none" }] });
+await call(A, "POST", "/api/work/schedule/items", si(["own9"]));
+await call(A, "POST", "/api/work/schedule/items", si(["sara"]));
+check("own schedule: can add items", (await call(O9, "POST", "/api/work/schedule/items", si())).status === 201);
+const sch = (await call(A, "GET", "/api/work/schedule?from=2026-12-05&to=2026-12-05")).data.items.filter((x) => x.title === "[r] own item");
+const onMe = sch.find((x) => x.who.includes("own9")), byMe = sch.find((x) => x.created_by === "own9"), other = sch.find((x) => x.who.includes("sara"));
+check("the schedule items carry who made them", onMe && byMe && other && other.created_by === "aldo", JSON.stringify(sch));
+check("own schedule: edits an item they are on", (await call(O9, "POST", `/api/work/schedule/items/${onMe.id}/update`, { note: "hi" })).status === 200);
+check("own schedule: edits an item they created", (await call(O9, "POST", `/api/work/schedule/items/${byMe.id}/update`, { note: "hi" })).status === 200);
+check("own schedule: cannot change someone else's item (403)", (await call(O9, "POST", `/api/work/schedule/items/${other.id}/update`, { note: "no" })).status === 403 && (await call(O9, "POST", `/api/work/schedule/items/${other.id}/delete`)).status === 403);
+check("own schedule: deletes an item they created", (await call(O9, "POST", `/api/work/schedule/items/${byMe.id}/delete`)).status === 200);
+check("own schedule: still cannot use admin tools (bulk delete, types)", (await call(O9, "POST", "/api/work/schedule/items/bulk-delete", { preview: true })).status === 403 && (await call(O9, "POST", "/api/work/schedule/types", { name: "Nope", color: "#112233" })).status === 403);
+check("an agent without the schedule permission cannot add (403)", (await call(S, "POST", "/api/work/schedule/items", si())).status === 403);
+sql("DELETE FROM schedule_items WHERE title = '[r] own item'");
+
+// templates and flows: the ones they made or administer
+r = await call(O9, "POST", "/api/work/templates", { name: "[r] my template", deadline: "1 day" });
+const myTpl = r.data.template && r.data.template.id;
+const adminTpl = (await call(A, "POST", "/api/work/templates", { name: "[r] admin template", deadline: "1 day" })).data.template.id;
+check("own templates: can create one", r.status === 201 && r.data.template.created_by === "own9", JSON.stringify(r.data));
+check("own templates: edit and delete their own", (await call(O9, "POST", "/api/work/templates", { id: myTpl, name: "[r] my template 2", deadline: "2 days" })).status === 200 && (await call(O9, "POST", `/api/work/templates/${myTpl}/delete`)).status === 200);
+check("own templates: not someone else's (403)", (await call(O9, "POST", "/api/work/templates", { id: adminTpl, name: "hijack" })).status === 403 && (await call(O9, "POST", `/api/work/templates/${adminTpl}/delete`)).status === 403);
+check("an agent without it still cannot create (403)", (await call(S, "POST", "/api/work/templates", { name: "x" })).status === 403);
+r = await call(O9, "POST", "/api/work/flows", { name: "[r] my flow", admin_user: "sara" });
+const myFlow = r.data.flow && r.data.flow.id;
+const adminFlow = (await call(A, "POST", "/api/work/flows", { name: "[r] admin flow", admin_user: "aldo" })).data.flow.id;
+check("own flows: they become the administrator whatever they send", r.status === 201 && r.data.flow.admin_user === "own9", JSON.stringify(r.data));
+const fl = (await call(O9, "GET", "/api/work/flows")).data.flows;
+check("own flows: the list shows only flows they administer", fl.some((f) => f.id === myFlow) && !fl.some((f) => f.id === adminFlow), JSON.stringify(fl.map((f) => f.name)));
+check("own flows: not someone else's (403)", (await call(O9, "POST", "/api/work/flows", { id: adminFlow, name: "hijack" })).status === 403 && (await call(O9, "POST", `/api/work/flows/${adminFlow}/delete`)).status === 403);
+check("own flows: edit and delete their own", (await call(O9, "POST", "/api/work/flows", { id: myFlow, name: "[r] my flow 2" })).status === 200 && (await call(O9, "POST", `/api/work/flows/${myFlow}/delete`)).status === 200);
+check("an agent without it cannot list flows (403)", (await call(S, "GET", "/api/work/flows")).status === 403);
+sql("DELETE FROM flows WHERE name LIKE '[r]%'; DELETE FROM task_templates WHERE name LIKE '[r]%' OR name = 'hijack'");
+
+// the migration copies existing OFF switches over, so nobody gains access by the split
+sql("INSERT OR REPLACE INTO roles (key, name, base, builtin, sort) VALUES ('mig9', 'Mig9', 'agent', 0, 99); INSERT OR REPLACE INTO role_permissions (role_key, perm, allowed) VALUES ('mig9', 'contact.edit', 0), ('mig9', 'schedule.manage', 1), ('mig9', 'flows.manage', 0)");
+sql(`UPDATE users SET perm_overrides = '{"contact.delete":false,"templates.manage":false,"projects.manage":true}' WHERE username = 'own9'`);
+execFileSync("npx", ["wrangler", "d1", "execute", "groupb-tracker-db", "--local", "--persist-to", PERSIST, "--file", "schema/schema_v32_own_permissions.sql"], { stdio: "pipe" });
+const mrows = rows("SELECT perm, allowed FROM role_permissions WHERE role_key = 'mig9' ORDER BY perm").map((x) => `${x.perm}=${x.allowed}`).join();
+check("migration: roles with 'any' off get the 'own' one off too, nothing else changes", mrows === "contact.edit=0,contact.edit_own=0,flows.manage=0,flows.own=0,schedule.manage=1", mrows);
+const ov = JSON.parse(rows("SELECT perm_overrides FROM users WHERE username = 'own9'")[0].perm_overrides);
+check("migration: personal exceptions too", ov["contact.delete_own"] === false && ov["templates.own"] === false && ov["projects.manage"] === true && !("contact.edit_own" in ov), JSON.stringify(ov));
+execFileSync("npx", ["wrangler", "d1", "execute", "groupb-tracker-db", "--local", "--persist-to", PERSIST, "--file", "schema/schema_v32_own_permissions.sql"], { stdio: "pipe" });
+check("migration: running it twice changes nothing more", rows("SELECT COUNT(*) n FROM role_permissions WHERE role_key = 'mig9'")[0].n === 5);
+sql("DELETE FROM role_permissions WHERE role_key = 'mig9'; DELETE FROM roles WHERE key = 'mig9'");
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9','ow9','ob9','own9'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

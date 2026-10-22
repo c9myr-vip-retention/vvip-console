@@ -1,6 +1,11 @@
-// My day (agent home): my ongoing task with a live timer, what is due today, what is overdue, and the rest of my list.
+// My day (agent home), top to bottom: a greeting, a strip of numbers (players to contact, open, due today, overdue, done today), then two columns.
+// Left: what I am working on now (live timer) and my task list. Right: today's schedule, then the daily work (contact next, check-in, grace).
 import React, { useEffect, useMemo, useState } from "react";
 import { Seg, BrandBadge } from "../ui/index.jsx";
+import { api as sched } from "../schedule/api.js";
+import { Brands, typeOf } from "../schedule/forms.jsx";
+import { HIDE_SHIFTS, byTime, expand, timeStr } from "../schedule/logic.js";
+import { useLive } from "../live.js";
 import { api, TEAMS, BRAND_ORDER, dispName, dispId, keyMetric, ckey, fmt } from "../../App.jsx";
 import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
@@ -12,6 +17,7 @@ import {
 
 const HT = [["active", "Active"], ["over", "Overdue"], ["today", "Due today"], ["done", "Done"]];
 const BUCKET_ORDER = ["over", "today", "week", "next", "later", "none", "done"];
+const dateLine = () => new Date(Date.now() + 8 * 3600e3).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
 const greet = () => { const h = new Date(Date.now() + 8 * 3600e3).getUTCHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; };
 
 /** Right-column summary card: title + count, a few rows, "Open" goes to the full page. */
@@ -29,6 +35,50 @@ const SideRow = ({ onClick, name, brand, sub, right }) => (
     {right}
   </div>
 );
+
+/** One number of the strip. onClick makes it a button; tone "alert" turns the border red. */
+const Tile = ({ label, value, sub, onClick, tone }) => (
+  <div className={"card kpi" + (onClick ? " tile" : "") + (tone === "alert" ? " alert" : "")} onClick={onClick} tabIndex={onClick ? 0 : undefined} onKeyDown={onClick ? (e) => e.key === "Enter" && onClick() : undefined}>
+    <div className="l">{label}</div>
+    <div className="v" style={tone === "alert" ? { color: "var(--neg)" } : undefined}>{value}</div>
+    <div className="d dim">{sub}</div>
+  </div>
+);
+
+/** What is on the schedule today (reload events, meetings, maintenance...). Updates by itself when somebody changes the schedule. */
+function TodayCard({ ctx, today }) {
+  const [data, setData] = useState(null);
+  const [tick, setTick] = useState(0);
+  useLive(["schedule"], () => setTick((n) => n + 1));
+  useEffect(() => {
+    let off = false;
+    sched.schedule(today, today).then((r) => !off && setData(r), () => !off && setData({ items: [], types: [] }));
+    return () => { off = true; };
+  }, [today, tick]);
+  const list = useMemo(() => (data ? expand((data.items || []).filter((i) => !i.off && (!HIDE_SHIFTS || i.type_key !== "shift")), today, today).sort(byTime) : []), [data, today]);
+  const types = (data && data.types) || [];
+  return (
+    <div className="card">
+      <h3>Today on the schedule<span className="dim" style={{ textTransform: "none", letterSpacing: 0 }}> {data ? list.length : ""}</span><span className="grow" /><button className="btn sm" onClick={() => ctx.goto && ctx.goto("sched")}>Open →</button></h3>
+      <div className="body" style={{ paddingTop: 4 }}>
+        {data === null && <div className="dim" style={{ padding: "14px 0" }}>Loading…</div>}
+        {data && !list.length && <div className="dim" style={{ padding: "14px 0" }}>Nothing scheduled for today.</div>}
+        {list.slice(0, 6).map((o) => {
+          const t = typeOf(types, o.item.type_key);
+          return (
+            <div key={o.key} className="lrow" onClick={() => ctx.goto && ctx.goto("sched")}>
+              <span className="pill np" style={{ "--c": t.color }}>{t.name}</span>
+              <div style={{ minWidth: 0, flex: 1 }}><b style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>{o.item.title}</b>
+                {o.item.brands.length > 0 && <div style={{ marginTop: 2 }}><Brands list={o.item.brands} max={4} /></div>}</div>
+              <span className="dim mono" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{timeStr(o.item)}</span>
+            </div>
+          );
+        })}
+        {list.length > 6 && <div className="wmore" onClick={() => ctx.goto && ctx.goto("sched")}>Show all {list.length}</div>}
+      </div>
+    </div>
+  );
+}
 
 /** Contact next / Check-in / Grace to claim: the agent's daily-work summary, from the board in ctx plus the two read-only endpoints those pages use. */
 function DailyCards({ ctx }) {
@@ -98,6 +148,9 @@ export default function MyDay({ ctx }) {
   const list = filt(ht);
   const groups = BUCKET_ORDER.map((k) => [k, BUCKETS.find((b) => b[0] === k)[1], list.filter((t) => bucketOf(t) === k).sort(byDue)]).filter((g) => g[2].length);
   const ed = canEdit(me);
+  const snap = ctx.board?.snapshot_date;
+  const toContact = useMemo(() => contactTodo(ctx.teamData, ctx.contacts, snap, me.username).length, [ctx.teamData, ctx.contacts, snap, me.username]);
+  const doneToday = mine.filter((t) => t.status === "done" && t.completed_at && new Date(Date.parse(t.completed_at.replace(" ", "T") + "Z") + 8 * 3600e3).toISOString().slice(0, 10) === today).length;
 
   const row = (t) => (
     <div key={t.id} className="frow" onClick={() => openTask(t.id)} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && openTask(t.id)}>
@@ -114,25 +167,26 @@ export default function MyDay({ ctx }) {
       {ed && t.status === "pending" && <button className="btn sm" disabled={busy} onClick={(e) => { e.stopPropagation(); run(t, "start"); }}>▶ Start</button>}
     </div>
   );
-  const mini = (title, items, empty, extra) => (
-    <div className="card">
-      <h3>{title} <span className="dim" style={{ textTransform: "none", letterSpacing: 0 }}>{items.length}</span>{extra}</h3>
-      <div>{items.length ? items.slice(0, 5).map(row) : <div className="body dim">{empty}</div>}{items.length > 5 && <div className="wmore" onClick={() => setHt(title === "Overdue" ? "over" : "today")}>Show all {items.length}</div>}</div>
-    </div>
-  );
-
   return (
     <div>
       <div className="hello top">
         <div>
           <h1>{greet()}, {me.username}</h1>
-          <p>{over.length} task{over.length === 1 ? "" : "s"} overdue · {dueToday.length} due today · {active.length} open</p>
+          <p>{dateLine()}{ctx.viewTeam ? ` · Team ${ctx.viewTeam}` : ""}</p>
         </div>
         <span className="grow" />
         {ed && <button className="btn pri" onClick={() => newTask({})}>+ New task</button>}
       </div>
       {error && <div className="banner crit">{error}</div>}
       <ConflictBanner conflict={conflict} onOpen={(id) => { clearConflict(); openTask(id); }} onClose={clearConflict} />
+
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", marginBottom: 14 }}>
+        {snap && <Tile label="Players to contact" value={toContact} sub={toContact ? "waiting for you" : "all done"} onClick={() => ctx.goto && ctx.goto("queue")} />}
+        <Tile label="Open tasks" value={active.length} sub="assigned to me" onClick={() => setHt("active")} />
+        <Tile label="Due today" value={dueToday.length} sub={dueToday.length ? "finish these today" : "nothing due"} onClick={() => setHt("today")} />
+        <Tile label="Overdue" value={over.length} sub={over.length ? "needs attention" : "all on time"} tone={over.length ? "alert" : ""} onClick={() => setHt("over")} />
+        <Tile label="Done today" value={doneToday} sub="completed tasks" onClick={() => setHt("done")} />
+      </div>
 
       {ongoing ? (
         <div className="card" style={{ marginBottom: 14 }}>
@@ -163,7 +217,13 @@ export default function MyDay({ ctx }) {
             <div className="bar" style={{ padding: "10px 14px 0" }}>
               <Seg value={ht} onChange={setHt} options={HT.map(([k, l]) => ({ value: k, label: l, count: filt(k).length }))} />
             </div>
-            {groups.length === 0 && <div className="body dim" style={{ padding: 30, textAlign: "center" }}>Nothing here. Nice.</div>}
+            {groups.length === 0 && (
+              <div className="body" style={{ padding: "28px 20px", textAlign: "center", display: "grid", gap: 8, justifyItems: "center" }}>
+                <b>{ht === "done" ? "Nothing completed yet" : ht === "active" && !mine.length ? "No tasks yet" : "Nothing here. Nice."}</b>
+                <span className="dim">{ht === "active" && !mine.length ? "Tasks assigned to you, and ones you make for yourself, show up here." : "Switch the tab above to see the rest of your list."}</span>
+                {ed && ht === "active" && !mine.length && <button className="btn pri" onClick={() => newTask({})}>+ New task</button>}
+              </div>
+            )}
             {groups.map(([k, label, items]) => (
               <div key={k}>
                 <div className="ddh" style={{ padding: "12px 14px 4px" }}>{label} · {items.length}</div>
@@ -172,9 +232,8 @@ export default function MyDay({ ctx }) {
             ))}
           </div>
           <div style={{ display: "grid", gap: 14 }}>
+            <TodayCard ctx={ctx} today={today} />
             <DailyCards ctx={ctx} />
-            {mini("Due today", dueToday, "Nothing due today.")}
-            {mini("Overdue", over, "Nothing overdue.")}
           </div>
         </div>
       )}

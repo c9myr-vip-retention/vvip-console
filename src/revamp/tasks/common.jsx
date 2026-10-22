@@ -3,6 +3,7 @@ import { can } from "../perms.js";
 import React, { useEffect, useRef, useState } from "react";
 import { work } from "../api/work.js";
 import { toast } from "../ui/index.jsx";
+import { useLive } from "../live.js";
 import * as mock from "./fixtures.js";
 export { STATUS, dueInfo, elapsedSec, fmtElapsed, todayNum, toNum, toStr, fmtDay, BUCKETS, bucketOf, byDue } from "../taskviews/shared.js";
 
@@ -107,5 +108,6 @@ export function useTasksData() {
     }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  useLive(["tasks", "projects", "people"], load);        // someone else changed a task: it shows up here without a refresh
   return { ...state, reload: load };
 }

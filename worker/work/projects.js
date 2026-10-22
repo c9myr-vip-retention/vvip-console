@@ -63,6 +63,14 @@ async function projectRows(c, { id = null, archived = null } = {}) {
   return rows.map((r) => ({ ...r, members: mem.get(r.id) || [] }));
 }
 
+/** May this person change this project? "Manage any project", or "own projects" and they own it (its creator is its owner member). */
+async function mayChange(c, id) {
+  if (c.can("projects.manage")) return true;
+  if (!c.can("projects.use")) return false;
+  return !!(await c.env.DB.prepare("SELECT 1 AS x FROM project_members WHERE project_id = ? AND username = ? AND role = 'owner'").bind(id, c.user.username).first());
+}
+const MINE = "You can only change projects you own";
+
 async function projects(c, m) {
   const { path, method } = c, db = c.env.DB;
   if (path === "/api/work/projects" && method === "GET") {
@@ -70,7 +78,7 @@ async function projects(c, m) {
     return c.ok({ projects: await projectRows(c, { archived: a === "1" ? 1 : 0 }) });
   }
   if (path === "/api/work/projects" && method === "POST") {
-    if (!c.can("projects.manage")) return c.err("Admin only", 403);
+    if (!c.can("projects.manage") && !c.can("projects.use")) return c.err("You do not have permission to create projects", 403);
     const b = await body(c);
     const name = str(b.name, 120);
     if (!name) return c.err("Project name is required");
@@ -82,6 +90,7 @@ async function projects(c, m) {
       if (!Number.isInteger(id)) return c.err("Bad project id");
       const cur = await db.prepare("SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL").bind(id).first();
       if (!cur) return c.err("Project not found", 404);
+      if (!(await mayChange(c, id))) return c.err(MINE, 403);
       const keep = uniq([...wanted]);
       const stmts = [
         db.prepare("UPDATE projects SET name = ?, description = ?, privacy = ? WHERE id = ?").bind(name, description, privacy, id),
@@ -118,16 +127,16 @@ async function projects(c, m) {
     return c.ok({ project: p, activity: results || [] });
   }
   if ((m = path.match(/^\/api\/work\/projects\/(\d+)\/archive$/)) && method === "POST") {
-    if (!c.can("projects.manage")) return c.err("Admin only", 403);
     const b = await body(c), id = Number(m[1]);
+    if (!(await mayChange(c, id))) return c.err(c.can("projects.use") ? MINE : "You do not have permission to change projects", 403);
     const r = await db.prepare("UPDATE projects SET archived = ? WHERE id = ? AND deleted_at IS NULL").bind(b.archived ? 1 : 0, id).run();
     if (!r.meta.changes) return c.err("Project not found", 404);
     c.log(c.user, "work", `${b.archived ? "Archived" : "Unarchived"} project #${id}`);
     return c.ok({ project: (await projectRows(c, { id }))[0] });
   }
   if ((m = path.match(/^\/api\/work\/projects\/(\d+)\/delete$/)) && method === "POST") {  // soft delete -> Recycle bin
-    if (!c.can("projects.manage")) return c.err("Admin only", 403);
     const id = Number(m[1]);
+    if (!(await mayChange(c, id))) return c.err(c.can("projects.use") ? MINE : "You do not have permission to delete projects", 403);
     const r = await db.prepare("UPDATE projects SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ? AND deleted_at IS NULL").bind(c.user.username, id).run();
     if (!r.meta.changes) return c.err("Project not found", 404);
     c.log(c.user, "work", `Deleted project #${id}`);
@@ -161,11 +170,14 @@ async function flowRows(db, id = null) {
 async function flows(c, m) {
   const { path, method } = c, db = c.env.DB;
   if (!path.startsWith("/api/work/flows")) return null;
-  if (!c.can("flows.manage")) return c.err("Admin only", 403);
-  if (path === "/api/work/flows" && method === "GET") return c.ok({ flows: await flowRows(db) });
+  const anyFlow = c.can("flows.manage");                       // "Manage any flow"; "flows.own" reaches only the flows they administer
+  if (!anyFlow && !c.can("flows.own")) return c.err("Admin only", 403);
+  const meF = c.user.username, ownsFlow = async (id) => !!(await db.prepare("SELECT 1 AS x FROM flows WHERE id = ? AND admin_user = ? AND deleted_at IS NULL").bind(id, meF).first());
+  if (path === "/api/work/flows" && method === "GET") { const all = await flowRows(db); return c.ok({ flows: anyFlow ? all : all.filter((f) => f.admin_user === meF) }); }
   if (path === "/api/work/flows" && method === "POST") {
     const b = await body(c), name = str(b.name, 120);
     if (!name) return c.err("Flow name is required");
+    if (!anyFlow) b.admin_user = meF;                          // they become (and stay) the flow's administrator
     const [adminUser, defAssignee] = await Promise.all(["admin_user", "default_assignee"].map(async (k) => (b[k] ? (await existingUsers(db, [b[k]]))[0] || null : null)));
     if (b.admin_user && !adminUser) return c.err("Flow administrator is not a known user");
     if (b.default_assignee && !defAssignee) return c.err("Default assignee is not a known user");
@@ -175,6 +187,7 @@ async function flows(c, m) {
       if (!Number.isInteger(projectId) || !(await db.prepare("SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL").bind(projectId).first())) return c.err("Project not found", 404);
     }
     let id = b.id !== undefined && b.id !== null && b.id !== "" ? Number(b.id) : null;
+    if (id !== null && !anyFlow && !(await ownsFlow(id))) return c.err("You can only change flows you administer", 403);
     if (id !== null) {
       const r = await db.prepare("UPDATE flows SET name = ?, project_id = ?, admin_user = ?, default_assignee = ? WHERE id = ? AND deleted_at IS NULL").bind(name, projectId, adminUser, defAssignee, id).run();
       if (!r.meta.changes) return c.err("Flow not found", 404);
@@ -188,6 +201,7 @@ async function flows(c, m) {
   }
   if ((m = path.match(/^\/api\/work\/flows\/(\d+)\/delete$/)) && method === "POST") {
     const id = Number(m[1]);
+    if (!anyFlow && !(await ownsFlow(id))) return c.err("You can only delete flows you administer", 403);
     const r = await db.prepare("UPDATE flows SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ? AND deleted_at IS NULL").bind(c.user.username, id).run();
     if (!r.meta.changes) return c.err("Flow not found", 404);
     c.log(c.user, "work", `Deleted flow #${id}`);
@@ -206,7 +220,9 @@ async function templates(c, m) {
     const { results } = await db.prepare("SELECT id, name, deadline, assignee, checklist, created_by FROM task_templates WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE").all();
     return c.ok({ templates: (results || []).map(tplOut) });
   }
-  if (!c.can("templates.manage")) return c.err("Admin only", 403);   // every write below is admin only (agents and viewers get 403)
+  const anyTpl = c.can("templates.manage");                    // "Manage any task template"; "templates.own" reaches only the ones they created
+  if (!anyTpl && !c.can("templates.own")) return c.err("Admin only", 403);   // every write below needs one of the two (agents and viewers get 403)
+  const ownsTpl = async (id) => !!(await db.prepare("SELECT 1 AS x FROM task_templates WHERE id = ? AND created_by = ? AND deleted_at IS NULL").bind(id, c.user.username).first());
   if (path === "/api/work/templates" && method === "POST") {
     const b = await body(c), name = str(b.name, 120);
     if (!name) return c.err("Template name is required");
@@ -216,6 +232,7 @@ async function templates(c, m) {
     if (b.assignee) { assignee = (await existingUsers(db, [b.assignee]))[0] || null; if (!assignee) return c.err("Assignee is not a known user"); }
     const checklist = JSON.stringify((Array.isArray(b.checklist) ? b.checklist : []).map((x) => str(x, 200)).filter(Boolean).slice(0, 50));
     let id = b.id !== undefined && b.id !== null && b.id !== "" ? Number(b.id) : null;
+    if (id !== null && !anyTpl && !(await ownsTpl(id))) return c.err("You can only change templates you created", 403);
     if (id !== null) {
       const r = await db.prepare("UPDATE task_templates SET name = ?, deadline = ?, assignee = ?, checklist = ? WHERE id = ? AND deleted_at IS NULL").bind(name, deadline, assignee, checklist, id).run();
       if (!r.meta.changes) return c.err("Template not found", 404);
@@ -230,6 +247,7 @@ async function templates(c, m) {
   }
   if ((m = path.match(/^\/api\/work\/templates\/(\d+)\/delete$/)) && method === "POST") {
     const id = Number(m[1]);
+    if (!anyTpl && !(await ownsTpl(id))) return c.err("You can only delete templates you created", 403);
     const r = await db.prepare("UPDATE task_templates SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ? AND deleted_at IS NULL").bind(c.user.username, id).run();
     if (!r.meta.changes) return c.err("Template not found", 404);
     c.log(c.user, "work", `Deleted template #${id}`);

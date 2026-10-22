@@ -6,6 +6,7 @@
 
 import { handleWork } from "./work/index.js";
 import { handleRoles } from "./roles.js";
+import { liveBump } from "./work/pulse.js";
 import { loadRoles, resolvePerms, rolePerms, legacyColumns, filterPeople } from "./perms.js";
 
 function corsFor(request) {
@@ -1815,8 +1816,8 @@ async function autoAssignRosters(env, assignedBy = "cron") {
   return out;
 }
 
-export default {
-  async fetch(request, env, ctx) {
+const worker = {
+  async route(request, env, ctx) {
     CORS = corsFor(request);
     if (env.LARK_HOST) LARK.HOST = env.LARK_HOST;   // local preview only: point Lark calls at a mock; unset in production
     const url = new URL(request.url);
@@ -2010,9 +2011,25 @@ export default {
     const perms = resolvePerms(user, roleMap);
     const can = (k) => perms.has(k);
     const canManage = can("users.manage");
-    const canEdit = can("contact.edit");
-    const canDelete = can("contact.delete");
+    // Contacts come as a pair: "any" (contact.edit / contact.delete) and "own" (contact.edit_own / contact.delete_own). canEdit / canDelete mean
+    // "some version of it"; the *Any flags say whether it reaches players and notes that belong to other agents.
+    const canEditAny = can("contact.edit"), canDeleteAny = can("contact.delete");
+    const canEdit = canEditAny || can("contact.edit_own");
+    const canDelete = canDeleteAny || can("contact.delete_own");
     const NOEDIT = () => err("View-only — your account has no edit permission", 403);
+    const OWNONLY = () => err("You can only work on players assigned to you", 403);
+    // Who a player is assigned to today: the day's contact row first, then the standing assignment. null = nobody (anyone may pick it up).
+    const ownerOf = async (b) => {
+      const row = b.snapshot_date ? await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
+        .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first() : null;
+      if (row && row.assigned_to) return row.assigned_to;
+      const a = await env.DB.prepare("SELECT agent FROM player_assignment WHERE brand = ? AND player_key = ? AND active = 1 ORDER BY (tier_segment = ?) DESC LIMIT 1")
+        .bind(b.brand, b.player_key, b.tier_segment || "").first();
+      if (a) return a.agent;
+      if (b.snapshot_date) return null;
+      const last = await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE player_key = ? AND brand = ? AND assigned_to IS NOT NULL ORDER BY snapshot_date DESC LIMIT 1").bind(b.player_key, b.brand).first();   // notes carry no day: use the latest contact row
+      return last ? last.assigned_to : null;
+    };
 
     // Team wall: managers see every brand; everyone else is locked to their team's brands.
     // allowedBrands === null → no restriction. Else an array (empty array → sees nothing).
@@ -2200,6 +2217,11 @@ export default {
       if (!brandAllowed(b.brand)) return err("Not your team", 403);
       if (b.clear) {
         if (!canDelete) return err("No permission to clear contacts", 403);
+        if (!canDeleteAny) {                                   // own only: a contact somebody else logged stays
+          const was = await env.DB.prepare("SELECT updated_by FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
+            .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first();
+          if (was && was.updated_by && was.updated_by !== user.username) return err("You can only clear contacts you logged yourself", 403);
+        }
         await env.DB.prepare(
           `DELETE FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?`
         ).bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).run();
@@ -2207,6 +2229,11 @@ export default {
         return ok({ cleared: true });
       }
       if (!canEdit) return NOEDIT();
+      if (!canEditAny) {                                       // own only: players assigned to someone else are off limits, and so is handing them over
+        const owner = await ownerOf(b);
+        if (owner && owner !== user.username) return OWNONLY();
+        if (b.assigned_to && b.assigned_to !== user.username) return err("You can only assign players to yourself", 403);
+      }
       // contacted_at = the real MYT calendar day the agent acted (date('now','+8 hours')),
       // NOT snapshot_date (the data day, which lags before the 15:00 feed). Set on the
       // first human write; COALESCE keeps that first-touch day on later status changes,
@@ -2647,6 +2674,7 @@ export default {
       const note = (b.note || "").trim();
       if (!b.player_key || !b.brand || !note) return err("Missing player_key / brand / note");
       if (!brandAllowed(b.brand)) return err("Not your team", 403);
+      if (!canEditAny) { const owner = await ownerOf({ player_key: b.player_key, brand: b.brand }); if (owner && owner !== user.username) return OWNONLY(); }
       if (note.length > 2000) return err("Note too long");
       await env.DB.prepare(
         `INSERT INTO player_notes (player_key, brand, note, created_by, created_at)
@@ -2661,6 +2689,10 @@ export default {
       if (!canDelete) return err("No permission to delete notes", 403);
       const id = path.split("/").pop();
       if (!id) return err("Missing note id");
+      if (!canDeleteAny) {                                     // own only: a note somebody else wrote stays
+        const n = await env.DB.prepare("SELECT created_by FROM player_notes WHERE id = ?").bind(id).first();
+        if (n && n.created_by && n.created_by !== user.username) return err("You can only delete notes you wrote yourself", 403);
+      }
       await env.DB.prepare("DELETE FROM player_notes WHERE id = ?").bind(id).run();
       log(user, "note", `Deleted note #${id}`);
       return ok({ deleted: true });
@@ -2703,6 +2735,7 @@ export default {
       const b = await request.json();
       if (!b.player_key || !b.brand) return err("Missing player_key / brand");
       if (!brandAllowed(b.brand)) return err("Not your team", 403);
+      if (!canEditAny) { const owner = await ownerOf({ player_key: b.player_key, brand: b.brand }); if (owner && owner !== user.username) return OWNONLY(); }
       await env.DB.prepare(`
         INSERT INTO player_crm (player_key, brand, next_followup, updated_by, updated_at)
         VALUES (?, ?, ?, ?, datetime('now'))
@@ -2751,6 +2784,7 @@ export default {
       // Single-player edit from the drawer: { player_key, brand, url }. Empty url removes the link.
       if (b.player_key && b.brand && !Array.isArray(b.rows)) {
         const pk = String(b.player_key).trim(), brand = String(b.brand).trim(), u = String(b.url || "").trim();
+        if (!canEditAny) { const owner = await ownerOf({ player_key: pk, brand }); if (owner && owner !== user.username) return OWNONLY(); }
         if (!u) {
           await env.DB.prepare(`DELETE FROM player_telegram WHERE player_key = ? AND brand = ?`).bind(pk, brand).run();
           log(user, "telegram", `Removed Telegram link · ${pk} (${brand})`);
@@ -3788,11 +3822,11 @@ export default {
         if (b.role_key && !picked) return err("Unknown role", 400);
         if (picked) {
           // a role decides the old columns too, so every query that still reads them agrees
-          const perms = rolePerms(picked, roleMap), f2 = (k) => (perms.has(k) ? 1 : 0);
+          const perms = rolePerms(picked, roleMap), f2 = (k) => (perms.has(k) ? 1 : 0), lc = legacyColumns(picked, roleMap);
           await env.DB.prepare(
             "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team, role_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
           ).bind(b.username.trim().toLowerCase(), hash, legacyColumns(picked, roleMap).role,
-            f2("contact.edit"), f2("contact.delete"), f2("kpi.scored"), f2("users.manage"), newTeam, picked.key).run();
+            lc.can_edit, lc.can_delete, f2("kpi.scored"), f2("users.manage"), newTeam, picked.key).run();
           log(user, "user", `Created account · ${b.username.trim().toLowerCase()} (${picked.name})`);
           return ok({ message: "User created" });
         }
@@ -3939,4 +3973,14 @@ export default {
       }
     }
   },
+};
+
+// Every request goes through route(); a successful change then bumps its area's live counter (worker/work/pulse.js).
+export default {
+  async fetch(request, env, ctx) {
+    const res = await worker.route(request, env, ctx);
+    liveBump(request, res, env, ctx);
+    return res;
+  },
+  scheduled: (event, env, ctx) => worker.scheduled(event, env, ctx),
 };

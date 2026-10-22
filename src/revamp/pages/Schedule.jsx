@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Avatar, MultiSelect, Select, Seg, toast } from "../ui";
 import { BRAND_ORDER } from "../tokens.js";
 import { api } from "../schedule/api.js";
+import { useLive } from "../live.js";
 import { can } from "../perms.js";
 import { AddModal, SwapsModal, TypeModal, ViewModal } from "../schedule/forms.jsx";
 import { ManageModal } from "../schedule/manage.jsx";
@@ -24,7 +25,7 @@ const getPref = (k, d) => { try { return localStorage.getItem("revamp_sched_" + 
 const setPref = (k, v) => { try { localStorage.setItem("revamp_sched_" + k, v); } catch { /* storage blocked: the page still works */ } };
 
 export default function Schedule({ ctx }) {
-  const me = ctx?.me?.username || "", admin = can(ctx?.me, "schedule.manage"), canSwaps = can(ctx?.me, "schedule.swaps"), canEdit = can(ctx?.me, "schedule.swap_request");
+  const me = ctx?.me?.username || "", admin = can(ctx?.me, "schedule.manage"), ownEdit = can(ctx?.me, "schedule.edit_own"), canSwaps = can(ctx?.me, "schedule.swaps"), canEdit = can(ctx?.me, "schedule.swap_request");
   api.setMe(ctx?.me);
   const today = todayMyt();
 
@@ -39,6 +40,7 @@ export default function Schedule({ ctx }) {
   const [modal, setModal] = useState(null);                 // {kind:'add'|'edit'|'view'|'type'|'swaps'|'manage'|'bulk', ...}
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
+  useLive(["schedule"], reload);                      // someone changed the schedule: the board updates on its own
   const seq = useRef(0);
 
   const mon = mondayOf(anchor), monthFirst = monthStart(anchor);
@@ -59,7 +61,7 @@ export default function Schedule({ ctx }) {
       (e) => { if (n === seq.current) setState({ loading: false, error: e.message || "Could not load the schedule" }); },
     );
   }, [fetchFrom, fetchTo, tick]);
-  useEffect(() => { if (admin) api.people().then((r) => setPeople(r.people || []), () => {}); }, [admin]);
+  useEffect(() => { if (admin || ownEdit) api.people().then((r) => setPeople(r.people || []), () => {}); }, [admin, ownEdit]);
   useEffect(() => { if (canSwaps && !HIDE_SHIFTS) api.swaps().then((r) => setOpenSwaps((r.swaps || []).filter((s) => s.status === "open").length), () => {}); }, [canSwaps, tick]);
 
   const types = data.types, items = data.items;
@@ -75,7 +77,8 @@ export default function Schedule({ ctx }) {
   const todayList = useMemo(() => expand(shown.filter((i) => i.type_key !== "shift"), today, today).sort(byTime), [shown, today]);
 
   const swapState = (id) => { const l = data.my_swaps.filter((s) => s.item_id === id); return l.length ? l[l.length - 1].status : ""; };
-  const open = (occ) => setModal(admin ? { kind: "edit", item: occ.item } : { kind: "view", occ });
+  const mayEdit = (it) => admin || (ownEdit && (it.created_by === me || it.who.includes(me)));   // everything, or only items they created or are on
+  const open = (occ) => setModal(mayEdit(occ.item) ? { kind: "edit", item: occ.item } : { kind: "view", occ });
   const done = (firstDate) => { setModal(null); if (firstDate) setAnchor(firstDate); reload(); };
   const move = async (id, date) => {
     const it = items.find((i) => i.id === id);
@@ -113,13 +116,13 @@ export default function Schedule({ ctx }) {
         <b className="sch-range">{label}</b>
         <button className="btn sm" onClick={() => shift(1)} aria-label="Next">›</button>
         {!atNow && <button className="btn sm" onClick={() => setAnchor(today)}>{view === "month" ? "This month" : "This week"}</button>}
-        {admin && (
+        {(admin || ownEdit) && (
           <>
-            {!HIDE_SHIFTS && canSwaps && <button className="btn sm" onClick={() => setModal({ kind: "swaps" })}>Swap requests{openSwaps ? ` · ${openSwaps}` : ""}</button>}
-            {view === "week" && <button className="btn sm" onClick={copyLastWeek}>Copy last week</button>}
-            <button className="btn sm" onClick={() => setModal({ kind: "type" })}>+ New schedule type</button>
+            {admin && !HIDE_SHIFTS && canSwaps && <button className="btn sm" onClick={() => setModal({ kind: "swaps" })}>Swap requests{openSwaps ? ` · ${openSwaps}` : ""}</button>}
+            {admin && view === "week" && <button className="btn sm" onClick={copyLastWeek}>Copy last week</button>}
+            {admin && <button className="btn sm" onClick={() => setModal({ kind: "type" })}>+ New schedule type</button>}
             <button className="btn sm" onClick={() => setModal({ kind: "bulk" })}>Bulk schedule</button>
-            <button className="btn sm" onClick={() => setModal({ kind: "manage" })}>{HIDE_SHIFTS ? "Manage types & delete" : "Manage shifts & delete"}</button>
+            {admin && <button className="btn sm" onClick={() => setModal({ kind: "manage" })}>{HIDE_SHIFTS ? "Manage types & delete" : "Manage shifts & delete"}</button>}
             <button className="btn pri" onClick={() => setModal({ kind: "add", date: view === "month" ? today : days.includes(today) ? today : mon })}>+ Add to schedule</button>
           </>
         )}
@@ -147,8 +150,8 @@ export default function Schedule({ ctx }) {
       {!state.error && state.loading && !types.length && <div className="dim" style={{ padding: 14 }}>Loading…</div>}
       {!state.error && !state.loading && !types.length && <div className="card"><div className="body dim">No schedule types yet. {admin ? "Add one with “+ New schedule type”." : "Ask an admin to add one."}</div></div>}
       {types.length > 0 && !state.error && (
-        view === "week" ? <WeekBoard days={days} today={today} occs={occs} types={types} me={me} admin={admin} hideShifts={HIDE_SHIFTS || hidden.includes("shift")} onOpen={open} onAdd={(d) => setModal({ kind: "add", date: d })} onMove={move} />
-        : view === "lanes" ? <Lanes days={days} today={today} occs={occs} types={visibleTypes} me={me} admin={admin} onOpen={open} onAdd={(d, t) => setModal({ kind: "add", date: d, type: t })} onMove={move} />
+        view === "week" ? <WeekBoard days={days} today={today} occs={occs} types={types} me={me} admin={admin || ownEdit} hideShifts={HIDE_SHIFTS || hidden.includes("shift")} onOpen={open} onAdd={(d) => setModal({ kind: "add", date: d })} onMove={move} />
+        : view === "lanes" ? <Lanes days={days} today={today} occs={occs} types={visibleTypes} me={me} admin={admin || ownEdit} onOpen={open} onAdd={(d, t) => setModal({ kind: "add", date: d, type: t })} onMove={move} />
         : view === "roster" ? <Roster days={days} today={today} items={items} people={people} shifts={data.shifts} admin={admin} me={me} onChanged={reload} />
         : <Month month={monthFirst} today={today} occs={occs} types={types} me={me} onOpen={open} onDay={(d) => { setAnchor(d); setV("week"); }} />
       )}

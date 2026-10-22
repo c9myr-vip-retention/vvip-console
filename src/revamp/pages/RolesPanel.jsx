@@ -6,6 +6,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, MultiSelect, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
+import { useLive } from "../live.js";
 import { hiddenPerm } from "../schedule/logic.js";
 
 const FIXED = { admin: "Admin", agent: "Agent", viewer: "Viewer" };           // the fixed starting sets built into the code
@@ -93,6 +94,7 @@ export default function RolesPanel() {
     work.accounts().then(setAccounts, () => {});
   }, []);
   useEffect(() => { load(); }, [load]);
+  useLive(["people"], () => load());
 
   const role = data && data.roles.find((r) => r.key === sel);
   useEffect(() => { setName(role ? role.name : ""); }, [role && role.key, role && role.name]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -176,8 +178,11 @@ export default function RolesPanel() {
                 <MultiSelect label="Roles they can see" value={(role.sees || {}).list || []} options={data.roles.filter((r) => r.key !== role.key).map((r) => ({ value: r.key, label: r.name }))}
                   onChange={(v) => change({ sees: { mode: "list", list: v } })} />
               )}
+              <Select value={(role.sees || {}).team === "own" ? "own" : "all"} style={{ width: "auto", minWidth: 250 }}
+                options={[{ value: "all", label: "Every team" }, { value: "own", label: "Only their own team" }]}
+                onChange={(t) => change({ sees: { mode: (role.sees || { mode: "all" }).mode, list: (role.sees || {}).list || [], team: t } }, "Saved")} />
             </div>
-            <div className="dim" style={{ fontSize: 12 }}>Lists also follow the team in view. To let this role see people from every team, switch on “See people from every team” below.</div>
+            <div className="dim" style={{ fontSize: 12 }}>“Only their own team” limits every agent and staff list to the team on their account, whichever team is in view. With “Every team”, lists follow the team in view unless “See people from every team” is switched on below.</div>
           </div></div>
 
           {data.groups.map(([gk, gl]) => (

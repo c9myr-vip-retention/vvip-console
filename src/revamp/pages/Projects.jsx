@@ -2,7 +2,7 @@
 // A project opens into a detail view with its tasks, members and activity.
 import React, { useMemo, useState } from "react";
 import { Avatar, Modal, MultiSelect, Select, Seg, toast } from "../ui";
-import { api, allowed, canEdit, useLoad, person, Notice, newTask, openTask, fmtWhen, fmtDay } from "../setup/common.jsx";
+import { api, allowed, canEdit, useLoad, person, Notice, Confirm, newTask, openTask, fmtWhen, fmtDay } from "../setup/common.jsx";
 
 const STATUS = { pending: ["Pending", "#8B94A7"], progress: ["In progress", "#4C8DF6"], done: ["Completed", "#4CC38A"], deferred: ["Deferred", "#A78BFA"] };
 const todayMyt = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
@@ -40,16 +40,19 @@ function ProjectForm({ project, people, onClose, onSaved }) {
 }
 
 function ProjectDetail({ ctx, id, onBack, onChanged }) {
-  const admin = allowed(ctx, "projects.manage"), me = ctx?.me?.username;
-  const [tab, setTab] = useState("tasks"), [edit, setEdit] = useState(false);
-  const proj = useLoad(() => api.project(id), [id]);
-  const tasks = useLoad(() => api.tasks({ project_id: id, include: "done" }), [id]);
+  const manage = allowed(ctx, "projects.manage"), own = allowed(ctx, "projects.use"), me = ctx?.me?.username;
+  const admin = manage || own;                                  // may pick members (the people list)
+  const [tab, setTab] = useState("tasks"), [edit, setEdit] = useState(false), [del, setDel] = useState(false), [busy, setBusy] = useState(false);
+  const proj = useLoad(() => api.project(id), [id], ["projects", "tasks"]);
+  const tasks = useLoad(() => api.tasks({ project_id: id, include: "done" }), [id], ["tasks"]);
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);
   const p = proj.data?.project, ts = tasks.data?.tasks || [], today = todayMyt();
   const done = ts.filter((t) => t.status === "done").length, overdue = ts.filter((t) => t.status !== "done" && t.due_date && t.due_date < today).length;
   const progress = ts.length ? Math.round((100 * done) / ts.length) : 0;
   const archive = async () => { try { await api.archiveProject(id, !p.archived); toast(p.archived ? "Project restored" : "Project archived"); onChanged(); onBack(); } catch (e) { toast(e.message); } };
+  const remove = async () => { setBusy(true); try { await api.deleteProject(id); toast("Project moved to the Recycle bin"); onChanged(); onBack(); } catch (e) { toast(e.message); setBusy(false); } };
   if (!p) return <><div className="top"><button className="btn sm" onClick={onBack}>← Projects</button></div><Notice error={proj.error} loading={proj.loading} /></>;
+  const change = manage || (own && p.members.some((x) => x.username === me && x.role === "owner"));   // "Manage any project", or "own projects" and they own this one
   return (
     <>
       <div className="top">
@@ -57,8 +60,9 @@ function ProjectDetail({ ctx, id, onBack, onChanged }) {
         <h1>{p.name}</h1><span className="tag">{p.privacy}</span>{p.archived ? <span className="tag">archived</span> : null}
         <span className="grow" />
         <Faces members={p.members} max={6} />
-        {admin && <button className="btn" onClick={() => setEdit(true)}>Settings</button>}
-        {admin && <button className="btn" onClick={archive}>{p.archived ? "Unarchive" : "Archive"}</button>}
+        {change && <button className="btn" onClick={() => setEdit(true)}>Settings</button>}
+        {change && <button className="btn" onClick={archive}>{p.archived ? "Unarchive" : "Archive"}</button>}
+        {change && <button className="btn danger" onClick={() => setDel(true)}>Delete</button>}
         {canEdit(ctx) && !p.archived && <button className="btn pri" onClick={() => newTask({ project_id: p.id })}>+ Task</button>}
       </div>
       {p.description && <p className="dim" style={{ marginBottom: 12 }}>{p.description}</p>}
@@ -96,24 +100,26 @@ function ProjectDetail({ ctx, id, onBack, onChanged }) {
         </div></div>
       )}
       {edit && <ProjectForm project={p} people={(ppl.data?.people || []).map((x) => x.username)} onClose={() => setEdit(false)} onSaved={() => { setEdit(false); proj.reload(); onChanged(); }} />}
+      {del && <Confirm title="Delete project" text={<>Move <b>{p.name}</b> to the Recycle bin? Its tasks are kept. An admin can restore the project for 30 days.</>} onCancel={() => setDel(false)} onConfirm={remove} busy={busy} />}
     </>
   );
 }
 
 function ProjectList({ ctx, onOpen, reloadKey, onChanged }) {
-  const admin = allowed(ctx, "projects.manage"), me = ctx?.me?.username;
+  const manage = allowed(ctx, "projects.manage"), own = allowed(ctx, "projects.use"), me = ctx?.me?.username;
+  const admin = manage || own;                                  // may create projects and pick members
   const [scope, setScope] = useState("0"), [q, setQ] = useState(""), [create, setCreate] = useState(false);
-  const { data, loading, error, reload } = useLoad(() => api.projects({ archived: scope }), [scope, reloadKey]);
+  const { data, loading, error, reload } = useLoad(() => api.projects({ archived: scope }), [scope, reloadKey], ["projects", "tasks"]);
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);
   const rows = useMemo(() => (data?.projects || []).filter((p) => !q || `${p.name} ${p.description || ""}`.toLowerCase().includes(q.toLowerCase())), [data, q]);
   return (
     <>
       <div className="top">
-        <h1>{admin ? "Projects" : "My projects"}</h1><span className="grow" />
+        <h1>{manage ? "Projects" : "My projects"}</h1><span className="grow" />
         {admin && <button className="btn pri" onClick={() => setCreate(true)}>+ Create project</button>}
       </div>
       <div className="bar">
-        <Seg value={scope} onChange={setScope} options={[{ value: "0", label: admin ? "All" : "My" }, { value: "1", label: "Archived" }]} />
+        <Seg value={scope} onChange={setScope} options={[{ value: "0", label: manage ? "All" : "My" }, { value: "1", label: "Archived" }]} />
         <input className="search" placeholder="Search projects" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <Notice error={error} loading={loading && !data} />

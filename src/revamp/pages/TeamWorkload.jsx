@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, Modal, Seg, Select } from "../ui/index.jsx";
 import useTaskOverlays from "../tasks/useTaskOverlays.jsx";
 import { can } from "../perms.js";
+import { useLive } from "../live.js";
 import { tapi, meOf, todayMY, useNow, StatusPill, DueBadge, CheckProg, dueInfo, fmtElapsed, byDue } from "../tasks/common.jsx";
 
 const parseUtc =(s) => Date.parse(String(s).replace(" ", "T") + "Z");
@@ -50,6 +51,7 @@ export default function TeamWorkload({ ctx }) {
     try { const r = await tapi.workload(); setRows(r.people || []); setMyTeam(r.my_team || null); setErr(""); } catch (e) { setErr(e.message || "Could not load the workload"); setRows((x) => x || []); }
   }, []);
   useEffect(() => { load(); const id = setInterval(load, 60000); return () => clearInterval(id); }, [load]);
+  useLive(["tasks", "people"], load);
   useEffect(() => {
     tapi.people().then((r) => setPeople(r.people || [])).catch(() => {});
     tapi.projects({ archived: 0 }).then((r) => setProjects(r.projects || [])).catch(() => {});

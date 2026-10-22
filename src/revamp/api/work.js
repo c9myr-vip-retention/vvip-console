@@ -71,6 +71,7 @@ export const work = {
   project: (id) => get(`/api/work/projects/${id}`),
   saveProject: (b) => post("/api/work/projects", b),                   // { id?, name, description, privacy, members: [username] }
   archiveProject: (id, archived) => post(`/api/work/projects/${id}/archive`, { archived }),
+  deleteProject: (id) => post(`/api/work/projects/${id}/delete`),                    // the owner, or anyone who can manage any project
   flows: () => get("/api/work/flows"),
   saveFlow: (b) => post("/api/work/flows", b),
   deleteFlow: (id) => post(`/api/work/flows/${id}/delete`),

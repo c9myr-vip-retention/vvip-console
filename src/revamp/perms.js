@@ -2,7 +2,7 @@
 // no `perms`, so fall back to what the old flags mean: manage_users = every admin permission, can_edit = act, can_delete, on_leaderboard.
 import { NAV } from "./tokens.js";
 
-const AGENT_ACT = ["contact.edit", "tasks.use", "schedule.swap_request"];
+const AGENT_ACT = ["contact.edit", "contact.edit_own", "tasks.use", "projects.use", "schedule.swap_request"];
 const PAGE_ALL = ["page.changes", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.settings", "page.account"];   // everyone has these by default
 const PAGE_AGENT = ["page.myday", "page.myperf"];                                                                                          // agent-style sidebar only
 
@@ -10,7 +10,7 @@ export function can(me, key) {
   if (!me) return false;
   if (Array.isArray(me.perms)) return me.perms.includes(key);
   if (key === "kpi.scored") return !!me.on_leaderboard;
-  if (key === "contact.delete") return !!(me.can_delete || me.manage_users);
+  if (key === "contact.delete" || key === "contact.delete_own") return !!(me.can_delete || me.manage_users);
   if (AGENT_ACT.includes(key)) return !!(me.can_edit || me.manage_users);
   if (PAGE_ALL.includes(key)) return true;
   if (PAGE_AGENT.includes(key)) return !me.manage_users;
@@ -33,7 +33,9 @@ const EXTRA = [
   ["Work", "flows", "Flows"], ["Work", "tpl", "Templates"], ["Task insight", "ana", "Analytics"], ["Admin", "set", "Settings"],
   ["Me", "home", "My day"], ["Me", "mine", "My performance"],
 ];
-export const canOpen = (me, key) => { const p = PAGE_PERM[key]; return !p || can(me, p); };
+// Flows and Templates also open for the "own" version of their permission (they then show only what that person may change).
+const PAGE_OWN = { flows: "flows.own", tpl: "templates.own" };
+export const canOpen = (me, key) => { const p = PAGE_PERM[key]; return !p || can(me, p) || (!!PAGE_OWN[key] && can(me, PAGE_OWN[key])); };
 
 /** The sidebar for this person: admin-style when they can see every team, agent-style otherwise; either way only the pages they may use. */
 export function navFor(me) {

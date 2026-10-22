@@ -73,6 +73,7 @@ export const api = {
     const p = { id: ++seq, name: b.name, description: b.description || "", privacy: b.privacy || "members", archived: 0, members, last_active: stamp(0, 1) }; projects.push(p); return wait({ project: projOut(p) });
   },
   archiveProject: (id, archived) => { if (!admin()) return deny(); projects.find((p) => p.id === Number(id)).archived = archived ? 1 : 0; return wait({ ok: true }); },
+  deleteProject: (id) => { const i = projects.findIndex((p) => p.id === Number(id)); if (i >= 0) projects.splice(i, 1); return wait({ ok: true }); },
   flows: () => (admin() ? wait({ flows: flows.map(flowOut) }) : deny()),
   saveFlow: (b) => {
     if (!admin()) return deny();

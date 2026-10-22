@@ -510,7 +510,7 @@ async function workload(c) {
   const mine = c.user.team || null;
   let seen = [...by.values()];
   try {                                                  // who this account may see by role
-    const meta = new Map(((await db.prepare("SELECT username, role, role_key FROM users").all()).results || []).map((u) => [u.username, u]));
+    const meta = new Map(((await db.prepare("SELECT username, role, role_key, team FROM users").all()).results || []).map((u) => [u.username, u]));
     const ok = new Set(filterPeople([...meta.values()], c.user, c.roles).map((u) => u.username));
     seen = seen.filter((p) => ok.has(p.username) || !meta.has(p.username));
   } catch { /* schema_v27 not run yet: nothing to filter by */ }

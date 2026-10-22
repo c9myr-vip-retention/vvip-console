@@ -23,7 +23,7 @@ async function body(c) { try { const b = await c.request.json(); return b && typ
 
 const itemOut = (r) => ({
   id: r.id, type_key: r.type_key, date: r.date, title: r.title, start_time: r.start_time || null, end_time: r.end_time || null,
-  brands: parseList(r.brands), who: parseList(r.who), note: r.note || "", repeat: r.repeat, off: r.off ? 1 : 0,
+  brands: parseList(r.brands), who: parseList(r.who), note: r.note || "", repeat: r.repeat, off: r.off ? 1 : 0, created_by: r.created_by || null,
 });
 const typeOut = (r) => ({ key: r.key, name: r.name, color: r.color, builtin: r.builtin ? 1 : 0 });
 
@@ -100,7 +100,7 @@ export async function handleSchedule(c) {
     if (to) b2.push(to);
     where.push(`((${oneOff.join(" AND ")}) OR (${rep.join(" AND ")}))`);
     const { results } = await db.prepare(
-      `SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off FROM schedule_items
+      `SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off, created_by FROM schedule_items
         WHERE ${where.join(" AND ")} ORDER BY date, COALESCE(start_time,''), id LIMIT 5000`
     ).bind(...b2).all();
     const types = await db.prepare("SELECT key, name, color, builtin FROM schedule_types ORDER BY builtin DESC, rowid").all();
@@ -110,7 +110,7 @@ export async function handleSchedule(c) {
 
   // ───────────── add items (many dates x many entries) ─────────────
   if (path === "/api/work/schedule/items" && method === "POST") {
-    if (!c.can("schedule.manage")) return c.err("Admin only", 403);
+    if (!c.can("schedule.manage") && !c.can("schedule.edit_own")) return c.err("Admin only", 403);
     const b = await body(c);
     if (!Array.isArray(b.items) || !b.items.length) return c.err("items must be a non-empty array");
     // an entry may carry `dates: [...]` instead of one `date`; both are expanded here
@@ -164,9 +164,11 @@ export async function handleSchedule(c) {
   let m = path.match(/^\/api\/work\/schedule\/items\/(\d+)\/(update|delete|swap)$/);
   if (m && method === "POST") {
     const id = Number(m[1]), act = m[2];
-    if (act !== "swap" && !c.can("schedule.manage")) return c.err("Admin only", 403);
-    const cur = await db.prepare("SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off FROM schedule_items WHERE id = ? AND deleted_at IS NULL").bind(id).first();
+    const mayAny = c.can("schedule.manage");
+    if (act !== "swap" && !mayAny && !c.can("schedule.edit_own")) return c.err("Admin only", 403);
+    const cur = await db.prepare("SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off, created_by FROM schedule_items WHERE id = ? AND deleted_at IS NULL").bind(id).first();
     if (!cur) return c.err("Schedule item not found", 404);
+    if (act !== "swap" && !mayAny && cur.created_by !== me && !parseList(cur.who).includes(me)) return c.err("You can only change schedule items you created or are on", 403);
 
     if (act === "delete") {
       await db.prepare("UPDATE schedule_items SET deleted_at = datetime('now') WHERE id = ?").bind(id).run();
@@ -190,7 +192,7 @@ export async function handleSchedule(c) {
       await db.prepare("UPDATE schedule_items SET type_key=?, date=?, title=?, start_time=?, end_time=?, brands=?, who=?, note=?, repeat=?, off=? WHERE id=?")
         .bind(x.type_key, x.date, x.title, x.start, x.end, JSON.stringify(x.brands), JSON.stringify(x.who), x.note, x.repeat, x.off, id).run();
       c.log(c.user, "schedule", `Edited schedule item #${id} "${x.title}"`);
-      const row = await db.prepare("SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off FROM schedule_items WHERE id = ?").bind(id).first();
+      const row = await db.prepare("SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off, created_by FROM schedule_items WHERE id = ?").bind(id).first();
       return c.ok({ item: itemOut(row) });
     }
 

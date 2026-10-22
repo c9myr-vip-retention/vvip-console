@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { work, http } from "../api/work.js";
 import { Modal, Avatar } from "../ui";
 import * as mock from "./fixtures.js";
+import { useLive } from "../live.js";
 
 export const isMock = () => { try { return localStorage.getItem("revamp_mock") === "1"; } catch { return false; } };
 // One API object for the pages: the real client, or the fixtures when localStorage.revamp_mock === "1".
@@ -15,20 +16,23 @@ export const isAdmin = (ctx) => !!(ctx && ctx.me && ctx.me.manage_users);       
 export const canEdit = (ctx) => !!(ctx && can(ctx.me, "tasks.use"));
 export const allowed = (ctx, perm) => !!(ctx && can(ctx.me, perm));
 
-/** Load once and on reload(). Returns { data, loading, error, reload }. Ignores out-of-date responses. */
-export function useLoad(fn, deps = []) {
+/** Load once and on reload(). Returns { data, loading, error, reload }. Ignores out-of-date responses.
+ *  live: areas ("tasks", "schedule", "projects", "people") that reload it quietly (no Loading flash) when they change. */
+export function useLoad(fn, deps = [], live = []) {
   const [s, set] = useState({ data: null, loading: true, error: "" });
   const seq = useRef(0);
-  const run = useCallback(() => {
+  const run = useCallback((quiet) => {
     const n = ++seq.current;
-    set((p) => ({ ...p, loading: true, error: "" }));
+    if (quiet !== true) set((p) => ({ ...p, loading: true, error: "" }));
     Promise.resolve().then(fn).then(
       (data) => n === seq.current && set({ data, loading: false, error: "" }),
-      (e) => n === seq.current && set((p) => ({ ...p, loading: false, error: e.message || "Could not load" })),
+      (e) => n === seq.current && quiet !== true && set((p) => ({ ...p, loading: false, error: e.message || "Could not load" })),   // a quiet refresh that fails keeps what is on screen
     );
   }, deps); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { run(); }, [run]);
-  return { ...s, reload: run };
+  useLive(live, () => run(true));
+  const reload = useCallback(() => run(), [run]);
+  return { ...s, reload };
 }
 
 export const useStatus = () => { const [msg, setMsg] = useState(""); return [msg, setMsg]; };

@@ -35,9 +35,9 @@ function FlowForm({ flow, people, projects, onClose, onSaved }) {
 }
 
 export default function Flows({ ctx, embedded }) {
-  const admin = allowed(ctx, "flows.manage");
-  const { data, loading, error, reload } = useLoad(() => (admin ? api.flows() : Promise.resolve(null)), [admin]);
-  const ref = useLoad(() => (admin ? Promise.all([api.people(), api.projects({ archived: 0 })]) : Promise.resolve(null)), [admin]);
+  const admin = allowed(ctx, "flows.manage") || allowed(ctx, "flows.own");   // the server lists only the flows they administer when it is "own"
+  const { data, loading, error, reload } = useLoad(() => (admin ? api.flows() : Promise.resolve(null)), [admin], ["projects", "tasks"]);
+  const ref = useLoad(() => (admin ? Promise.all([api.people(), api.projects({ archived: 0 })]) : Promise.resolve(null)), [admin], ["projects", "people"]);
   const [edit, setEdit] = useState(null), [del, setDel] = useState(null), [busy, setBusy] = useState(false);
   if (!admin) return <AdminOnly what="Flows" />;
   const people = (ref.data?.[0]?.people || []).map((p) => p.username), projects = ref.data?.[1]?.projects || [];

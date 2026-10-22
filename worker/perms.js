@@ -39,8 +39,10 @@ export const PERMS = [
   { key: "page.settings", group: "pages", label: "Settings page", desc: "Show the Settings page in the sidebar. Open to everyone by default; which tabs appear inside depends on the other permissions (My account has its own switch).", d: [1, 1, 1] },
 
   { key: "dashboard.view", group: "daily", label: "See the admin Dashboard", desc: "Open the Dashboard page: the live staff board, KPIs, trends, brand health and top lists. It hides the page; numbers stay limited to the team(s) the role may see.", d: [1, 0, 0] },
-  { key: "contact.edit", group: "daily", label: "Log contacts", desc: "Assign players, set status, write notes, CRM and Telegram. Without it the account is view-only.", d: [1, 1, 0] },
-  { key: "contact.delete", group: "daily", label: "Clear a contact or note", desc: "Delete a logged contact or a player note.", d: [1, 1, 0] },
+  { key: "contact.edit_own", group: "daily", label: "Log contacts for their own players", desc: "Assign, set status and write notes on players assigned to them (or not assigned yet). Without this and the next one the account is view-only.", d: [1, 1, 0] },
+  { key: "contact.edit", group: "daily", label: "Log contacts for any player", desc: "The same on players assigned to other agents. Switch this off and an agent can only work their own players.", d: [1, 1, 0] },
+  { key: "contact.delete_own", group: "daily", label: "Clear their own contacts and notes", desc: "Delete a contact or a player note that they logged themselves.", d: [1, 1, 0] },
+  { key: "contact.delete", group: "daily", label: "Clear anyone's contact or note", desc: "Delete a logged contact or a player note somebody else wrote.", d: [1, 1, 0] },
   { key: "assign.manage", group: "daily", label: "Assign players to agents", desc: "Manual and automatic assignment, login-check assignment.", d: [1, 0, 0] },
   { key: "campaigns.manage", group: "daily", label: "Manage campaigns", desc: "Create, edit, export, close and delete campaigns and their reports.", d: [1, 0, 0] },
   { key: "data.sync", group: "daily", label: "Run data syncs", desc: "Run feeders, Lark and engagement syncs, feed checks, and log livechat numbers.", d: [1, 0, 0] },
@@ -56,14 +58,18 @@ export const PERMS = [
   { key: "tasks.edit_any", group: "tasks", label: "Edit any task", desc: "Change tasks they do not own or hold.", d: [1, 0, 0] },
   { key: "tasks.delete_any", group: "tasks", label: "Delete any task", desc: "Delete tasks they did not create.", d: [1, 0, 0] },
   { key: "workload.all", group: "tasks", label: "Team workload: all teams", desc: "See every team's workload. Without it they see their own team only.", d: [1, 0, 0] },
-  { key: "projects.manage", group: "tasks", label: "Manage projects", desc: "Create, edit, archive and delete projects; see all projects.", d: [1, 0, 0] },
-  { key: "flows.manage", group: "tasks", label: "Manage flows", desc: "Create, edit and delete flows.", d: [1, 0, 0] },
-  { key: "templates.manage", group: "tasks", label: "Manage task templates", desc: "Create, edit and delete task templates.", d: [1, 0, 0] },
+  { key: "projects.use", group: "tasks", label: "Create and manage own projects", desc: "Create projects, and edit, archive and delete the ones they own. They see the projects they are a member of.", d: [1, 1, 0] },
+  { key: "projects.manage", group: "tasks", label: "Manage any project", desc: "Edit, archive and delete projects they do not own, and see every project.", d: [1, 0, 0] },
+  { key: "flows.own", group: "tasks", label: "Manage flows they administer", desc: "Create flows (they become the flow's administrator) and edit or delete the flows they administer.", d: [1, 0, 0] },
+  { key: "flows.manage", group: "tasks", label: "Manage any flow", desc: "Create, edit and delete every flow.", d: [1, 0, 0] },
+  { key: "templates.own", group: "tasks", label: "Manage task templates they created", desc: "Create task templates, and edit or delete the ones they created.", d: [1, 0, 0] },
+  { key: "templates.manage", group: "tasks", label: "Manage any task template", desc: "Create, edit and delete every task template.", d: [1, 0, 0] },
   { key: "analytics.view", group: "tasks", label: "See analytics and everyone's efficiency", desc: "Task analytics and every person's task efficiency. Without it they see their own.", d: [1, 0, 0] },
   { key: "tasks.clear", group: "tasks", label: "Clear all task data", desc: "Permanently delete every task with its checklists, comments and history, to reset the data. Cannot be undone.", d: [1, 0, 0] },
   { key: "bin.manage", group: "tasks", label: "Use the recycle bin", desc: "See, restore and permanently remove deleted items.", d: [1, 0, 0] },
 
-  { key: "schedule.manage", group: "schedule", label: "Edit the schedule", desc: "Add, edit, move and delete schedule items, types and shift times; shift groups and bulk delete.", d: [1, 0, 0] },
+  { key: "schedule.edit_own", group: "schedule", label: "Edit schedule items they are on or created", desc: "Add schedule items, and edit, move or delete the ones they created or are named on.", d: [1, 0, 0] },
+  { key: "schedule.manage", group: "schedule", label: "Edit the whole schedule", desc: "Add, edit, move and delete any schedule item, plus types, shift times, shift groups and bulk delete.", d: [1, 0, 0] },
   { key: "schedule.swaps", group: "schedule", label: "Decide shift swaps", desc: "See swap requests and approve or decline them.", d: [1, 0, 0] },
   { key: "schedule.swap_request", group: "schedule", label: "Request a shift swap", desc: "Ask for a swap on a shift they are on.", d: [1, 1, 0] },
 
@@ -91,8 +97,8 @@ export function legacyPerms(user) {
   const mgr = !!user.manage_users;
   if (mgr) { for (const p of PERMS) if (p.d[0]) out.add(p.key); }
   const edit = !!user.can_edit || mgr, del = !!user.can_delete || mgr;
-  if (edit) { out.add("contact.edit"); out.add("tasks.use"); out.add("schedule.swap_request"); }
-  if (del) out.add("contact.delete");
+  if (edit) { out.add("contact.edit"); out.add("contact.edit_own"); out.add("tasks.use"); out.add("projects.use"); out.add("schedule.swap_request"); }
+  if (del) { out.add("contact.delete"); out.add("contact.delete_own"); }
   if (user.on_leaderboard) out.add("kpi.scored");
   if (!mgr) for (const p of PERMS) if (p.group === "pages" && p.d[1]) out.add(p.key);        // an old non-manager account already sees the pages an agent sees
   return out;
@@ -112,13 +118,14 @@ export async function loadRoles(db) {
   } catch { return null; }
 }
 
-/** Which roles a role can see: { mode: "all" | "rank" | "list", list: [role keys] }. Anything unreadable means everyone, as before. */
+/** Which people a role can see: { mode: "all" | "rank" | "list", list: [role keys], team: "all" | "own" }. mode limits by role; team "own" limits to the
+ *  person's own team (whatever the team in view is). Anything unreadable means everyone, as before. */
 export function parseSees(raw) {
   try {
     const o = JSON.parse(raw || "null");
-    if (o && ["all", "rank", "list"].includes(o.mode)) return { mode: o.mode, list: Array.isArray(o.list) ? o.list.filter((x) => typeof x === "string") : [] };
+    if (o && ["all", "rank", "list"].includes(o.mode)) return { mode: o.mode, list: Array.isArray(o.list) ? o.list.filter((x) => typeof x === "string") : [], team: o.team === "own" ? "own" : "all" };
   } catch { /* fall through */ }
-  return { mode: "all", list: [] };
+  return { mode: "all", list: [], team: "all" };
 }
 
 /** The role keys this account may see in people lists, or null for everyone. An account without a role sees everyone, as today.
@@ -134,10 +141,14 @@ export function visibleRoles(user, roles) {
 }
 /** The role an account counts as: its own role, or for an old-settings account the built-in role named in its old `role`. */
 export const roleKeyOf = (row) => row.role_key || row.role || "";
-/** People this account may see: everyone, or only those in roles it can see (always including itself). */
+/** People this account may see: everyone, or only those in roles it can see, and only its own team when the role says so (always including itself).
+ *  Rows need a `team` for the own-team limit. */
 export function filterPeople(rows, user, roles) {
   const vis = visibleRoles(user, roles);
-  return vis ? rows.filter((r) => r.username === user.username || vis.has(roleKeyOf(r))) : rows;
+  const rk = user && user.role_key, sees = rk && roles && roles.has(rk) ? roles.get(rk).sees : null;
+  const own = !!(sees && sees.team === "own");
+  if (!vis && !own) return rows;
+  return rows.filter((r) => r.username === user.username || ((!vis || vis.has(roleKeyOf(r))) && (!own || (!!user.team && r.team === user.team))));
 }
 
 /** The permissions a role starts from. base is "none", a fixed code default set ("admin", "agent", "viewer"), or the key of another role,
@@ -206,7 +217,7 @@ export function legacyColumns(role, roles, overrides) {
   const perms = applyOverrides(rolePerms(role, roles), overrides);
   return {
     role: codeBase(role, roles) === "none" ? "viewer" : codeBase(role, roles),
-    can_edit: perms.has("contact.edit") ? 1 : 0, can_delete: perms.has("contact.delete") ? 1 : 0,
+    can_edit: perms.has("contact.edit") || perms.has("contact.edit_own") ? 1 : 0, can_delete: perms.has("contact.delete") || perms.has("contact.delete_own") ? 1 : 0,
     on_leaderboard: perms.has("kpi.scored") ? 1 : 0, manage_users: perms.has("users.manage") ? 1 : 0,
   };
 }

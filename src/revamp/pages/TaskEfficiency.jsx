@@ -9,7 +9,7 @@ export default function TaskEfficiency({ ctx }) {
   const admin = allowed(ctx, "analytics.view");
   const [user, setUser] = useState(""), [days, setDays] = useState("30");
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);
-  const { data, loading, error } = useLoad(() => api.efficiency(admin ? user : "", days), [admin, user, days]);
+  const { data, loading, error } = useLoad(() => api.efficiency(admin ? user : "", days), [admin, user, days], ["tasks"]);
   const users = data?.users || [];
   const sum = (k) => users.reduce((a, u) => a + (u[k] || 0), 0);
   const rated = users.filter((u) => u.on_time_rate !== null);

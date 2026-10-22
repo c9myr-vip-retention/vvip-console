@@ -2,6 +2,7 @@
 // Clock-in, accepting chats, the off-chat timer and violations are "NA" until that tracking is built.
 import React, { useEffect, useMemo, useState } from "react";
 import { Avatar } from "../ui";
+import { useLive } from "../live.js";
 import { api } from "../schedule/api.js";
 import { tapi, useNow, fmtElapsed, CheckProg } from "../tasks/common.jsx";
 import { HIDE_SHIFTS, addDays, nowLabel, nowMinutes, occursOn, onDuty, todayMyt } from "../schedule/logic.js";
@@ -45,6 +46,7 @@ export default function DashStaff({ viewTeam }) {
     return () => { live = false; };
   }, [tick, today]);
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
+  useLive(["tasks", "schedule"], () => setTick((n) => n + 1));
 
   const agents = useMemo(() => (people || []).filter((p) => (p.on_leaderboard || p.role === "agent") && p.team === viewTeam).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps

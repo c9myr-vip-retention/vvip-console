@@ -38,8 +38,10 @@ function TemplateForm({ tpl, people, onClose, onSaved }) {
 }
 
 export default function Templates({ ctx, embedded }) {
-  const admin = allowed(ctx, "templates.manage");
-  const { data, loading, error, reload } = useLoad(() => api.templates(), []);
+  const any = allowed(ctx, "templates.manage"), own = allowed(ctx, "templates.own"), me = ctx?.me?.username;
+  const admin = any || own;                                     // may create
+  const mayChange = (t) => any || (own && t.created_by === me);   // "any template", or "own templates" and they made it
+  const { data, loading, error, reload } = useLoad(() => api.templates(), [], ["projects"]);
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);
   const [q, setQ] = useState(""), [edit, setEdit] = useState(null), [del, setDel] = useState(null), [busy, setBusy] = useState(false);
   const rows = useMemo(() => (data?.templates || []).filter((t) => !q || t.name.toLowerCase().includes(q.toLowerCase())), [data, q]);
@@ -71,7 +73,7 @@ export default function Templates({ ctx, embedded }) {
                   {admin && <td>{person(t.created_by)}</td>}
                   <td className="r" style={{ whiteSpace: "nowrap" }}>
                     <button className="btn sm pri" onClick={() => startFromTemplate(t.id)}>Use</button>
-                    {admin && <> <button className="btn sm" onClick={() => setEdit(t)}>Edit</button> <button className="btn sm danger" aria-label={`Delete ${t.name}`} onClick={() => setDel(t)}>✕</button></>}
+                    {mayChange(t) && <> <button className="btn sm" onClick={() => setEdit(t)}>Edit</button> <button className="btn sm danger" aria-label={`Delete ${t.name}`} onClick={() => setDel(t)}>✕</button></>}
                   </td>
                 </tr>
               ))}

@@ -12,7 +12,7 @@ const Card = ({ title, sub, children }) => (
 export default function Analytics({ ctx }) {
   const admin = allowed(ctx, "analytics.view");
   const [days, setDays] = useState("30");
-  const { data, loading, error } = useLoad(() => (admin ? api.analytics(Number(days)) : Promise.resolve(null)), [admin, days]);
+  const { data, loading, error } = useLoad(() => (admin ? api.analytics(Number(days)) : Promise.resolve(null)), [admin, days], ["tasks"]);
   if (!admin) return <AdminOnly what="Analytics" />;
   const weeks = data?.created_vs_completed || [];
   return (
