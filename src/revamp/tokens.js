@@ -21,7 +21,7 @@ export const NAV = {
     ["Admin", [["set", "Settings"]]],
   ],
   agent: [
-    ["My work", [["home", "My day"], ["tasks", "My tasks"], ["sched", "Schedule"], ["proj", "Projects"]]],
+    ["My work", [["home", "My day"], ["tasks", "My tasks"], ["sched", "Schedule"], ["proj", "Projects"], ["team", "Team workload"]]],
     ["Daily work", [["queue", "Contact"], ["checkin", "Check-in"], ["grace", "Grace claims"], ["players", "Players"], ["delta", "Changes"]]],
     ["Me", [["mine", "My performance"], ["acct", "Account"]]],
   ],

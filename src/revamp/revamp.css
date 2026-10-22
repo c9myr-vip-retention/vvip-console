@@ -518,3 +518,60 @@
 .rv .side .nav{padding:6px 10px}
 .rv .side .nav-h{padding:9px 10px 3px}
 .rv .side .sidenav{gap:2px}
+
+/* No browser up/down arrows on number boxes (type the number; keyboard arrows still work) */
+.rv input[type=number]{-moz-appearance:textfield;appearance:textfield}
+.rv input[type=number]::-webkit-inner-spin-button,.rv input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;appearance:none;margin:0}
+
+/* Dashboard live board (staff on shift now). No coloured edge on the cards. */
+.rv .dst{margin-bottom:18px}
+.rv .dst-head{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px}
+.rv .dst-eyebrow{font-size:11px;letter-spacing:.8px}
+.rv .dst-chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.rv .dst-chip{display:inline-flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 14px;color:var(--txt);font:inherit}
+.rv .dst-chip b{font-size:18px}
+.rv .dst-chip span{color:var(--dim)}
+.rv .dst-chip:hover:not(:disabled){border-color:var(--dim)}
+.rv .dst-chip.on{border-color:var(--accent)}
+.rv .dst-chip.na{opacity:.55;cursor:default}
+.rv .dst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+.rv .dst-card{padding:14px;display:grid;gap:8px}
+.rv .dst-big{font-size:26px;line-height:1.1}
+.rv .dst-pills{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.rv .dst-sh.on{--c:#4CC38A;color:#4CC38A}
+.rv .dst-sh.later,.rv .dst-sh.done,.rv .dst-sh.none{--c:#8B94A7}
+.rv .dst-sh.off{--c:#E39A4B;color:#E39A4B}
+.rv .dst-tag{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-size:12px}
+
+/* Settings > Roles and Accounts */
+.rv .rl{display:grid;grid-template-columns:270px minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:900px){.rv .rl{grid-template-columns:1fr}}
+.rv .rl-list{display:grid;gap:6px}
+.rv .rl-lh{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.rv .rl-item{display:grid;gap:2px;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--txt);font:inherit}
+.rv .rl-item:hover{border-color:var(--dim)}
+.rv .rl-item.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+.rv .rl-item .dim{font-size:12px}
+.rv .rl-note{font-size:12px;margin-top:6px}
+.rv .rl-edit{display:grid;gap:12px;min-width:0}
+.rv .rl-head{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:end}
+@media (max-width:700px){.rv .rl-head{grid-template-columns:1fr}}
+.rv .rl-fixed{display:flex;align-items:center;color:var(--dim)}
+.rv .rl-sum{grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.rv .rl-act{margin-left:auto;display:flex;gap:8px}
+.rv .rl-gh{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--dim);margin-bottom:6px;font-weight:500}
+.rv .rl-row{display:flex;gap:14px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line)}
+.rv .rl-gh + .rl-row{border-top:0}
+.rv .rl-desc{font-size:12px;margin-top:1px}
+.rv .rl-chg{margin-left:8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:0 6px;vertical-align:middle}
+.rv .rl-sw{position:relative;flex:none;width:38px;height:22px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;padding:0;margin-top:1px;transition:background .12s,border-color .12s}
+.rv .rl-sw span{position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--dim);transition:transform .12s,background .12s}
+.rv .rl-sw.on{background:var(--accent);border-color:var(--accent)}
+.rv .rl-sw.on span{transform:translateX(16px);background:var(--on-accent,#15181E)}
+.rv .rl-sw:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rv .rl-sw:disabled{opacity:.5;cursor:not-allowed}
+.rv .acc-tbl{width:100%;border-collapse:collapse}
+.rv .acc-tbl th{text-align:left;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:500;padding:10px 12px}
+.rv .acc-tbl td{padding:8px 12px;border-top:1px solid var(--line);vertical-align:middle}
+.rv .acc-new{display:grid;grid-template-columns:1.2fr 1.2fr 1fr .8fr auto;gap:10px;align-items:center}
+@media (max-width:900px){.rv .acc-new{grid-template-columns:1fr 1fr}}

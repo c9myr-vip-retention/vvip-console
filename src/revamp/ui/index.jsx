@@ -117,7 +117,7 @@ function useMenu() {
 
 /* ---------------------------------------------------------------- Select */
 /** Dropdown (single). options: [{ value, label, dot? }]. Searchable. `placeholder` adds a leading "" (clear) row. */
-export function Select({ value, options, onChange, placeholder, style, disabled, className }) {
+export function Select({ value, options, onChange, placeholder, style, disabled, className, title }) {
   const m = useMenu();
   const all = useMemo(() => (placeholder !== undefined ? [{ value: "", label: placeholder }, ...options] : options), [options, placeholder]);
   const shown = useMemo(() => { const q = norm(m.query); return q ? all.filter((o) => norm(o.label).includes(q)) : all; }, [all, m.query]);
@@ -127,7 +127,7 @@ export function Select({ value, options, onChange, placeholder, style, disabled,
   const pick = (o) => { onChange(o.value); m.close(); };
   return (
     <>
-      <button type="button" ref={m.btn} disabled={disabled} className={"csb" + (m.open ? " open" : "") + (className ? " " + className : "")} style={style}
+      <button type="button" ref={m.btn} disabled={disabled} title={title} className={"csb" + (m.open ? " open" : "") + (className ? " " + className : "")} style={style}
         aria-haspopup="listbox" aria-expanded={m.open} onClick={() => (m.open ? m.close(false) : openMenu())}
         onKeyDown={(e) => { if (!m.open && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); openMenu(); } }}>
         <span className={"csl" + (cur && cur.value !== "" ? "" : " ph")}><Dot c={cur?.dot} />{cur && (cur.value !== "" || placeholder === undefined) ? cur.label : (placeholder ?? "Select…")}</span>
@@ -148,18 +148,28 @@ export function Select({ value, options, onChange, placeholder, style, disabled,
 
 /* ---------------------------------------------------------------- MultiSelect */
 /** Multi-select with checkboxes. value: string[]; options: [{ value, label, dot? }] */
-export function MultiSelect({ value, options, onChange, label, style, disabled }) {
+export function MultiSelect({ value, options, onChange, label, style, disabled, groups }) {
   const m = useMenu();
   const shown = useMemo(() => { const q = norm(m.query); return q ? options.filter((o) => norm(o.label).includes(q)) : options; }, [options, m.query]);
   const pos = useFloat(m.open, m.btn, m.menu, [shown.length, value.length]);
   const toggle = (o) => onChange(value.includes(o.value) ? value.filter((x) => x !== o.value) : [...value, o.value]);
+  // groups (optional): [{ label, values }] quick picks, e.g. every agent. Clicking adds the group; clicking again when all are on removes it.
+  const pickGroup = (g) => { const on = g.values.every((v) => value.includes(v)); onChange(on ? value.filter((v) => !g.values.includes(v)) : [...new Set([...value, ...g.values])]); };
   const footer = (
+    <>
+    {groups && groups.length > 0 && (
+      <div className="csf" style={{ justifyContent: "flex-start", flexWrap: "wrap", position: "static", paddingBottom: 0 }}>
+        <span className="dim">Add by role:</span>
+        {groups.map((g) => <button key={g.label} type="button" className={"btn sm" + (g.values.length && g.values.every((v) => value.includes(v)) ? " on" : "")} onClick={() => pickGroup(g)}>{g.label} · {g.values.length}</button>)}
+      </div>
+    )}
     <div className="csf">
       <button type="button" className="btn sm" disabled={!value.length} onClick={() => onChange([])}>Clear</button>
       <button type="button" className="btn sm" onClick={() => onChange(options.map((o) => o.value))} disabled={value.length === options.length}>All</button>
       <span className="dim" style={{ marginLeft: "auto" }}>{value.length} selected</span>
       <button type="button" className="btn sm pri" onClick={() => m.close()}>Done</button>
     </div>
+    </>
   );
   return (
     <>
@@ -335,4 +345,38 @@ export function Avatar({ name }) {
 /** Small coloured brand tag. color comes from brandColor() in ../tokens.js. */
 export function BrandBadge({ brand, color }) {
   return <span className="bb" style={{ "--b": color }}>{brand}</span>;
+}
+
+/* ---------------------------------------------------------------- NativeSelect */
+/** Drop-in for a native <select> in live-console code: same props and <option> children, but it shows the custom dropdown.
+ *  onChange gets { target: { value } } like the native one. value for a controlled select, defaultValue for an uncontrolled one.
+ *  A disabled option with an empty value (a "Pick…" prompt) becomes the placeholder and cannot be chosen. */
+const optText = (n) => (n == null || n === false ? "" : Array.isArray(n) ? n.map(optText).join("") : typeof n === "object" ? optText(n.props && n.props.children) : String(n));
+function optionsOf(children, out = []) {
+  React.Children.forEach(children, (c) => {
+    if (!React.isValidElement(c)) return;
+    if (c.type === "option") { const label = optText(c.props.children); out.push({ value: c.props.value !== undefined ? String(c.props.value) : label, label, disabled: !!c.props.disabled }); }
+    else if (c.props && c.props.children) optionsOf(c.props.children, out);     // <optgroup> and fragments
+  });
+  return out;
+}
+const revampOn = () => { try { return localStorage.getItem("revamp_ui") === "1"; } catch (e) { return false; } };   // same flag as App.jsx (?revamp=1)
+export function NativeSelect({ value, defaultValue, onChange, children, className, disabled, title, style }) {
+  const [own, setOwn] = useState(defaultValue === undefined ? "" : String(defaultValue));
+  const controlled = value !== undefined;
+  const all = useMemo(() => optionsOf(children), [children]);
+  const prompt = all.find((o) => o.disabled && o.value === "");
+  const options = all.filter((o) => o !== prompt).map(({ value: v, label }) => ({ value: v, label }));
+  const cur = controlled ? String(value ?? "") : own;
+  const pick = (v) => { if (prompt && v === "") return; if (!controlled) setOwn(v); if (onChange) onChange({ target: { value: v } }); };
+  // Flag off (the console everyone uses today): the plain browser <select>, exactly as before.
+  if (!revampOn()) {
+    const props = { className, disabled, title, style, onChange };
+    if (controlled) props.value = value; else props.defaultValue = defaultValue;
+    return <select {...props}>{children}</select>;
+  }
+  return (
+    <Select className={"live-csb" + (className ? " " + className : "")} value={cur} options={options} onChange={pick} disabled={disabled}
+      placeholder={prompt ? prompt.label : undefined} style={style} title={title} />
+  );
 }

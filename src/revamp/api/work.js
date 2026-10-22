@@ -30,12 +30,26 @@ export const work = {
   comment: (id, body) => post(`/api/work/tasks/${id}/comments`, { body }),
   deleteTask: (id) => post(`/api/work/tasks/${id}/delete`),
   workload: () => get("/api/work/workload"),
+  // roles and accounts (Settings). Needs users.manage; see worker/roles.js
+  roles: () => get("/api/roles"),
+  createRole: (b) => post("/api/roles", b),                                         // { name, base: admin|agent|viewer|none }
+  updateRole: (key, b) => post(`/api/roles/${key}/update`, b),                      // { name?, base?, overrides?: { perm: true|false|null }, reset? }
+  deleteRole: (key, b) => post(`/api/roles/${key}/delete`, b),                      // { move_to? }
+  accounts: () => get("/api/users"),
+  createAccount: (b) => post("/api/users", b),                                      // { username, password, role_key, team }
+  setAccountRole: (b) => post("/api/users/role", b),                                // { id, role_key, team? }
+  setAccountFlags: (b) => post("/api/users/perm", b),                                // the old editor: { id, role, can_edit, can_delete, on_leaderboard, manage_users, team }
+  deleteAccount: (id) => http(`/api/users/${id}`, { method: "DELETE" }),
   // schedule
   schedule: (from, to) => get(`/api/work/schedule${qs({ from, to })}`),
   addScheduleItems: (items) => post("/api/work/schedule/items", { items }),
   updateScheduleItem: (id, b) => post(`/api/work/schedule/items/${id}/update`, b),
   deleteScheduleItem: (id) => post(`/api/work/schedule/items/${id}/delete`),
+  deleteScheduleItems: (b) => post("/api/work/schedule/items/bulk-delete", b),    // { type_key?, from?, to?, preview? } -> { count, repeating } | { deleted }
   addScheduleType: (b) => post("/api/work/schedule/types", b),
+  addShiftPreset: (b) => post("/api/work/schedule/shifts", b),                   // { name, start_time, end_time }
+  updateShiftPreset: (key, b) => post(`/api/work/schedule/shifts/${key}/update`, b),
+  deleteShiftPreset: (key) => post(`/api/work/schedule/shifts/${key}/delete`),
   requestSwap: (id, note) => post(`/api/work/schedule/items/${id}/swap`, { note }),
   swaps: () => get("/api/work/schedule/swaps"),
   decideSwap: (id, status) => post(`/api/work/schedule/swaps/${id}`, { status }),
