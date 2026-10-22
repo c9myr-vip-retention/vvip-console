@@ -3760,7 +3760,7 @@ export function TelegramImport({ viewTeam = "B" }) {
   );
 }
 
-export function Settings({ me, viewTeam = "B", hideLog = false, hideAccounts = false }) {
+export function Settings({ me, viewTeam = "B", hideLog = false, hideAccounts = false, hidePassword = false }) {
   const [users, setUsers] = useState([]);
   const [drafts, setDrafts] = useState({});   // id -> { role, can_edit, can_delete, on_leaderboard, manage_users }
   const [nu, setNu] = useState(""); const [np, setNp] = useState("");
@@ -3850,14 +3850,14 @@ export function Settings({ me, viewTeam = "B", hideLog = false, hideAccounts = f
           </div>
           <div className="hint">New accounts start as <b>Viewer</b> (lowest access). Pick a role to set defaults, then fine-tune the boxes. CS reps log in with their own account — "My queue" and the action log track them by name.</div>
         </div>)}
-      <div className="set-card set-password">
+      {!hidePassword && <div className="set-card set-password">
         <h3>Change my password</h3>
         <div className="form-row">
           <input placeholder="Current password" type="password" value={cp} onChange={(e) => setCp(e.target.value)} />
           <input placeholder="New password" type="password" value={cn} onChange={(e) => setCn(e.target.value)} />
           <button className="btn-gold" disabled={!cp || !cn} onClick={changePw}>Update</button>
         </div>
-      </div>
+      </div>}
       {canManage && <TelegramImport viewTeam={viewTeam} />}
       {canManage && !hideLog && <ActivityLog viewTeam={viewTeam} />}
       {msg && <div className="set-msg">{msg}</div>}

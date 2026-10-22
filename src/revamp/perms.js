@@ -3,8 +3,8 @@
 import { NAV } from "./tokens.js";
 
 const AGENT_ACT = ["contact.edit", "tasks.use", "schedule.swap_request"];
-const PAGE_ALL = ["page.changes", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload"];   // everyone saw these before
-const PAGE_AGENT = ["page.myday", "page.myperf", "page.account"];                                                                                          // agent-style sidebar only
+const PAGE_ALL = ["page.changes", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.settings", "page.account"];   // everyone has these by default
+const PAGE_AGENT = ["page.myday", "page.myperf"];                                                                                          // agent-style sidebar only
 
 export function can(me, key) {
   if (!me) return false;
@@ -25,13 +25,13 @@ export const PAGE_PERM = {
   queue: "page.contact", checkin: "page.checkin", grace: "page.grace", players: "page.players", assign: "assign.manage",
   tasks: "page.tasks", sched: "page.schedule", proj: "page.projects", flows: "flows.manage", tpl: "templates.manage", team: "page.workload",
   ana: "analytics.view", set: "page.settings",                // the Recycle bin is a tab in Settings, not a page of its own
-  home: "page.myday", mine: "page.myperf", acct: "page.account",
+  home: "page.myday", mine: "page.myperf",
 };
 // Pages the other sidebar style does not list are added to this section when the role may open them: [section, page key, label]
 const EXTRA = [
   ["Overview", "dash", "Dashboard"], ["Overview", "perf", "Performance"], ["Daily work", "assign", "Assignments"],
   ["Work", "flows", "Flows"], ["Work", "tpl", "Templates"], ["Task insight", "ana", "Analytics"], ["Admin", "set", "Settings"],
-  ["Me", "home", "My day"], ["Me", "mine", "My performance"], ["Me", "acct", "Account"],
+  ["Me", "home", "My day"], ["Me", "mine", "My performance"],
 ];
 export const canOpen = (me, key) => { const p = PAGE_PERM[key]; return !p || can(me, p); };
 

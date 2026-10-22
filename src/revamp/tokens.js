@@ -23,7 +23,7 @@ export const NAV = {
   agent: [
     ["My work", [["home", "My day"], ["tasks", "My tasks"], ["sched", "Schedule"], ["proj", "Projects"], ["team", "Team workload"]]],
     ["Daily work", [["queue", "Contact"], ["checkin", "Check-in"], ["grace", "Grace claims"], ["players", "Players"], ["delta", "Changes"]]],
-    ["Me", [["mine", "My performance"], ["acct", "Account"]]],
+    ["Me", [["mine", "My performance"], ["set", "Settings"]]],           // the Account page is a tab inside Settings
   ],
 };
 

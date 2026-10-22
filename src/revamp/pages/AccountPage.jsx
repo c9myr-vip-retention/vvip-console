@@ -1,11 +1,11 @@
-// Account (agent): change my password, my details. Owned by agent "shell-ui".
+// My account (a tab in Settings, open to everyone): change my password, my details. Owned by agent "shell-ui".
 import React, { useState } from "react";
 import { api } from "../../App.jsx";
 import { toast } from "../ui/index.jsx";
 
 const PERMS = [["can_edit", "Edit queue"], ["can_delete", "Delete contact"], ["on_leaderboard", "Scored agent"], ["manage_users", "Manage users"]];
 
-export default function AccountPage({ ctx }) {
+export default function AccountPage({ ctx, embedded = false }) {
   const { me } = ctx;
   const [cur, setCur] = useState(""); const [nw, setNw] = useState(""); const [nw2, setNw2] = useState("");
   const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
@@ -22,7 +22,7 @@ export default function AccountPage({ ctx }) {
   }
   return (
     <>
-      <div className="top"><h1>Account</h1></div>
+      {!embedded && <div className="top"><h1>Account</h1></div>}
       <div className="acct-grid">
         <form className="card" onSubmit={submit}>
           <h3>Change my password</h3>
@@ -38,9 +38,9 @@ export default function AccountPage({ ctx }) {
         <div className="card">
           <h3>My details</h3>
           <div className="body">
-            <p><b>{me.username}</b> · <span className="role-tag">{me.role || "agent"}</span> · Team {me.team || "—"}</p>
+            <p><b>{me.username}</b> · <span className="role-tag">{me.role_name || me.role || "agent"}</span> · Team {me.team || "—"}</p>
             <p className="dim" style={{ marginTop: 8 }}>{PERMS.map(([k, l]) => `${l} ${me[k] ? "✓" : "✗"}`).join(" · ")}</p>
-            <p className="dim" style={{ marginTop: 8 }}>Team accounts, Telegram import and Activity logs are admin-only.</p>
+            <p className="dim" style={{ marginTop: 8 }}>The other Settings tabs only appear if your role allows them.</p>
           </div>
         </div>
       </div>

@@ -7,9 +7,10 @@ import AccountsPanel from "./AccountsPanel.jsx";
 import RolesPanel from "./RolesPanel.jsx";
 import TaskDataPanel from "./TaskDataPanel.jsx";
 import PagesPanel from "./PagesPanel.jsx";
+import AccountPage from "./AccountPage.jsx";
 import { can } from "../perms.js";
 
-const TABS = [["acc", "Accounts", "users.manage"], ["roles", "Roles & permissions", "users.manage"], ["pages", "Page access", "users.manage"], ["log", "Activity log", "activity.view"], ["bin", "Recycle bin", "bin.manage"], ["tdata", "Task data", "tasks.clear"]];
+const TABS = [["me", "My account", "page.account"], ["acc", "Accounts", "users.manage"], ["roles", "Roles & permissions", "users.manage"], ["pages", "Page access", "users.manage"], ["log", "Activity log", "activity.view"], ["bin", "Recycle bin", "bin.manage"], ["tdata", "Task data", "tasks.clear"]];
 
 export default function SettingsPage({ ctx }) {
   const [tab, setTab] = useState(() => { try { return sessionStorage.getItem("rv_set_tab") || "acc"; } catch (e) { return "acc"; } });
@@ -23,7 +24,8 @@ export default function SettingsPage({ ctx }) {
         {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={cur === k} className={cur === k ? "on" : ""} onClick={() => pick(k)}>{l}</button>)}
       </div>
       {!cur && <div className="card"><div className="body dim">Nothing here is available to your role.</div></div>}
-      {cur === "acc" && <><AccountsPanel me={ctx.me} /><div className="rv-live" style={{ marginTop: 14 }}><LiveSettings me={ctx.me} viewTeam={ctx.viewTeam} hideLog hideAccounts /></div></>}
+      {cur === "me" && <AccountPage ctx={ctx} embedded />}
+      {cur === "acc" && <><AccountsPanel me={ctx.me} /><div className="rv-live" style={{ marginTop: 14 }}><LiveSettings me={ctx.me} viewTeam={ctx.viewTeam} hideLog hideAccounts hidePassword /></div></>}
       {cur === "roles" && <RolesPanel />}
       {cur === "pages" && <PagesPanel />}
       {cur === "log" && <div className="rv-live"><ActivityLog viewTeam={ctx.viewTeam} /></div>}
