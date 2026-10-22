@@ -2,7 +2,9 @@
 //
 // One permission = one function someone may or may not do. A role is a name plus a starting point (`base`: admin, agent, viewer or
 // none) and any number of overrides (a permission switched on or off on top of the base). Effective permission = override, else the
-// base default. The three built-in roles (admin, agent, viewer) can be renamed and edited like any other.
+// starting point. A role based on Admin, Agent or Viewer starts from that built-in role AS IT IS NOW (so editing Agent changes every role that
+// starts from Agent); a built-in role starts from the code defaults below. Roles are ranked, most senior first (roles.sort).
+// The three built-in roles (admin, agent, viewer) can be renamed and edited like any other.
 //
 // An account that has no role_key yet (every account today) keeps exactly the access its old flags give it: legacyPerms() below.
 // Giving an account a role in Settings moves it onto this system, and syncFlags() keeps the old columns (role, can_edit, can_delete,
@@ -76,7 +78,7 @@ export function legacyPerms(user) {
 /** Roles from the database, as Map(key -> { key, name, base, builtin, overrides }). null when the tables are not there yet. */
 export async function loadRoles(db) {
   try {
-    const r = await db.prepare("SELECT key, name, base, builtin FROM roles WHERE deleted_at IS NULL ORDER BY builtin DESC, sort, rowid").all();
+    const r = await db.prepare("SELECT key, name, base, builtin FROM roles WHERE deleted_at IS NULL ORDER BY sort, rowid").all();
     const p = await db.prepare("SELECT role_key, perm, allowed FROM role_permissions").all();
     const map = new Map();
     for (const x of r.results || []) map.set(x.key, { key: x.key, name: x.name, base: BASES.includes(x.base) ? x.base : "none", builtin: !!x.builtin, overrides: {} });
@@ -85,22 +87,31 @@ export async function loadRoles(db) {
   } catch { return null; }
 }
 
-export function rolePerms(role) {
+/** The permissions a role starts from: the built-in role it is based on, as it is now, or the code defaults. */
+export function startPerms(role, roles, depth = 0) {
   const out = new Set();
-  for (const k of PERM_KEYS) { const o = role.overrides[k]; if (o === undefined ? defaultFor(role.base, k) : o) out.add(k); }
+  const baseRole = roles && depth < 3 && role.base !== "none" && role.key !== role.base ? roles.get(role.base) : null;
+  const inherited = baseRole && baseRole.builtin ? rolePerms(baseRole, roles, depth + 1) : null;
+  for (const k of PERM_KEYS) if (inherited ? inherited.has(k) : defaultFor(role.base, k)) out.add(k);
+  return out;
+}
+
+export function rolePerms(role, roles, depth = 0) {
+  const start = startPerms(role, roles, depth), out = new Set();
+  for (const k of PERM_KEYS) { const o = role.overrides[k]; if (o === undefined ? start.has(k) : o) out.add(k); }
   return out;
 }
 
 /** The effective permission set of an account. roles may be null (tables missing): then everyone is legacy. */
 export function resolvePerms(user, roles) {
   const rk = user && user.role_key;
-  if (rk && roles && roles.has(rk)) return rolePerms(roles.get(rk));
+  if (rk && roles && roles.has(rk)) return rolePerms(roles.get(rk), roles);
   return legacyPerms(user);
 }
 
 /** The old columns an account on `role` must carry so every query that still reads them agrees. */
-export function legacyColumns(role) {
-  const perms = rolePerms(role);
+export function legacyColumns(role, roles) {
+  const perms = rolePerms(role, roles);
   return {
     role: role.base === "none" ? "viewer" : role.base,
     can_edit: perms.has("contact.edit") ? 1 : 0, can_delete: perms.has("contact.delete") ? 1 : 0,

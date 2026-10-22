@@ -188,6 +188,33 @@ r = await bd({});
 check("no filters deletes every remaining item", r.data.deleted === 3 && rows("SELECT COUNT(*) n FROM schedule_items WHERE deleted_at IS NULL")[0].n === 0, JSON.stringify(r.data));
 check("nothing left -> deleted 0", (await bd({})).data.deleted === 0);
 
+// ---- types: rename, recolour, delete ----
+sql("DELETE FROM schedule_items; DELETE FROM schedule_types WHERE builtin = 0");
+r = await call(A, "POST", `${W}/types`, { name: "Promo", color: "#112233" });
+const PK = r.data.type && r.data.type.key;
+check("create a custom type", r.status === 201 && PK === "promo", JSON.stringify(r));
+for (const [who, tok] of [["agent", S], ["viewer", V]]) {
+  check(`${who} cannot rename a type (403)`, (await call(tok, "POST", `${W}/types/${PK}/update`, { name: "X" })).status === 403);
+  check(`${who} cannot delete a type (403)`, (await call(tok, "POST", `${W}/types/${PK}/delete`, {})).status === 403);
+}
+r = await call(A, "POST", `${W}/types/${PK}/update`, { name: "Promotions", color: "#AABBCC" });
+check("rename and recolour", r.status === 200 && r.data.type.name === "Promotions" && r.data.type.color === "#AABBCC", JSON.stringify(r));
+check("rename onto another type is 409", (await call(A, "POST", `${W}/types/${PK}/update`, { name: "meetings" })).status === 409);
+check("bad colour is 400", (await call(A, "POST", `${W}/types/${PK}/update`, { color: "red" })).status === 400);
+check("blank name is 400", (await call(A, "POST", `${W}/types/${PK}/update`, { name: " " })).status === 400);
+check("unknown type is 404", (await call(A, "POST", `${W}/types/nope/update`, { name: "Z" })).status === 404);
+check("a built-in type can be renamed too", (await call(A, "POST", `${W}/types/training/update`, { name: "Learning" })).data.type.name === "Learning");
+await call(A, "POST", `${W}/items`, { items: [{ type_key: PK, date: "2026-12-01", title: "[t] a" }, { type_key: PK, date: "2026-12-02", title: "[t] b" }, { type_key: "reload", date: "2026-12-01", title: "[t] keep" }] });
+r = await call(A, "POST", `${W}/types/${PK}/delete`, { preview: true });
+check("delete preview counts the items and deletes nothing", r.status === 200 && r.data.items === 2 && rows("SELECT COUNT(*) n FROM schedule_types WHERE key = 'promo'")[0].n === 1, JSON.stringify(r.data));
+r = await call(A, "POST", `${W}/types/${PK}/delete`, {});
+check("delete the type and its items", r.status === 200 && r.data.items === 2, JSON.stringify(r.data));
+check("the type is gone from the board and the other type's item stays", !(await call(S, "GET", `${W}?from=2026-12-01&to=2026-12-31`)).data.types.some((t) => t.key === PK) && (await call(S, "GET", `${W}?from=2026-12-01&to=2026-12-31`)).data.items.map((i) => i.title).join() === "[t] keep");
+check("deleting it twice is 404", (await call(A, "POST", `${W}/types/${PK}/delete`, {})).status === 404);
+check("a deleted type cannot be used for new items (400)", (await call(A, "POST", `${W}/items`, { items: [{ type_key: PK, date: "2026-12-03", title: "[t] no" }] })).status === 400);
+check("a built-in type can be deleted (Learning/training)", (await call(A, "POST", `${W}/types/training/delete`, {})).status === 200 && !(await call(S, "GET", W)).data.types.some((t) => t.key === "training"));
+sql("INSERT OR IGNORE INTO schedule_types (key, name, color, builtin) VALUES ('shift','Agent shifts','#5F9AD6',1),('reload','Reload events','#E8C547',1),('meeting','Meetings','#A78BFA',1),('maint','Maintenance','#EF4444',1),('report','Reports & deadlines','#4CC38A',1),('training','Training','#56B6C2',1)");   // put the built-ins back for the next run
+
 console.log(`\n${passes} passed, ${fails} failed`);
 console.log(fails ? `${fails} check(s) FAILED` : "All checks passed");
 process.exit(fails ? 1 : 0);

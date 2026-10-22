@@ -3779,7 +3779,7 @@ export default {
         if (b.role_key && !picked) return err("Unknown role", 400);
         if (picked) {
           // a role decides the old columns too, so every query that still reads them agrees
-          const perms = rolePerms(picked), f2 = (k) => (perms.has(k) ? 1 : 0);
+          const perms = rolePerms(picked, roleMap), f2 = (k) => (perms.has(k) ? 1 : 0);
           await env.DB.prepare(
             "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team, role_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
           ).bind(b.username.trim().toLowerCase(), hash, picked.base === "none" ? "viewer" : picked.base,

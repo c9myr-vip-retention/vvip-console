@@ -1,13 +1,14 @@
 // Role routes (Settings > Roles). Mounted by worker/index.js after requireAuth. Returns a Response, or null for paths that are not ours.
 // All of them need users.manage. See worker/perms.js for the model and schema/schema_v27_roles.sql for the tables.
-//   GET  /api/roles                      roles + the permission catalogue
-//   POST /api/roles                      { name, base }                       new role
+//   GET  /api/roles                      roles (ranked, most senior first) + the permission catalogue
+//   POST /api/roles                      { name, base }                       new role, added at the bottom (most junior)
 //   POST /api/roles/:key/update          { name?, base?, overrides?, reset? } rename, change the starting point, switch permissions
+//   POST /api/roles/:key/move            { dir: "up" | "down" }               change its rank
 //   POST /api/roles/:key/delete          { move_to? }                         remove a custom role (people on it move to move_to)
 //   POST /api/users/role                 { id, role_key, team? }              give an account a role
-// Changing a role re-syncs the old columns of every account on it (legacyColumns), and nothing may remove the last account
-// that can manage accounts.
-import { GROUPS, PERMS, PERM_KEYS, BASES, loadRoles, rolePerms, legacyColumns, managerCount, slugRole } from "./perms.js";
+// Changing a role re-syncs the old columns of every account whose permissions could have changed (legacyColumns), and nothing may remove
+// the last account that can manage accounts.
+import { GROUPS, PERMS, PERM_KEYS, BASES, loadRoles, rolePerms, startPerms, legacyColumns, managerCount, slugRole } from "./perms.js";
 
 const NO_TABLES = "Roles are not set up yet (schema_v27 has not been run)";
 const LAST = "Can't remove the last account that can manage accounts and roles. Give someone else that permission first.";
@@ -27,10 +28,21 @@ function locksOut(before, after, rolesBefore, rolesAfter) {
 // How many accounts sit on each role. An account without a role_key counts toward the built-in role named in its old `role`.
 const countOn = (users, key) => users.filter((u) => (u.role_key ? u.role_key === key : u.role === key)).length;
 
-async function syncRole(db, role) {
-  const col = legacyColumns(role);
-  await db.prepare("UPDATE users SET role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE role_key = ?")
-    .bind(col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, role.key).run();
+/** One role as the API returns it. rank 1 = most senior. */
+function roleOut(role, roles, users) {
+  return {
+    key: role.key, name: role.name, base: role.base, builtin: role.builtin, overrides: role.overrides,
+    perms: [...rolePerms(role, roles)], start: [...startPerms(role, roles)], users: countOn(users, role.key), rank: [...roles.keys()].indexOf(role.key) + 1,
+  };
+}
+
+/** Bring the old columns of every account on a role back in step with what the role now allows. */
+async function syncAll(db, roles) {
+  await db.batch([...roles.values()].map((role) => {
+    const col = legacyColumns(role, roles);
+    return db.prepare("UPDATE users SET role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE role_key = ?")
+      .bind(col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, role.key);
+  }));
 }
 
 export async function handleRoles(c) {
@@ -45,9 +57,7 @@ export async function handleRoles(c) {
     const catalogue = { groups: GROUPS, perms: PERMS.map((p) => ({ key: p.key, group: p.group, label: p.label, desc: p.desc, defaults: { admin: !!p.d[0], agent: !!p.d[1], viewer: !!p.d[2] } })) };
     if (!roles) return c.ok({ ...catalogue, roles: [], setup_needed: true });
     const users = await allUsers(db);
-    return c.ok({ ...catalogue, setup_needed: false, roles: [...roles.values()].map((r) => ({
-      key: r.key, name: r.name, base: r.base, builtin: r.builtin, overrides: r.overrides, perms: [...rolePerms(r)], users: countOn(users, r.key),
-    })) });
+    return c.ok({ ...catalogue, setup_needed: false, roles: [...roles.values()].map((r) => roleOut(r, roles, users)) });
   }
 
   const roles = await loadRoles(db);
@@ -66,11 +76,27 @@ export async function handleRoles(c) {
     const top = await db.prepare("SELECT COALESCE(MAX(sort), 0) AS m FROM roles").first();
     await db.prepare("INSERT INTO roles (key, name, base, builtin, sort) VALUES (?,?,?,0,?)").bind(key, name, base, (top?.m || 0) + 1).run();
     c.log(c.user, "role", `Created role "${name}" (starts from ${base})`);
-    return c.ok({ role: { key, name, base, builtin: false, overrides: {}, perms: [...rolePerms({ key, name, base, overrides: {} })], users: 0 } }, 201);
+    const after = await loadRoles(db);
+    return c.ok({ role: roleOut(after.get(key), after, await allUsers(db)) }, 201);
+  }
+
+  // ── rank ──
+  let m = path.match(/^\/api\/roles\/([a-z0-9-]+)\/move$/);
+  if (m && method === "POST") {
+    const b = await body(c);
+    const order = [...roles.keys()], i = order.indexOf(m[1]);
+    if (i < 0) return c.err("Role not found", 404);
+    if (b.dir !== "up" && b.dir !== "down") return c.err("dir must be up or down");
+    const j = b.dir === "up" ? i - 1 : i + 1;
+    if (j < 0 || j >= order.length) return c.ok({ roles: order });                       // already at the end: nothing to do
+    [order[i], order[j]] = [order[j], order[i]];
+    await db.batch(order.map((k, idx) => db.prepare("UPDATE roles SET sort = ? WHERE key = ?").bind(idx + 1, k)));
+    c.log(c.user, "role", `Moved role "${roles.get(m[1]).name}" ${b.dir}`);
+    return c.ok({ roles: order });
   }
 
   // ── edit a role ──
-  let m = path.match(/^\/api\/roles\/([a-z0-9-]+)\/(update|delete)$/);
+  m = path.match(/^\/api\/roles\/([a-z0-9-]+)\/(update|delete)$/);
   if (m && method === "POST") {
     const role = roles.get(m[1]);
     if (!role) return c.err("Role not found", 404);
@@ -96,16 +122,15 @@ export async function handleRoles(c) {
           if (v === null) delete next.overrides[k]; else next.overrides[k] = !!v;
         }
       }
-      // the stored overrides only ever differ from the base: drop any that now equal it
       const rolesAfter = new Map(roles); rolesAfter.set(role.key, next);
       if (locksOut(users, users, roles, rolesAfter)) return c.err(LAST, 400);
       await db.prepare("UPDATE roles SET name = ?, base = ? WHERE key = ?").bind(next.name, next.base, role.key).run();
       await db.prepare("DELETE FROM role_permissions WHERE role_key = ?").bind(role.key).run();
       const rows = Object.entries(next.overrides);
       if (rows.length) await db.batch(rows.map(([k, v]) => db.prepare("INSERT INTO role_permissions (role_key, perm, allowed) VALUES (?,?,?)").bind(role.key, k, v ? 1 : 0)));
-      await syncRole(db, next);
+      await syncAll(db, rolesAfter);           // roles based on this one change with it
       c.log(c.user, "role", `Changed role "${next.name}"`);
-      return c.ok({ role: { key: next.key, name: next.name, base: next.base, builtin: next.builtin, overrides: next.overrides, perms: [...rolePerms(next)], users: countOn(users, next.key) } });
+      return c.ok({ role: roleOut(next, rolesAfter, users) });
     }
 
     // delete
@@ -120,7 +145,7 @@ export async function handleRoles(c) {
     const rolesAfter = new Map(roles); rolesAfter.delete(role.key);
     if (locksOut(users, after, roles, rolesAfter)) return c.err(LAST, 400);
     if (target) {
-      const col = legacyColumns(target);
+      const col = legacyColumns(target, roles);
       await db.prepare("UPDATE users SET role_key = ?, role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE role_key = ?")
         .bind(target.key, col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, role.key).run();
     }
@@ -139,7 +164,7 @@ export async function handleRoles(c) {
     if (!target) return c.err("User not found", 404);
     const after = users.map((u) => (u.id === target.id ? { ...u, role_key: role.key } : u));
     if (locksOut(users, after, roles, roles)) return c.err(LAST, 400);
-    const col = legacyColumns(role);
+    const col = legacyColumns(role, roles);
     const team = b.team === undefined ? target.team : (["A", "B", "C"].includes(b.team) ? b.team : null);
     await db.prepare("UPDATE users SET role_key = ?, role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ?, team = ? WHERE id = ?")
       .bind(role.key, col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, team, target.id).run();
@@ -149,4 +174,3 @@ export async function handleRoles(c) {
 
   return null;
 }
-

@@ -224,6 +224,33 @@ export async function handleSchedule(c) {
     return c.ok({ type: { key, name, color, builtin: 0 } }, 201);
   }
 
+  // ───────────── rename, recolour or delete a type (any type, built-in ones too) ─────────────
+  // Deleting a type removes the type itself and soft-deletes every item of that type (deleted_at), so they leave the board.
+  // { preview: true } on delete only reports how many items it would take with it.
+  m = path.match(/^\/api\/work\/schedule\/types\/([a-z0-9-]+)\/(update|delete)$/);
+  if (m && method === "POST") {
+    if (!c.can("schedule.manage")) return c.err("Admin only", 403);
+    const cur = await db.prepare("SELECT key, name, color, builtin FROM schedule_types WHERE key = ?").bind(m[1]).first();
+    if (!cur) return c.err("Schedule type not found", 404);
+    const b = await body(c);
+    if (m[2] === "update") {
+      const name = b.name === undefined ? cur.name : str(b.name, 40), color = b.color === undefined ? cur.color : (typeof b.color === "string" ? b.color.trim() : "");
+      if (!name) return c.err("Give the type a name");
+      if (!COLOR_RE.test(color)) return c.err("color must look like #RRGGBB");
+      const dup = await db.prepare("SELECT key FROM schedule_types WHERE name = ? COLLATE NOCASE AND key != ?").bind(name, cur.key).first();
+      if (dup) return c.err("A schedule type with that name already exists", 409);
+      await db.prepare("UPDATE schedule_types SET name = ?, color = ? WHERE key = ?").bind(name, color, cur.key).run();
+      c.log(c.user, "schedule", `Changed schedule type "${cur.name}"${name !== cur.name ? ` to "${name}"` : ""}`);
+      return c.ok({ type: { key: cur.key, name, color, builtin: cur.builtin ? 1 : 0 } });
+    }
+    const n = (await db.prepare("SELECT COUNT(*) AS n FROM schedule_items WHERE type_key = ? AND deleted_at IS NULL").bind(cur.key).first()).n;
+    if (b.preview) return c.ok({ items: n });
+    await db.prepare("UPDATE schedule_items SET deleted_at = datetime('now') WHERE type_key = ? AND deleted_at IS NULL").bind(cur.key).run();
+    await db.prepare("DELETE FROM schedule_types WHERE key = ?").bind(cur.key).run();
+    c.log(c.user, "schedule", `Deleted schedule type "${cur.name}" and its ${n} item${n === 1 ? "" : "s"}`);
+    return c.ok({ ok: true, items: n });
+  }
+
   // ───────────── shift times (admin): the presets behind "Quick fill a shift" ─────────────
   // Changing or removing a preset only affects shifts added from now on; shifts already on the board keep their own times.
   if (path === "/api/work/schedule/shifts" && method === "POST") {

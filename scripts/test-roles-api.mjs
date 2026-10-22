@@ -145,17 +145,56 @@ check("moving the manager to the Admin role is fine", r.status === 200);
 r = await call(A, "POST", "/api/roles/admin/update", { overrides: { "users.manage": false } });
 check("cannot switch users.manage off the last manager's role (400)", r.status === 400, JSON.stringify(r));
 await call(A, "POST", "/api/roles", { name: "Boss", base: "admin" });
+await call(A, "POST", "/api/roles/boss/update", { overrides: { "users.manage": true } });          // explicit, so it does not depend on the Admin role
 await call(A, "POST", "/api/users", { username: "boss1", password: PW, role_key: "boss", team: "B" });
 r = await call(A, "POST", "/api/roles/admin/update", { overrides: { "users.manage": false } });
-check("with a second manager the switch is allowed", r.status === 200, JSON.stringify(r));
+check("with a second manager (Boss, explicit) the switch is allowed", r.status === 200, JSON.stringify(r));
 // aldo lost users.manage on the Admin role: the boss account carries on, and is now the last manager
 const B1 = await login("boss1");
 check("aldo (Admin role without users.manage) is locked out of roles now (403)", (await call(A, "GET", "/api/roles")).status === 403);
 check("the Boss role cannot lose it either: the last manager (400)", (await call(B1, "POST", "/api/roles/boss/update", { overrides: { "users.manage": false } })).status === 400);
 check("the remaining manager can restore it", (await call(B1, "POST", "/api/roles/admin/update", { reset: true })).status === 200 && has(await me(A), "users.manage"));
 
+// ---- a role starts from the built-in role as it is NOW (so editing Agent changes roles based on Agent) ----
+await call(A, "POST", "/api/roles", { name: "Lead2", base: "agent" });
+await call(A, "POST", "/api/users", { username: "lena", password: PW, role_key: "lead2", team: "B" });
+r = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "lead2");
+check("a role based on Agent starts like Agent", r.start.includes("contact.delete") && !r.start.includes("schedule.manage") && r.perms.join() === r.start.join(), JSON.stringify(r));
+await call(A, "POST", "/api/roles/agent/update", { overrides: { "schedule.manage": true, "contact.delete": false } });
+r = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "lead2");
+check("edit the Agent role: Lead2 follows it", r.start.includes("schedule.manage") && !r.start.includes("contact.delete") && r.perms.includes("schedule.manage") && !r.perms.includes("contact.delete"), JSON.stringify(r));
+let dbL = rows("SELECT can_delete FROM users WHERE username = 'lena'")[0];
+check("the accounts on Lead2 were re-synced (can_delete is 0 now)", dbL.can_delete === 0, JSON.stringify(dbL));
+await call(A, "POST", "/api/roles/lead2/update", { overrides: { "schedule.manage": false } });
+r = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "lead2");
+check("a switch on Lead2 itself wins over what it inherits", !r.perms.includes("schedule.manage") && r.start.includes("schedule.manage"), JSON.stringify(r));
+const LN = await login("lena");
+check("and the Worker enforces it (Lead2 cannot edit the schedule)", (await call(LN, "POST", "/api/work/schedule/items", { items: [{ type_key: "reload", date: day(1), title: "[r] x" }] })).status === 403);
+await call(A, "POST", "/api/roles/agent/update", { reset: true });
+r = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "lead2");
+check("reset the Agent role: Lead2's starting point returns", !r.start.includes("schedule.manage") && r.start.includes("contact.delete"), JSON.stringify(r));
+
+// ---- rank (hierarchy): most senior first ----
+const order = async () => (await call(A, "GET", "/api/roles")).data.roles.map((x) => x.key);
+const swap = (arr, i, j) => { const o = [...arr]; [o[i], o[j]] = [o[j], o[i]]; return o; };
+let o0 = await order();
+r = await call(A, "GET", "/api/roles");
+check("roles come ranked: built-ins first (admin, agent, viewer), new ones after, rank 1..n", o0.slice(0, 3).join() === "admin,agent,viewer" && o0.includes("lead2") && r.data.roles.every((x, i) => x.rank === i + 1), JSON.stringify(r.data.roles.map((x) => [x.key, x.rank])));
+const iv = o0.indexOf("viewer"), ia = o0.indexOf("agent");
+r = await call(A, "POST", "/api/roles/viewer/move", { dir: "up" });
+check("move Viewer up above Agent", r.status === 200 && r.data.roles.join() === swap(o0, ia, iv).join(), JSON.stringify(r.data));
+const o1 = await order();
+check("the order is saved", o1.join() === swap(o0, ia, iv).join());
+check("moving the top role up changes nothing", (await call(A, "POST", `/api/roles/${o1[0]}/move`, { dir: "up" })).data.roles.join() === o1.join());
+check("moving the bottom role down changes nothing", (await call(A, "POST", `/api/roles/${o1[o1.length - 1]}/move`, { dir: "down" })).data.roles.join() === o1.join());
+const il = o1.indexOf("lead2");
+check("a custom role can be moved too", (await call(A, "POST", "/api/roles/lead2/move", { dir: "up" })).data.roles.join() === swap(o1, il, il - 1).join());
+check("bad direction is 400", (await call(A, "POST", "/api/roles/agent/move", { dir: "sideways" })).status === 400);
+check("unknown role is 404", (await call(A, "POST", "/api/roles/nope/move", { dir: "up" })).status === 404);
+check("an agent cannot rank roles (403)", (await call(S, "POST", "/api/roles/agent/move", { dir: "up" })).status === 403);
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1'); UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena'); UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);
