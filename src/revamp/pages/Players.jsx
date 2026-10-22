@@ -191,8 +191,8 @@ export default function Page({ ctx }) {
       </div>
 
       {dr && dr.list[dr.i] && (
-        <Drawer list={dr.list} index={dr.i} setIndex={(i) => setDr((d) => ({ ...d, i }))} snap={snap} me={me} team={team} readOnly={readOnly}
-          contact={contactMap[ckey(dr.list[dr.i])]} onSave={ctx.saveContact} onClear={ctx.clearContact} onClose={() => setDr(null)} />
+        <div className="rv-live"><Drawer list={dr.list} index={dr.i} setIndex={(i) => setDr((d) => ({ ...d, i }))} snap={snap} me={me} team={team} readOnly={readOnly}
+          contact={contactMap[ckey(dr.list[dr.i])]} onSave={ctx.saveContact} onClear={ctx.clearContact} onClose={() => setDr(null)} /></div>
       )}
     </>
   );

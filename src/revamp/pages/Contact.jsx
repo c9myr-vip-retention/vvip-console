@@ -6,7 +6,7 @@ import { useDailyBase, useDailyFilters } from "../daily/hooks.js";
 import { filterRows, sortPriority, buildBands, stageOf, isActioned, contactedPayload } from "../daily/logic.js";
 import { Banners, PageHead, SearchBox, AgentSelect, BrandMenu, FilterMenu, PlayerRow } from "../daily/widgets.jsx";
 
-const BAND_TOP = 8;
+const BAND_TOP = 10;   // same as the live worklist
 
 export default function Page({ ctx }) {
   const base = useDailyBase(ctx);
@@ -97,8 +97,8 @@ export default function Page({ ctx }) {
             {bandBlock("NONE", WL_NONE.label, `Quiet or healthy. ${WL_NONE.desc}.`, WL_NONE.color, bands.NONE, true)}
           </>}
       {dr && dr.list[dr.i] && (
-        <Drawer list={dr.list} index={dr.i} setIndex={(i) => setDr((d) => ({ ...d, i }))} snap={snap} me={me} team={team} readOnly={readOnly}
-          contact={contactMap[ckey(dr.list[dr.i])]} onSave={ctx.saveContact} onClear={ctx.clearContact} onClose={() => setDr(null)} />
+        <div className="rv-live"><Drawer list={dr.list} index={dr.i} setIndex={(i) => setDr((d) => ({ ...d, i }))} snap={snap} me={me} team={team} readOnly={readOnly}
+          contact={contactMap[ckey(dr.list[dr.i])]} onSave={ctx.saveContact} onClear={ctx.clearContact} onClose={() => setDr(null)} /></div>
       )}
     </>
   );
