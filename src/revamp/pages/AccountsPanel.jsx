@@ -63,6 +63,58 @@ function AdoptModal({ users, roles, perms, onClose, onDone }) {
   );
 }
 
+const parseOv = (u) => { try { const o = JSON.parse(u.perm_overrides || "{}"); return o && typeof o === "object" ? o : {}; } catch { return {}; } };
+const withOv = (set, ov) => { const out = new Set(set); for (const [k, v] of Object.entries(ov || {})) { if (v) out.add(k); else out.delete(k); } return out; };
+
+/** One account's own exceptions on top of its role: for each function, "Role" (do what the role says), "Allow" or "Block". Saves as you click. */
+function PermsModal({ u, role, groups, perms, onClose }) {
+  const [ov, setOv] = useState(() => parseOv(u)), [rolePerms, setRolePerms] = useState(() => new Set(role.perms)), [busy, setBusy] = useState(false);
+  const eff = withOv(rolePerms, ov), n = Object.keys(ov).length;
+  const set = async (key, v) => {
+    setBusy(true);
+    try { const r = await work.setAccountPerms({ id: u.id, overrides: { [key]: v } }); setOv(r.overrides); setRolePerms(new Set(r.role_perms)); }
+    catch (e) { toast(e.message || "Could not save"); }
+    setBusy(false);
+  };
+  const reset = async () => {
+    setBusy(true);
+    try { const r = await work.setAccountPerms({ id: u.id, reset: true }); setOv(r.overrides); toast(`${u.username} is back to exactly ${role.name}`); }
+    catch (e) { toast(e.message || "Could not reset"); }
+    setBusy(false);
+  };
+  const shown = perms.filter((p) => !hiddenPerm(p.key));
+  const choice = (k) => (k in ov ? (ov[k] ? "allow" : "block") : "role");
+  return (
+    <Modal title={`Permissions: ${u.username}`} onClose={onClose} width="min(780px,95vw)"
+      footer={<><span className="dim" style={{ marginRight: "auto" }}>{n ? `${n} personal exception${n === 1 ? "" : "s"} on top of ${role.name}` : `Exactly what ${role.name} gives`}</span>
+        <button className="btn" disabled={busy || !n} onClick={reset}>Reset to {role.name}</button><button className="btn pri" onClick={onClose}>Done</button></>}>
+      <div style={{ display: "grid", gap: 10, maxHeight: "62vh", overflow: "auto", paddingRight: 4 }}>
+        <div className="dim">{u.username} is <b>{role.name}</b>. Leave a function on <b>Role</b> to do what the role says. Choose <b>Allow</b> or <b>Block</b> to make an exception for this person only. It saves as you click.</div>
+        {groups.map(([gk, gl]) => (
+          <div key={gk}>
+            <div className="rl-gh">{gl}</div>
+            {shown.filter((p) => p.group === gk).map((p) => {
+              const c = choice(p.key), on = eff.has(p.key), roleOn = rolePerms.has(p.key);
+              return (
+                <div key={p.key} className="rl-row" style={{ alignItems: "center" }}>
+                  <span className={"pu-dot" + (on ? " on" : "")} title={on ? "Can do this" : "Cannot do this"} />
+                  <div className="grow"><b>{p.label}</b>{c !== "role" && <span className="rl-chg">{c === "allow" ? "allowed for them" : "blocked for them"}</span>}
+                    <div className="dim rl-desc">{p.desc}</div></div>
+                  <div className="seg" role="group" aria-label={p.label}>
+                    {[["role", `Role (${roleOn ? "on" : "off"})`], ["allow", "Allow"], ["block", "Block"]].map(([v, l]) => (
+                      <button key={v} type="button" className={c === v ? "on" : ""} disabled={busy} onClick={() => c !== v && set(p.key, v === "role" ? null : v === "allow")}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 /** Asked before an account moves to a role that has fewer permissions: says exactly what they would lose. */
 function LoseModal({ ask, onClose, onYes, busy }) {
   const { u, from, to, lost, gained } = ask;
@@ -76,7 +128,7 @@ function LoseModal({ ask, onClose, onYes, busy }) {
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 2 }}>{lost.map((l) => <li key={l}>{l}</li>)}</ul>
         </div>
         {gained.length > 0 && <div className="dim" style={{ fontSize: 12 }}>They will also gain: {gained.join(", ")}.</div>}
-        <div className="dim" style={{ fontSize: 12 }}>It applies the next time their page loads. You can move them back at any time.</div>
+        <div className="dim" style={{ fontSize: 12 }}>It applies the next time their page loads. You can move them back at any time. {Object.keys(parseOv(u)).length > 0 && "Their personal exceptions are cleared when the role changes."}</div>
       </div>
     </Modal>
   );
@@ -86,12 +138,12 @@ const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const when = (t) => (t ? String(t).slice(0, 16).replace("T", " ") : "never");
 
 export default function AccountsPanel({ me }) {
-  const [users, setUsers] = useState(null), [roles, setRoles] = useState([]), [perms, setPerms] = useState([]), [err, setErr] = useState(""), [adopt, setAdopt] = useState(false);
+  const [users, setUsers] = useState(null), [roles, setRoles] = useState([]), [perms, setPerms] = useState([]), [groups, setGroups] = useState([]), [err, setErr] = useState(""), [adopt, setAdopt] = useState(false), [pm, setPm] = useState(null);
   const [nu, setNu] = useState(""), [np, setNp] = useState(""), [nr, setNr] = useState(""), [nt, setNt] = useState(""), [busy, setBusy] = useState(false), [del, setDel] = useState(null);
   const load = useCallback(async () => {
     try {
       const [u, r] = await Promise.all([work.accounts(), work.roles()]);
-      setUsers(u); setRoles(r.roles || []); setPerms(r.perms || []); setErr(r.setup_needed ? "Roles are not set up yet (the roles migration has not been run). Accounts keep their old settings." : "");
+      setUsers(u); setRoles(r.roles || []); setPerms(r.perms || []); setGroups(r.groups || []); setErr(r.setup_needed ? "Roles are not set up yet (the roles migration has not been run). Accounts keep their old settings." : "");
       setNr((cur) => cur || ((r.roles || []).find((x) => x.key === "viewer") || (r.roles || [])[0] || {}).key || "");
     } catch (e) { setErr(e.message || "Could not load accounts"); setUsers((x) => x || []); }
   }, []);
@@ -109,7 +161,7 @@ export default function AccountsPanel({ me }) {
   const setRole = (u, key) => {
     const target = roles.find((r) => r.key === key); if (!target) return;
     const cur = u.role_key ? roles.find((r) => r.key === u.role_key) : null;
-    const now = cur ? new Set(cur.perms) : legacySet(u, perms), next = new Set(target.perms);
+    const now = cur ? withOv(cur.perms, parseOv(u)) : legacySet(u, perms), next = new Set(target.perms);
     const label = (k) => (perms.find((p) => p.key === k) || {}).label || k;
     const lost = [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label), gained = [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label);
     if (!lost.length) return doRole(u, key);
@@ -140,7 +192,7 @@ export default function AccountsPanel({ me }) {
       {err && <div className="banner warn">{err}</div>}
       <div className="card"><div className="tw">
         <table className="acc-tbl">
-          <thead><tr><th>Account</th><th style={{ width: 230 }}>Role</th><th style={{ width: 150 }}>Team</th><th>Last sign-in</th><th /></tr></thead>
+          <thead><tr><th>Account</th><th style={{ width: 230 }}>Role</th><th style={{ width: 150 }}>Team</th><th style={{ width: 130 }}>Personal</th><th>Last sign-in</th><th /></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
@@ -150,11 +202,12 @@ export default function AccountsPanel({ me }) {
                     placeholder={`${cap(u.role)} (old settings)`} disabled={!roles.length} />
                 </td>
                 <td><Select value={u.team || ""} options={TEAMS} onChange={(v) => setTeam(u, v)} /></td>
+                <td><button className="btn sm" disabled={!u.role_key} onClick={() => setPm(u)} title={u.role_key ? "Give this person extra permissions, or take some away" : "Give this account a role first"}>Permissions{Object.keys(parseOv(u)).length ? ` · ${Object.keys(parseOv(u)).length}` : ""}</button></td>
                 <td className="dim">{when(u.last_login)}</td>
                 <td className="r">{u.username !== me.username && <button className="btn sm danger" onClick={() => setDel(u)} aria-label={`Delete ${u.username}`}>Delete</button>}</td>
               </tr>
             ))}
-            {!users.length && <tr><td colSpan="5" className="dim" style={{ padding: 20, textAlign: "center" }}>No accounts.</td></tr>}
+            {!users.length && <tr><td colSpan="6" className="dim" style={{ padding: 20, textAlign: "center" }}>No accounts.</td></tr>}
           </tbody>
         </table>
       </div></div>
@@ -177,6 +230,7 @@ export default function AccountsPanel({ me }) {
       </div></div>
 
       {ask && <LoseModal ask={ask} busy={moving} onClose={() => setAsk(null)} onYes={() => doRole(ask.u, ask.key)} />}
+      {pm && roles.find((r) => r.key === pm.role_key) && <PermsModal u={pm} role={roles.find((r) => r.key === pm.role_key)} groups={groups} perms={perms} onClose={() => { setPm(null); load(); }} />}
       {adopt && <AdoptModal users={users} roles={roles} perms={perms} onClose={() => setAdopt(false)} onDone={(failed) => { setAdopt(false); load(); if (failed) return; }} />}
       {del && (
         <Modal title={`Delete ${del.username}?`} onClose={() => setDel(null)} width="min(460px,94vw)"

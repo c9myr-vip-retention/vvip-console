@@ -38,6 +38,7 @@ export const work = {
   deleteRole: (key, b) => post(`/api/roles/${key}/delete`, b),                      // { move_to? }
   accounts: () => get("/api/users"),
   createAccount: (b) => post("/api/users", b),                                      // { username, password, role_key, team }
+  setAccountPerms: (b) => post("/api/users/perms", b),                              // { id, overrides?: { perm: true|false|null }, reset? } personal permissions on top of the role
   setAccountRole: (b) => post("/api/users/role", b),                                // { id, role_key, team? }
   setAccountFlags: (b) => post("/api/users/perm", b),                                // the old editor: { id, role, can_edit, can_delete, on_leaderboard, manage_users, team }
   deleteAccount: (id) => http(`/api/users/${id}`, { method: "DELETE" }),

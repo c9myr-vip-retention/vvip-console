@@ -587,3 +587,16 @@
 .rv .dst-tl{font-size:11px;text-transform:uppercase;letter-spacing:.6px}
 .rv .dst-tt{display:flex;gap:10px;align-items:center;min-width:0}
 .rv .dst-tt b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rv .pu-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--line);margin-top:3px}
+.rv .pu-dot.on{background:var(--accent)}
+.rv .pg-tbl{border-collapse:separate;border-spacing:0;width:100%;min-width:max-content}
+.rv .pg-tbl th,.rv .pg-tbl td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:center}
+.rv .pg-tbl th:first-child,.rv .pg-tbl td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;min-width:210px}
+.rv .pg-sec td{background:var(--panel2);color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.7px;text-align:left!important}
+.rv .pg-cell{width:26px;height:26px;border-radius:7px;border:1px solid var(--line);background:transparent;color:var(--on-accent);font:inherit;line-height:1;padding:0}
+.rv .pg-cell.on{background:var(--accent);border-color:var(--accent);font-weight:700}
+.rv button.pg-cell{cursor:pointer}
+.rv button.pg-cell:hover{border-color:var(--accent)}
+.rv span.pg-cell{display:inline-flex;align-items:center;justify-content:center;cursor:default}
+.rv span.pg-cell.on{opacity:.7}
+.rv .pg-need{color:var(--dim);font-size:12px;text-align:left}

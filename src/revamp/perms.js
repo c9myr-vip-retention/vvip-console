@@ -15,7 +15,7 @@ export function can(me, key) {
 export const canAny = (me, keys) => keys.some((k) => can(me, k));
 
 // Pages that need a permission. Anything not listed is open to everyone.
-const PAGE_PERM = {
+export const PAGE_PERM = {
   dash: "dashboard.view", perf: "teams.all", assign: "assign.manage", flows: "flows.manage", tpl: "templates.manage", ana: "analytics.view",
   bin: "bin.manage", set: ["users.manage", "activity.view", "bin.manage", "tasks.clear"],
 };
@@ -25,6 +25,9 @@ const EXTRA = [
   ["Task insight", "ana", "Analytics"], ["Task insight", "bin", "Recycle bin"], ["Admin", "set", "Settings"],
 ];
 export const canOpen = (me, key) => { const p = PAGE_PERM[key]; return !p || (Array.isArray(p) ? canAny(me, p) : can(me, p)); };
+
+/** Keys of the pages this person can open. */
+export const pageKeys = (me) => new Set(navFor(me).flatMap(([, items]) => items.map(([k]) => k)));
 
 /** The sidebar for this person: admin-style when they can see every team, agent-style otherwise; either way only the pages they may use. */
 export function navFor(me) {
