@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Avatar, Modal, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
+import { hiddenPerm } from "../schedule/logic.js";
 
 const TEAMS = [{ value: "", label: "No team" }, { value: "A", label: "Team A" }, { value: "B", label: "Team B" }, { value: "C", label: "Team C" }];
 /** What an account without a role can do today (mirrors legacyPerms in worker/perms.js). */
@@ -22,7 +23,7 @@ function AdoptModal({ users, roles, perms, onClose, onDone }) {
     const role = roles.find((r) => r.key === u.role) || roles.find((r) => r.key === "viewer");
     const now = legacySet(u, perms), next = new Set(role ? role.perms : []);
     const label = (k) => (perms.find((p) => p.key === k) || {}).label || k;
-    return { u, role, gain: [...next].filter((k) => !now.has(k)).map(label), lose: [...now].filter((k) => !next.has(k)).map(label) };
+    return { u, role, gain: [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label), lose: [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label) };
   });
   const differ = rows.filter((r) => r.gain.length || r.lose.length);
   const go = async () => {
@@ -53,6 +54,25 @@ function AdoptModal({ users, roles, perms, onClose, onDone }) {
   );
 }
 
+/** Asked before an account moves to a role that has fewer permissions: says exactly what they would lose. */
+function LoseModal({ ask, onClose, onYes, busy }) {
+  const { u, from, to, lost, gained } = ask;
+  return (
+    <Modal title={`Move ${u.username} to ${to}?`} onClose={onClose} width="min(560px,94vw)"
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn danger" disabled={busy} onClick={onYes}>Yes, move {u.username}</button></>}>
+      <div style={{ display: "grid", gap: 12 }}>
+        <div><b>{u.username}</b> is <b>{from}</b> now. As <b>{to}</b> they will have <b>{lost.length} fewer permission{lost.length === 1 ? "" : "s"}</b>.</div>
+        <div>
+          <div className="neg" style={{ fontWeight: 600, marginBottom: 4 }}>They will lose:</div>
+          <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 2 }}>{lost.map((l) => <li key={l}>{l}</li>)}</ul>
+        </div>
+        {gained.length > 0 && <div className="dim" style={{ fontSize: 12 }}>They will also gain: {gained.join(", ")}.</div>}
+        <div className="dim" style={{ fontSize: 12 }}>It applies the next time their page loads. You can move them back at any time.</div>
+      </div>
+    </Modal>
+  );
+}
+
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const when = (t) => (t ? String(t).slice(0, 16).replace("T", " ") : "never");
 
@@ -69,9 +89,22 @@ export default function AccountsPanel({ me }) {
   useEffect(() => { load(); }, [load]);
 
   const roleOpts = roles.map((r) => ({ value: r.key, label: r.name }));
-  const setRole = async (u, key) => {
+  const [ask, setAsk] = useState(null), [moving, setMoving] = useState(false);
+  const doRole = async (u, key) => {
+    setMoving(true);
     try { await work.setAccountRole({ id: u.id, role_key: key }); toast(`${u.username} is now ${(roles.find((r) => r.key === key) || {}).name || key}`); load(); }
     catch (e) { toast(e.message || "Could not save"); }
+    setMoving(false); setAsk(null);
+  };
+  // Ask first when the new role has fewer permissions than the account has today
+  const setRole = (u, key) => {
+    const target = roles.find((r) => r.key === key); if (!target) return;
+    const cur = u.role_key ? roles.find((r) => r.key === u.role_key) : null;
+    const now = cur ? new Set(cur.perms) : legacySet(u, perms), next = new Set(target.perms);
+    const label = (k) => (perms.find((p) => p.key === k) || {}).label || k;
+    const lost = [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label), gained = [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label);
+    if (!lost.length) return doRole(u, key);
+    setAsk({ u, key, from: cur ? cur.name : `${cap(u.role)} (old settings)`, to: target.name, lost, gained });
   };
   const setTeam = async (u, team) => {
     try {
@@ -134,6 +167,7 @@ export default function AccountsPanel({ me }) {
         </div>
       </div></div>
 
+      {ask && <LoseModal ask={ask} busy={moving} onClose={() => setAsk(null)} onYes={() => doRole(ask.u, ask.key)} />}
       {adopt && <AdoptModal users={users} roles={roles} perms={perms} onClose={() => setAdopt(false)} onDone={(failed) => { setAdopt(false); load(); if (failed) return; }} />}
       {del && (
         <Modal title={`Delete ${del.username}?`} onClose={() => setDel(null)} width="min(460px,94vw)"

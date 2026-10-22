@@ -1,13 +1,20 @@
-// Settings > Roles. Make a role, name it, pick a starting point (Admin / Agent / Viewer defaults, or nothing) and switch any function on or off.
+// Settings > Roles. Roles are ranked, most senior first (move them with the arrows). Make a role, name it, pick a starting point and switch any
+// function on or off. A role based on Admin, Agent or Viewer starts from that role AS IT IS NOW, so editing Agent changes every role based on it.
 // One switch = one permission = one function. A switch that differs from the starting point is marked "changed". The Worker enforces all of it
 // (worker/perms.js, worker/roles.js); this page only edits it. Needs the users.manage permission.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
+import { hiddenPerm } from "../schedule/logic.js";
 
-const BASES = [
+// A built-in role starts from the fixed defaults; any other role starts from the built-in role it is based on, as it is now.
+const BASES_BUILTIN = [
   { value: "admin", label: "Admin defaults" }, { value: "agent", label: "Agent defaults" },
   { value: "viewer", label: "Viewer defaults" }, { value: "none", label: "Nothing (start empty)" },
+];
+const BASES = [
+  { value: "admin", label: "Same as the Admin role" }, { value: "agent", label: "Same as the Agent role" },
+  { value: "viewer", label: "Same as the Viewer role" }, { value: "none", label: "Nothing (start empty)" },
 ];
 const baseLabel = (b) => (BASES.find((x) => x.value === b) || BASES[3]).label;
 
@@ -73,16 +80,21 @@ export default function RolesPanel() {
 
   const role = data && data.roles.find((r) => r.key === sel);
   useEffect(() => { setName(role ? role.name : ""); }, [role && role.key, role && role.name]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const defaults = useMemo(() => {
-    const m = {};
-    for (const p of (data ? data.perms : [])) m[p.key] = role && role.base !== "none" ? !!p.defaults[role.base] : false;
+  const defaults = useMemo(() => {                                    // what the starting point has on, per permission (the Worker computes it)
+    const m = {}, on = new Set(role ? role.start || [] : []);
+    for (const p of (data ? data.perms : [])) m[p.key] = on.has(p.key);
     return m;
-  }, [data, role && role.base]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, role]);
 
   const patch = (next) => setData((d) => ({ ...d, roles: d.roles.map((r) => (r.key === next.key ? { ...r, ...next } : r)) }));
   const change = async (body, ok) => {
-    try { const r = await work.updateRole(role.key, body); patch(r.role); if (ok) toast(ok); }
-    catch (e) { toast(e.message || "Could not save"); load(role.key); }
+    try {
+      const r = await work.updateRole(role.key, body); patch(r.role); if (ok) toast(ok);
+      if (role.builtin || body.base !== undefined) load(role.key);       // roles based on this one change with it: fetch them all again
+    } catch (e) { toast(e.message || "Could not save"); load(role.key); }
+  };
+  const move = async (r, dir) => {
+    try { await work.moveRole(r.key, { dir }); load(r.key); } catch (e) { toast(e.message || "Could not move it"); }
   };
   const flip = (key, on) => {
     const def = defaults[key], overrides = { ...role.overrides };
@@ -97,19 +109,26 @@ export default function RolesPanel() {
   if (data.setup_needed) return <div className="card"><div className="body">Roles are not set up yet. The database needs the roles migration first (<span className="mono">schema_v27_roles.sql</span>), run by Aldo.</div></div>;
 
   const people = role ? accounts.filter((u) => (u.role_key ? u.role_key === role.key : u.role === role.key)) : [];
-  const changed = role ? Object.keys(role.overrides).filter((k) => role.overrides[k] !== defaults[k]).length : 0;
-  const total = data.perms.length, onCount = role ? role.perms.length : 0;
+  const changed = role ? Object.keys(role.overrides).filter((k) => !hiddenPerm(k) && role.overrides[k] !== defaults[k]).length : 0;
+  const shownPerms = data.perms.filter((p) => !hiddenPerm(p.key));
+  const total = shownPerms.length, onCount = role ? role.perms.filter((k) => !hiddenPerm(k)).length : 0;
 
   return (
     <div className="rl">
       {err && <div className="banner crit">{err}</div>}
       <div className="rl-list">
-        <div className="rl-lh"><b>Roles</b><span className="grow" /><button className="btn sm pri" onClick={() => setModal({ kind: "new" })}>+ New role</button></div>
-        {data.roles.map((r) => (
-          <button key={r.key} type="button" className={"rl-item" + (r.key === sel ? " on" : "")} onClick={() => setSel(r.key)}>
-            <b>{r.name}</b>
-            <span className="dim">{r.users} {r.users === 1 ? "person" : "people"} · {r.builtin ? "built in" : baseLabel(r.base).replace(" defaults", "")}</span>
-          </button>
+        <div className="rl-lh"><b>Roles <span className="dim" style={{ fontWeight: 400 }}>({data.roles.length})</span></b><span className="grow" /><button className="btn sm pri" onClick={() => setModal({ kind: "new" })}>+ New role</button></div>
+        <div className="dim rl-note" style={{ marginTop: 0 }}>Ranked most senior first. Use the arrows to move a role. New roles go to the bottom (most junior).</div>
+        {data.roles.map((r, i) => (
+          <div key={r.key} className={"rl-item rl-rank" + (r.key === sel ? " on" : "")}>
+            <button type="button" className="rl-pick" onClick={() => setSel(r.key)}>
+              <span className="dim rl-n">{i + 1}.</span>
+              <span className="rl-name"><b>{r.name}</b>
+                <span className="dim">{r.users} {r.users === 1 ? "person" : "people"} · {r.builtin ? "built in" : baseLabel(r.base).replace("Same as the ", "like ").replace(" role", "")}</span></span>
+            </button>
+            <button type="button" className="rl-arrow" disabled={i === 0} aria-label={`Move ${r.name} up`} onClick={() => move(r, "up")}>↑</button>
+            <button type="button" className="rl-arrow" disabled={i === data.roles.length - 1} aria-label={`Move ${r.name} down`} onClick={() => move(r, "down")}>↓</button>
+          </div>
         ))}
         <div className="dim rl-note">A role is a name plus a set of permissions. Give each account one role in the Accounts tab. Accounts that have not been given a role yet keep the access they have today.</div>
       </div>
@@ -119,7 +138,7 @@ export default function RolesPanel() {
           <div className="card"><div className="body rl-head">
             <label>Role name<input className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} onBlur={rename} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>
             <label>Starts from
-              <Select value={role.base} options={BASES} onChange={(v) => change({ base: v }, "Starting point changed")} />
+              <Select value={role.base} options={role.builtin ? BASES_BUILTIN : BASES} onChange={(v) => change({ base: v }, "Starting point changed")} />
             </label>
             <div className="rl-sum">
               <b className="mono">{onCount}</b> of {total} on{changed ? <> · <b className="mono">{changed}</b> changed from the starting point</> : " · same as the starting point"}
@@ -133,7 +152,7 @@ export default function RolesPanel() {
           {data.groups.map(([gk, gl]) => (
             <div key={gk} className="card"><div className="body">
               <div className="rl-gh">{gl}</div>
-              {data.perms.filter((p) => p.group === gk).map((p) => {
+              {shownPerms.filter((p) => p.group === gk).map((p) => {
                 const on = role.perms.includes(p.key), diff = p.key in role.overrides && role.overrides[p.key] !== defaults[p.key];
                 return (
                   <div key={p.key} className="rl-row">
