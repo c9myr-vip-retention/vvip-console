@@ -1,0 +1,9 @@
+/* dev harness only: the live console's :root tokens + reset, so the pages render without the shell */
+:root{
+  --bg:#0B0E13; --panel:#12161E; --panel2:#171C26; --line:#232A37; --txt:#E7EAF0; --dim:#8B94A7;
+  --gold:#D4AF37; --accent:#E9E3D3; --neg:#F2727F; --pos:#4CC38A; --warn:#E39A4B;
+  --band-act:#FF6A3D; --band-today:#E39A4B; --band-win:#B79A7C;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',system-ui,sans-serif}
