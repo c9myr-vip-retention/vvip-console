@@ -6,6 +6,11 @@ import { scopeLiveCss } from "./revamp/scopeCss.js";
 import { NativeSelect } from "./revamp/ui/index.jsx";
 import { readFlag } from "./flags.js";
 import { scopeTeam } from "./revamp/scope.js";
+import { can as canDo } from "./revamp/perms.js";
+import { useLive, useLiveTick } from "./revamp/live.js";
+
+// The newest updated_at among contact rows that came from the server ("changed since" asks for everything after it).
+const newestStamp = (list) => (list || []).reduce((m, c) => (c.updated_at && c.updated_at > m ? c.updated_at : m), "");
 
 /* ════════════════════════════════════════════════════════════════════
    GROUP B · VIP RTN CONSOLE  v2.1
@@ -75,6 +80,7 @@ export const ST_COLOR = { ASSIGNED:"#8A94A6", CONTACTED:"#56B6C2", RESPONDED:"#3
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 export async function api(path, options = {}) {
+  path = path.replace(/([?&])team=ALL(&|$)/, (m, a, b) => (b ? a : ""));           // "All teams" in the selector = no team filter
   const token = localStorage.getItem("session_token");
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -501,6 +507,12 @@ export function Drawer({ list, index, setIndex, snap, me, team, contact, onSave,
       .catch(() => { if (alive) setCrmHist([]); });
     return () => { alive = false; };
   }, [index]);
+  // Someone added a note or a follow-up on this player: refresh the ledger without touching what is being typed.
+  useLive(["player"], () => {
+    const pq = `player_key=${encodeURIComponent(p.player_key)}&brand=${encodeURIComponent(p.brand)}`;
+    api(`/api/rtn/notes?${pq}`).then((d) => setNotes(d.notes || [])).catch(() => {});
+    api(`/api/rtn/crm?${pq}`).then((d) => { setCrmHist(d.history || []); setLivechat(d.livechat || []); if (!tgEdit) setTgUrl(d.telegram_url || null); }).catch(() => {});
+  });
   // Asked on demand (one click), not on every drawer open: each lookup is ~11 Lark reads shared with the widget.
   async function checkBonuses() {
     const key = ckey(p);
@@ -2443,11 +2455,13 @@ export function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = 
   const [trendErr, setTrendErr] = useState(false);
   const [range, setRange] = useState(14);
   const [trendBrand, setTrendBrand] = useState("ALL");   // "ALL" = whole of Group B, else one brand
+  const trendTick = useLiveTick(["feed"]), trendSeen = useRef(0);
   useEffect(() => {
-    setTrend(null); setTrendErr(false);
+    const quiet = trendSeen.current !== trendTick; trendSeen.current = trendTick;          // new data landed: reload without blanking the chart
+    if (!quiet) { setTrend(null); setTrendErr(false); }
     const bq = trendBrand !== "ALL" ? `&brand=${encodeURIComponent(trendBrand)}` : "";
-    api(`/api/rtn/trend?days=${range}${bq}&team=${encodeURIComponent(viewTeam)}`).then((d) => setTrend(d || [])).catch(() => { setTrend([]); setTrendErr(true); });
-  }, [range, trendBrand, viewTeam]);
+    api(`/api/rtn/trend?days=${range}${bq}&team=${encodeURIComponent(viewTeam)}`).then((d) => setTrend(d || [])).catch(() => { if (!quiet) { setTrend([]); setTrendErr(true); } });
+  }, [range, trendBrand, viewTeam, trendTick]);
 
   const sum = (f) => data.reduce((s, r) => s + (r[f] || 0), 0);
   const dep = sum("daily_deposit"), wd = sum("daily_withdraw"), wl = sum("win_loss");
@@ -2964,7 +2978,8 @@ export function KpiScorecard({ onDrill, data, team, children, mistakeList, viewT
       .catch((e) => setErr(e.message))
       .finally(() => setRefreshing(false));
   }
-  useEffect(() => { loadKpi(); }, [viewTeam]);
+  const kpiTick = useLiveTick(["kpi", "contact", "feed"]);
+  useEffect(() => { loadKpi(); }, [viewTeam, kpiTick]);
 
   // guard states still render the page grid (so the By CS/Class/Brand blocks below show)
   const gridWrap = (top) => (
@@ -3501,7 +3516,8 @@ export function Performance({ onDrill, data, team, me, viewTeam = "B", contacts,
   const [selMonth, setSelMonth] = useState(monthOptions[0]);
 
   // Endpoint returns { month, logs } for ONE calendar month; pass ?month= to review a past one.
-  useEffect(() => { setLogs(null); api(`/api/rtn/performance?team=${encodeURIComponent(viewTeam)}&month=${selMonth}`)
+  const perfTick = useLiveTick(["contact", "kpi", "feed"]), perfSeen = useRef(0);
+  useEffect(() => { const quiet = perfSeen.current !== perfTick; perfSeen.current = perfTick; if (!quiet) setLogs(null); api(`/api/rtn/performance?team=${encodeURIComponent(viewTeam)}&month=${selMonth}`)
     .then((d) => { setLogs(d.logs || []); setPerfMonth(d.month || "");
       // reactivation is now one row per recovered player {agent, player_key, brand, tier_segment, tier}.
       // Fold into per-agent totals (Score + band counts) and a per-player tier map (drill-down band tags).
@@ -3525,7 +3541,7 @@ export function Performance({ onDrill, data, team, me, viewTeam = "B", contacts,
       }));
       Object.values(agg).forEach((a) => { a.score = Math.round(a.score * 100) / 100; });
       setReact(agg); setReactPlayers(byPlayer); setMoves(d.moves || []); setAway(awayRows); })
-    .catch((e) => setErr(e.message)); loadMistakes(); }, [viewTeam, selMonth]);
+    .catch((e) => setErr(e.message)); loadMistakes(); }, [viewTeam, selMonth, perfTick]);
 
   // Export the raw contact log behind these tables: who contacted whom, status, date.
   const exportPerf = () => {
@@ -5705,6 +5721,7 @@ export default function App() {
   const [tab, setTab] = useState("dash");
   const [drill, setDrill] = useState(null); // KPI → Daily deep-link: { brand, tier }
   const [board, setBoard] = useState(null);
+  const contactStamp = useRef("");
   const [loading, setLoading] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [dates, setDates] = useState([]);         // available snapshot dates, newest first
@@ -5717,11 +5734,12 @@ export default function App() {
     if (t) api("/api/me").then(setMe).catch(() => localStorage.removeItem("session_token"));
   }, []);
 
-  async function loadBoard(date) {
-    setLoading(true); setLoadErr("");
-    try { setBoard(await api("/api/rtn/board" + (date ? `?date=${date}` : ""))); }
-    catch (e) { setLoadErr(e.message); }
-    setLoading(false);
+  async function loadBoard(date, quiet) {
+    if (!quiet) setLoading(true);
+    setLoadErr("");
+    try { const b = await api("/api/rtn/board" + (date ? `?date=${date}` : "")); contactStamp.current = newestStamp(b.contacts); setBoard(b); }
+    catch (e) { if (!quiet) setLoadErr(e.message); }
+    if (!quiet) setLoading(false);
   }
   useEffect(() => { if (me) api("/api/rtn/dates").then(setDates).catch(() => setDates([])); }, [me]);
   useEffect(() => { if (me) loadBoard(viewDate); }, [me, viewDate]);
@@ -5729,10 +5747,23 @@ export default function App() {
   useEffect(() => {
     if (!me) return;
     if (!rv) { if (!me.manage_users && me.team) setViewTeam(me.team); return; }          // flag off: unchanged behaviour
-    const mine = TEAM_KEYS.includes(me.team) ? me.team : "A";
-    if (!me.manage_users) setViewTeam(mine);                                           // pinned to their own team
-    else if (teamStart.current !== me.username) { teamStart.current = me.username; setViewTeam(mine); }   // a manager starts there once, then may switch
+    const canAll = canDo(me, "teams.all");
+    const mine = TEAM_KEYS.includes(me.team) ? me.team : (canAll ? "ALL" : "A");        // no team: no filter (All teams)
+    if (!canAll) setViewTeam(mine);                                                    // pinned to their own team
+    else if (teamStart.current !== me.username) { teamStart.current = me.username; setViewTeam(mine); }   // someone who sees every team starts on their own team (or All), then may switch
   }, [me]);
+
+  // ---- live: the account's own permissions, who owns which player, and new data ----
+  useLive(["me"], () => { if (me) api("/api/me").then((m) => setMe((cur) => (cur && JSON.stringify(cur) === JSON.stringify(m) ? cur : m))).catch(() => {}); });
+  useLive(["contact"], () => { if (me && board?.snapshot_date && !isPast) refreshContacts(viewDate || undefined); });
+  useLive(["contactreset"], () => { if (me && board?.snapshot_date && !isPast) refreshContacts(viewDate || undefined, true); });   // rows removed, or written without a stamp
+  const feedTimer = useRef(null);
+  useLive(["feed"], () => {                                  // new data landed: reload the board once things settle (a feed posts several times)
+    if (!me || isPast) return;
+    clearTimeout(feedTimer.current);
+    feedTimer.current = setTimeout(() => { loadBoard(viewDate, true); api("/api/rtn/dates").then(setDates).catch(() => {}); }, 30000);
+  });
+  useEffect(() => () => clearTimeout(feedTimer.current), []);
 
   async function saveContact(payload) {
     await api("/api/rtn/contact", { method: "POST", body: JSON.stringify(payload) });
@@ -5745,10 +5776,23 @@ export default function App() {
   }
 
   // Pull just the contact rows again (who owns which player) and swap them into the board. Used by pages that refresh by themselves.
-  async function refreshContacts(date) {
+  // Pull the contact rows again (who owns which player, and its status). With the newest stamp we already have it only asks for what changed since;
+  // without one (or after rows were removed) it takes the full list.
+  async function refreshContacts(date, full) {
     try {
-      const r = await api("/api/rtn/board-contacts" + (date ? `?date=${date}` : ""));
-      setBoard((b) => (b ? { ...b, contacts: r.contacts || [] } : b));
+      const since = full ? "" : contactStamp.current;
+      const qs = new URLSearchParams(); if (date) qs.set("date", date); if (since) qs.set("since", since);
+      const r = await api("/api/rtn/board-contacts" + (qs.toString() ? `?${qs}` : ""));
+      const key = (c) => `${c.snapshot_date}|${c.player_key}|${c.brand}|${c.tier_segment}`;
+      if (!r.partial) {
+        contactStamp.current = newestStamp(r.contacts);
+        setBoard((b) => (b ? { ...b, contacts: r.contacts || [] } : b));
+        return;
+      }
+      const changed = new Map((r.contacts || []).map((c) => [key(c), c]));
+      if (!changed.size) return;
+      contactStamp.current = newestStamp(r.contacts) || contactStamp.current;
+      setBoard((b) => (b ? { ...b, contacts: [...b.contacts.filter((c) => !changed.has(key(c))), ...changed.values()] } : b));
     } catch { /* keep what is on screen */ }
   }
 
@@ -5816,7 +5860,7 @@ export default function App() {
     const ctx = {
       me, viewTeam, board, data, teamData, teamBrands, contacts: board?.contacts || [], dates, viewDate, setViewDate, isPast,
       readOnly: queueRO, saveContact, clearContact, loadBoard, refreshContacts, drill, setDrill, goto,
-      setViewTeam, teamKeys: TEAM_KEYS, team: scopeTeam(board?.team, viewTeam, me), health: board?.health || [], snap: board?.snapshot_date || null, loading,
+      setViewTeam, teamKeys: canDo(me, "teams.all") ? ["ALL", ...TEAM_KEYS] : TEAM_KEYS, team: scopeTeam(board?.team, viewTeam, me), health: board?.health || [], snap: board?.snapshot_date || null, loading,
     };
     return (<><Style scope /><RevampShell ctx={ctx} tab={rvTab || (me.manage_users ? "dash" : "home")} notices={notices} loading={loading} loadErr={loadErr} onSignOut={signOut} /></>);
   }
@@ -6039,6 +6083,7 @@ export function Campaigns({ me, viewTeam }) {
     dismissed.current = false;   // a new team gets its default table back
     setOpenEvent(null); setBandEdit(null); setReport(null);
   }, [team]);
+  useLive(["campaign"], () => { loadDay(); });                  // someone released, blocked or exported: the day reloads on its own
 
   const loadDay = async (d = day, t = team) => {
     try {
@@ -6216,15 +6261,17 @@ export function Campaigns({ me, viewTeam }) {
   const closeTables = () => { dismissed.current = true; setOpenEvent(null); };
   // Rows follow whichever event is open — including the one auto-opened by
   // loadDay when there's only a single event for the day.
+  const rowsTick = useLiveTick(["campaign", "contact"]), rowsSeen = useRef(0);
   useEffect(() => {
+    const quiet = rowsSeen.current !== rowsTick; rowsSeen.current = rowsTick;
     if (!openEvent || !isMgr) { setRows([]); return; }
     let dead = false;
     api(`/api/rtn/campaign/assignments?event_id=${openEvent.id}&view=all`)
-      .then((r) => { if (!dead) { setRows(r.rows || []); setPgEl(1); setPgCl(1); } })
+      .then((r) => { if (!dead) { setRows(r.rows || []); if (!quiet) { setPgEl(1); setPgCl(1); } } })
       .catch((e) => { if (!dead) setMsg({ bad: true, t: e.message }); });
     return () => { dead = true; };
     /* eslint-disable-next-line */
-  }, [openEvent?.id, isMgr]);
+  }, [openEvent?.id, isMgr, rowsTick]);
   const loadReport = async () => {
     setOpenEvent(null);
     try { setReport(await api(`/api/rtn/campaign/report?date=${day}&team=${team}`)); }

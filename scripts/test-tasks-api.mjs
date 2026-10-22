@@ -254,6 +254,53 @@ check("a view-only account cannot comment with a file (403)", (await call(V, "PO
 check("a file name is made safe", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "..\\..\\evil<script>.png", mime: "image/png", data: PNG }] })).data.comments[2].attachments[0].name === "evil_script_.png");
 check("the reset counts the attachments", (await call(A, "POST", "/api/work/tasks/clear", { preview: true })).data.counts.attachments === 3);
 
+// ---- group chat: @tags, notifications, reactions ----
+const inbox = async (tok) => (await call(tok, "GET", "/api/work/notifications")).data;
+const TC = (await call(S, "POST", "/api/work/tasks", { title: "[t] chat" })).data.task.id;
+check("before being tagged, an outsider cannot open the task (403)", (await call(D, "GET", `/api/work/tasks/${TC}`)).status === 403);
+const n0 = (await inbox(D)).unread, pulseN0 = (await call(D, "GET", "/api/work/pulse")).data.areas.notif;
+r = await call(S, "POST", `/api/work/tasks/${TC}/comments`, { body: "hey @daniel and @ghost, and @sara myself" });
+check("a comment can tag people", r.status === 200, JSON.stringify(r.data));
+const tagCid = r.data.comments[0].id;
+check("a tagged person can now open the task (added as an observer)", (await call(D, "GET", `/api/work/tasks/${TC}`)).status === 200 && (await call(D, "GET", `/api/work/tasks/${TC}`)).data.observers.includes("daniel"));
+check("an unknown name or the author is not added", !(await call(S, "GET", `/api/work/tasks/${TC}`)).data.observers.some((u) => u === "ghost" || u === "sara"));
+check("the activity says who was tagged", (await call(S, "GET", `/api/work/tasks/${TC}`)).data.activity.some((a) => /Tagged daniel/.test(a.text)));
+let ib = await inbox(D);
+check("the tagged person gets a 'mention' notification with the task title and a preview", ib.unread === n0 + 1 && ib.items[0].kind === "mention" && ib.items[0].task_id === TC && ib.items[0].actor === "sara" && /hey @daniel/.test(ib.items[0].text) && ib.items[0].task_title === "[t] chat", JSON.stringify(ib.items[0]));
+check("the author is not notified about their own comment", !(await inbox(S)).items.some((x) => x.task_id === TC && x.kind !== "assigned"));
+await new Promise((r2) => setTimeout(r2, 400));
+check("the live notification counter moves for the person who got one", (await call(D, "GET", "/api/work/pulse")).data.areas.notif !== pulseN0);
+r = await call(D, "POST", `/api/work/tasks/${TC}/comments`, { body: "on it" });
+ib = await inbox(S);
+check("a plain comment notifies the others on the task (assignee gets 'comment')", ib.items.some((x) => x.task_id === TC && x.kind === "comment" && x.actor === "daniel" && x.text === "on it"), JSON.stringify(ib.items.slice(0, 3)));
+// reactions
+r = await call(D, "POST", `/api/work/comments/${tagCid}/react`, { emoji: "👍" });
+const rx = r.data.comments && r.data.comments.find((x) => x.id === tagCid);
+check("a person can react to a message", r.status === 200 && rx && rx.reactions.length === 1 && rx.reactions[0].emoji === "👍" && rx.reactions[0].users.join() === "daniel", JSON.stringify(r.data));
+r = await call(S, "POST", `/api/work/comments/${tagCid}/react`, { emoji: "👍" });
+check("two people on one reaction are counted together", r.data.comments.find((x) => x.id === tagCid).reactions[0].users.join() === "daniel,sara");
+r = await call(D, "POST", `/api/work/comments/${tagCid}/react`, { emoji: "👍" });
+check("the same reaction again takes it back", r.data.comments.find((x) => x.id === tagCid).reactions[0].users.join() === "sara");
+check("a reaction that is not in the list is 400", (await call(D, "POST", `/api/work/comments/${tagCid}/react`, { emoji: "💩" })).status === 400);
+check("a view-only account cannot react (403)", (await call(V, "POST", `/api/work/comments/${tagCid}/react`, { emoji: "🎉" })).status === 403);
+check("someone with no access to the task cannot react (403)", (await call(await login("otto"), "POST", `/api/work/comments/${tagCid}/react`, { emoji: "🎉" })).status === 403);
+check("an unknown comment is 404", (await call(D, "POST", "/api/work/comments/999999/react", { emoji: "🎉" })).status === 404);
+// read / unread
+ib = await inbox(D);
+check("mark one task's notifications read", (await call(D, "POST", "/api/work/notifications/read", { task_id: TC })).status === 200 && (await inbox(D)).items.filter((x) => x.task_id === TC && !x.read).length === 0 && (await inbox(D)).items.filter((x) => x.task_id === TC).length > 0);
+check("read needs ids, task_id or all (400)", (await call(D, "POST", "/api/work/notifications/read", {})).status === 400);
+check("a person cannot read or clear somebody else's notifications", (await inbox(S)).items.every((x) => x.id !== ib.items[0].id));
+// assigned
+const nS = (await inbox(S)).unread;
+const TG = (await call(A, "POST", "/api/work/tasks", { title: "[t] for sara", assignee: "sara" })).data.task.id;
+ib = await inbox(S);
+check("being given a task is a notification ('assigned')", ib.unread === nS + 1 && ib.items[0].kind === "assigned" && ib.items[0].task_id === TG && ib.items[0].actor === "aldo");
+const nD = (await inbox(D)).unread;
+await call(A, "POST", `/api/work/tasks/${TG}/update`, { assignee: "daniel" });
+check("being given a task by reassigning it is one too", (await inbox(D)).unread === nD + 1 && (await inbox(D)).items[0].kind === "assigned");
+check("mark everything read", (await call(D, "POST", "/api/work/notifications/read", { all: true })).status === 200 && (await inbox(D)).unread === 0);
+check("unauthenticated notifications is 401", (await call(null, "GET", "/api/work/notifications")).status === 401);
+
 // ---- live updates: a change bumps its area's counter, and nothing else does ----
 const pulse = async (tok) => (await call(tok, "GET", "/api/work/pulse"));
 const settle = () => new Promise((r) => setTimeout(r, 700));      // the bump runs after the response is sent
@@ -288,7 +335,7 @@ check("with the wrong word it refuses (400)", (await call(A, "POST", "/api/work/
 check("nothing was deleted by the refusals", n("tasks") === before);
 r = await call(A, "POST", "/api/work/tasks/clear", { confirm: "CLEAR TASKS" });
 check("clear everything", r.status === 200 && r.data.cleared.tasks === before, JSON.stringify(r.data));
-check("every task table is empty", ["tasks", "task_checklist", "task_observers", "task_comments", "task_activity", "task_attachments"].every((t) => n(t) === 0));
+check("every task table is empty", ["tasks", "task_checklist", "task_observers", "task_comments", "task_activity", "task_attachments", "task_reactions"].every((t) => n(t) === 0) && n("notifications WHERE task_id IS NOT NULL") === 0);
 check("people and accounts are untouched", n("users") > 0);
 check("the board is empty for everyone", (await call(S, "GET", "/api/work/tasks?include=done")).data.tasks.length === 0 && (await call(A, "GET", "/api/work/tasks?include=done")).data.tasks.length === 0);
 check("a new task can be made after the reset", (await call(S, "POST", "/api/work/tasks", { title: "[t] after reset" })).status === 201);

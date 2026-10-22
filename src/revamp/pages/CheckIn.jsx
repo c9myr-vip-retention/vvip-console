@@ -6,6 +6,7 @@ import { Select, Seg, BrandBadge } from "../ui";
 import { api, TEAMS, BRAND_ORDER, dispId, days, fmtDate, fmtRM, lcStatusColor } from "../../App.jsx";
 import { bcolor, SearchBox } from "../daily/widgets.jsx";
 import { Head, Empty, downloadCsv } from "../daily2/common.jsx";
+import { useLive } from "../live.js";
 
 export default function CheckIn({ ctx }) {
   const me = ctx.me || {};
@@ -26,16 +27,18 @@ export default function CheckIn({ ctx }) {
 
   useEffect(() => { setBrand(defaultBrand()); /* eslint-disable-next-line */ }, [viewTeam]);
 
-  const load = async () => {
-    setBusy(true); setErr("");
+  const load = async (quiet) => {
+    if (quiet !== true) setBusy(true);
+    setErr("");
     const p = new URLSearchParams({ brand, tier });
     if (agent) p.set("agent", agent);
     if (date) p.set("date", date);
     try { setD(await api(`/api/rtn/login-check?${p}`)); }
-    catch (e) { setErr(e.message); }
+    catch (e) { if (quiet !== true) setErr(e.message); }
     setBusy(false);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [agent, date, brand, tier]);
+  useLive(["checkin"], () => load(true));                         // someone ticked a login or assigned a player: it shows up here on its own
 
   const toggle = async (row, field) => {
     if (readOnly) return;

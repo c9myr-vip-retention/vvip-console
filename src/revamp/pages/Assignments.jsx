@@ -11,6 +11,7 @@ import { useDailyBase } from "../daily/hooks.js";
 import { stageOf, isActioned, assignPayload, buildBands, sortPriority } from "../daily/logic.js";
 import { Banners, ClassPill, SearchBox, PlayerName, bcolor } from "../daily/widgets.jsx";
 import { Head, Live, PCell, Empty } from "../daily2/common.jsx";
+import NeedTeam from "./NeedTeam.jsx";
 
 const SHOW = 60;
 
@@ -210,6 +211,7 @@ export default function Assignments({ ctx }) {
   const base = useDailyBase(ctx);
   const [view, setView] = useState("overview");
   if (!can(base.me, "assign.manage")) return <Empty>Assignments needs the “Assign players to agents” permission.</Empty>;
+  if (ctx.viewTeam === "ALL") return <><Head title="Assignments" sub="Hand players to agents and keep the contact target on track." /><NeedTeam ctx={ctx} what="Assignments" /></>;
   return (
     <>
       <Head title="Assignments" sub="Hand players to agents and keep the contact target on track.">

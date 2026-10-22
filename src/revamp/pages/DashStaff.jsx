@@ -48,7 +48,7 @@ export default function DashStaff({ viewTeam }) {
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
   useLive(["tasks", "schedule"], () => setTick((n) => n + 1));
 
-  const agents = useMemo(() => (people || []).filter((p) => (p.on_leaderboard || p.role === "agent") && p.team === viewTeam).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
+  const agents = useMemo(() => (people || []).filter((p) => (p.on_leaderboard || p.role === "agent") && (viewTeam === "ALL" || p.team === viewTeam)).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const nOn = rows.filter((r) => r.on).length, nTask = rows.filter((r) => ongoing[r.u]).length;
@@ -69,7 +69,7 @@ export default function DashStaff({ viewTeam }) {
       <div className="dst-head">
         <div>
           <div className="dim dst-eyebrow">RIGHT NOW · GMT+8 · {nowLabel()}</div>
-          <h2 style={{ margin: "2px 0 0" }}>Live board <span className="dim" style={{ fontSize: 13, fontWeight: 400 }}>· Team {viewTeam}</span></h2>
+          <h2 style={{ margin: "2px 0 0" }}>Live board <span className="dim" style={{ fontSize: 13, fontWeight: 400 }}>· {viewTeam === "ALL" ? "All teams" : `Team ${viewTeam}`}</span></h2>
           <div className="dim">{HIDE_SHIFTS ? "Shift times live in the HR portal. Shift, clock-in and chat status come later." : "Who is on shift now, from the Schedule. Clock-in and chat status come later."}</div>
         </div>
         <span className="grow" />
@@ -86,7 +86,7 @@ export default function DashStaff({ viewTeam }) {
       </div>
       {err && <div className="banner warn">{err}</div>}
       {people === null || items === null ? <div className="dim" style={{ padding: 10 }}>Loading…</div>
-        : !rows.length ? <div className="dim" style={{ padding: 10 }}>No agents on Team {viewTeam} yet.</div>
+        : !rows.length ? <div className="dim" style={{ padding: 10 }}>No agents on {viewTeam === "ALL" ? "any team" : `Team ${viewTeam}`} yet.</div>
         : !shown.length ? <div className="dim" style={{ padding: 10 }}>Nobody matches.</div>
         : (
           <div className="dst-grid">

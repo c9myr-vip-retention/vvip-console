@@ -8,6 +8,7 @@ import { handleTasks } from "./tasks.js";
 import { handleSchedule } from "./schedule.js";
 import { handleProjects } from "./projects.js";
 import { pulse } from "./pulse.js";
+import { handleChat } from "./chat.js";
 
 // c = { path, method, url, request, env, user, canManage, can, perms, ok, err, log, ctx }
 //   user.username identifies the person; c.can('some.permission') decides what they may do (worker/perms.js).
@@ -15,7 +16,7 @@ import { pulse } from "./pulse.js";
 export async function handleWork(c) {
   if (!c.path.startsWith("/api/work/")) return null;
   if (c.path === "/api/work/pulse" && c.method === "GET") return pulse(c);
-  for (const h of [handleTasks, handleSchedule, handleProjects]) {
+  for (const h of [handleChat, handleTasks, handleSchedule, handleProjects]) {
     const r = await h(c);
     if (r) return r;
   }

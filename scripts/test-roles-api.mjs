@@ -48,7 +48,7 @@ check("an agent cannot read roles (403)", r.status === 403);
 check("unauthenticated is 401", (await call(null, "GET", "/api/roles")).status === 401);
 r = await call(A, "GET", "/api/roles");
 const keys = (r.data.perms || []).map((p) => p.key);
-check("admin reads the catalogue (47 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 47 && new Set(keys).size === 47 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
+check("admin reads the catalogue (49 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 49 && new Set(keys).size === 49 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
 check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
 check("every page has its own permission", ["page.changes", "page.performance", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.myday", "page.myperf", "page.account", "page.settings"].every((k) => keys.includes(k)));
 const agentRole = r.data.roles.find((x) => x.key === "agent"), adminRole = r.data.roles.find((x) => x.key === "admin");
@@ -314,26 +314,26 @@ for (const n of ["Boss2", "Mid2", "Junior2"]) await call(A, "POST", "/api/roles"
 for (const [u, rk, tm] of [["bo", "boss2", "B"], ["mi", "mid2", "B"], ["ju", "junior2", "B"], ["ot1", "junior2", "A"]]) await call(A, "POST", "/api/users", { username: u, password: PW, role_key: rk, team: tm });
 const BO = await login("bo"), MI = await login("mi"), JU = await login("ju");
 let pp = await peopleOf(MI);
-check("by default everyone sees everyone, every team", pp.includes("bo") && pp.includes("ju") && pp.includes("mi") && pp.includes("ot1"), JSON.stringify(pp));
+check("by default the hierarchy applies: Mid2 sees itself and the roles below, in every team, but not the more senior Boss2", pp.includes("ju") && pp.includes("mi") && pp.includes("ot1") && !pp.includes("bo"), JSON.stringify(pp));
 r = await call(A, "POST", "/api/roles/mid2/update", { sees: { team: "own" } });
 check("set a role to see only its own team", r.status === 200 && r.data.role.sees.team === "own", JSON.stringify(r.data));
 pp = await peopleOf(MI);
-check("Mid2 sees its own team (and itself), not the other team", pp.includes("mi") && pp.includes("bo") && pp.includes("ju") && !pp.includes("ot1"), JSON.stringify(pp));
-check("Boss2 still sees everyone (its own setting is the default)", (await peopleOf(BO)).includes("ot1"));
+check("limited to its own team, Mid2 sees itself and the juniors of its team, not the other team", pp.includes("mi") && pp.includes("ju") && !pp.includes("ot1") && !pp.includes("bo"), JSON.stringify(pp));
+check("Boss2 (the most senior of the three) still sees everyone below, every team", (await peopleOf(BO)).includes("ot1") && (await peopleOf(BO)).includes("mi"));
 check("the admin account still sees everyone", (await peopleOf(A)).includes("ot1"));
 check("an account on old settings sees everyone", (await peopleOf(await login("leg1"))).includes("ot1"));
 check("a bad value is 400, and the old rank / roles settings are gone (400)", (await call(A, "POST", "/api/roles/mid2/update", { sees: { team: "everything" } })).status === 400 && (await call(A, "POST", "/api/roles/mid2/update", { sees: { mode: "rank" } })).status === 400);
 check("an agent cannot change who a role sees (403)", (await call(S, "POST", "/api/roles/mid2/update", { sees: { team: "all" } })).status === 403);
 pp = (await call(MI, "GET", "/api/work/workload")).data.people.map((x) => x.username);
-check("the workload list follows it too", pp.includes("bo") && !pp.includes("ot1"), JSON.stringify(pp));
+check("the workload list follows it too", pp.includes("ju") && !pp.includes("ot1") && !pp.includes("bo"), JSON.stringify(pp));
 sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_vis_1', 'SK69', 'V')");
 r = await call(MI, "GET", "/api/rtn/board");
 const names = (r.data.team || []).map((x) => x.username);
-check("the board's agent list follows it too, and carries team and role", r.status === 200 && names.includes("mi") && names.includes("ju") && !names.includes("ot1") && r.data.team.every((x) => "team" in x && "role" in x), JSON.stringify(r.data.team || r.data).slice(0, 200));
+check("the board's agent list follows it too, and carries team and role", r.status === 200 && names.includes("mi") && names.includes("ju") && !names.includes("ot1") && !names.includes("bo") && r.data.team.every((x) => "team" in x && "role" in x), JSON.stringify(r.data.team || r.data).slice(0, 200));
 r = await call(A, "GET", "/api/rtn/board");
 check("the admin's board list still has everyone", (r.data.team || []).some((x) => x.username === "ot1") && (r.data.team || []).some((x) => x.username === "mi"));
 await call(A, "POST", "/api/roles/mid2/update", { sees: { team: "all" } });
-check("setting it back to everyone", (await peopleOf(MI)).includes("ot1") && (await roleOf("mid2")).sees.team === "all" && isNull(rows("SELECT sees FROM roles WHERE key = 'mid2'")[0].sees));
+check("setting it back to every team", (await peopleOf(MI)).includes("ot1") && (await roleOf("mid2")).sees.team === "all" && isNull(rows("SELECT sees FROM roles WHERE key = 'mid2'")[0].sees));
 sql("DELETE FROM player_days WHERE player_key LIKE 'zz_vis%'");
 
 // ---- an agent is anyone with a team and "Counts as a scored CS agent", whatever their role is called ----
@@ -357,11 +357,13 @@ sql("DELETE FROM player_days WHERE player_key LIKE 'zz_sc%'");
 // ---- a role limited to its own team: the board, people and workload lists follow the account's team, not the team in view ----
 const OT = (await call(A, "POST", "/api/roles", { name: "OwnTeam9", base: "agent" })).data.role.key;
 await call(A, "POST", "/api/users", { username: "ow9", password: PW, role_key: OT, team: "A" });
-await call(A, "POST", "/api/users", { username: "ob9", password: PW, role_key: JR, team: "B" });
+await call(A, "POST", "/api/users", { username: "ow9a", password: PW, role_key: OT, team: "A" });
+await call(A, "POST", "/api/users", { username: "ob9", password: PW, role_key: OT, team: "B" });
 const OW = await login("ow9");
+check("same role, every team: they see each other in staff lists", (await peopleOf(OW)).includes("ob9"));
 await call(A, "POST", `/api/roles/${OT}/update`, { sees: { team: "own" } });
 pp = await peopleOf(OW);
-check("an own-team role sees its team (jn9, vw9) and itself, not the other team", pp.includes("ow9") && pp.includes("jn9") && pp.includes("vw9") && !pp.includes("ob9") && !pp.includes("aldo"), JSON.stringify(pp));
+check("an own-team role sees itself and its team's colleagues, not the other team", pp.includes("ow9") && pp.includes("ow9a") && !pp.includes("ob9"), JSON.stringify(pp));
 await call(A, "POST", `/api/roles/${OT}/update`, { sees: { team: "all" } });
 
 // ---- every permission comes as "own" and "any": switch the "any" one off and the person keeps working on their own things ----
@@ -460,8 +462,83 @@ check("the change bumps the 'contact' live counter", ((await call(A, "GET", "/ap
 check("running it again unassigns nobody", (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "B" })).data.unassigned === 0);
 sql("DELETE FROM contact_log WHERE player_key LIKE 'zz_un%'");
 
+// ---- live: a person's own permissions, the contact rows, and the other areas ----
+const pulseOf = async (tok) => (await call(tok, "GET", "/api/work/pulse")).data.areas;
+const settle2 = () => new Promise((r2) => setTimeout(r2, 700));
+let pm0 = await pulseOf(O9), ps0 = await pulseOf(S);
+await call(A, "POST", `/api/roles/${OWN}/update`, { overrides: { "tasks.assign_others": true } });
+let pm1 = await pulseOf(O9), ps1 = await pulseOf(S);
+check("pulse: a person's 'me' fingerprint moves when an admin changes their permissions, and only theirs", typeof pm0.me === "number" && pm1.me !== pm0.me && ps1.me === ps0.me, JSON.stringify([pm0.me, pm1.me, ps0.me, ps1.me]));
+await call(A, "POST", `/api/roles/${OWN}/update`, { overrides: { "tasks.assign_others": null } });
+check("pulse: and moves back when it is undone", (await pulseOf(O9)).me === pm0.me);
+await call(A, "POST", "/api/users/perms", { id: rows("SELECT id FROM users WHERE username = 'own9'")[0].id, overrides: { "dashboard.view": true } });
+check("pulse: a personal exception moves it too", (await pulseOf(O9)).me !== pm0.me);
+await call(A, "POST", "/api/users/perms", { id: rows("SELECT id FROM users WHERE username = 'own9'")[0].id, reset: true });
+
+sql(`DELETE FROM contact_log WHERE player_key LIKE 'zz_lv%'; INSERT INTO contact_log (snapshot_date, player_key, brand, tier_segment, assigned_to, status, updated_by, updated_at) VALUES ('${snap}', 'zz_lv_seed', 'SK69', 'V', NULL, 'ASSIGNED', 'aldo', datetime('now','-1 hour'))`);
+const full0 = (await call(A, "GET", `/api/rtn/board-contacts?date=${snap}`)).data;
+const stamp0 = full0.contacts.reduce((m, c) => (c.updated_at > m ? c.updated_at : m), "");
+check("board-contacts without 'since' is the full list", Array.isArray(full0.contacts) && !full0.partial);
+await new Promise((r2) => setTimeout(r2, 1100));
+const cl0 = (await pulseOf(A)).contact || 0;
+await call(S, "POST", "/api/rtn/contact", { snapshot_date: snap, player_key: "zz_lv_a", brand: "SK69", tier_segment: "V", status: "CALLED", assigned_to: "sara" });
+await settle2();
+const inc = (await call(A, "GET", `/api/rtn/board-contacts?date=${snap}&since=${encodeURIComponent(stamp0)}`)).data;
+check("board-contacts with 'since' returns only what changed after it", inc.partial === true && inc.contacts.some((c) => c.player_key === "zz_lv_a") && inc.contacts.length < full0.contacts.length + 2 && !("total" in inc), JSON.stringify([inc.contacts.length, full0.contacts.length]));
+check("a contact write bumps the 'contact' counter", ((await pulseOf(A)).contact || 0) === cl0 + 1);
+const cr0 = (await pulseOf(A)).contactreset || 0;
+await call(A, "POST", "/api/rtn/contact", { snapshot_date: snap, player_key: "zz_lv_a", brand: "SK69", tier_segment: "V", clear: true });
+await settle2();
+check("clearing a contact bumps 'contactreset' (a removed row cannot show in 'changed since')", ((await pulseOf(A)).contactreset || 0) === cr0 + 1);
+const pl0 = (await pulseOf(A)).player || 0;
+await call(S, "POST", "/api/rtn/notes", { player_key: "zz_lv_n", brand: "SK69", note: "hi" });
+await settle2();
+check("a note bumps the 'player' counter", ((await pulseOf(A)).player || 0) === pl0 + 1);
+sql("DELETE FROM player_notes WHERE player_key LIKE 'zz_lv%'; DELETE FROM contact_log WHERE player_key LIKE 'zz_lv%'");
+
+// ---- the role hierarchy: seniors are hidden from juniors; same role sees each other's tasks only when the viewer has no team ----
+for (const n of ["Hier1", "Hier2", "Hier3"]) { const rr = await call(A, "POST", "/api/roles", { name: n, base: "agent" }); await call(A, "POST", `/api/roles/${rr.data.role.key}/update`, { overrides: { "tasks.view_all": true } }); }
+const mkp = async (u, rk, tm) => { await call(A, "POST", "/api/users", { username: u, password: PW, role_key: rk, ...(tm ? { team: tm } : {}) }); const tk = await login(u); await call(tk, "POST", "/api/work/tasks", { title: `[h] ${u}` }); return tk; };
+const H1A = await mkp("h1a", "hier1"), H1B = await mkp("h1b", "hier1"), H1T = await mkp("h1t", "hier1", "B"), H1U = await mkp("h1u", "hier1", "B"), H2A = await mkp("h2a", "hier2", "B"), H3A = await mkp("h3a", "hier3", "B");
+const seen = async (tok) => (await call(tok, "GET", "/api/work/tasks")).data.tasks.filter((x) => x.title.startsWith("[h] ")).map((x) => x.assignee).sort();
+const idOf = (u) => rows(`SELECT id FROM tasks WHERE title = '[h] ${u}'`)[0].id;
+let sv = await seen(H1A);
+check("same role, no team: they see each other's tasks, and everyone below", ["h1a", "h1b", "h1t", "h1u", "h2a", "h3a"].every((u) => sv.includes(u)), JSON.stringify(sv));
+sv = await seen(H1T);
+check("same role with a team: only the tasks of people below (and their own)", sv.includes("h1t") && sv.includes("h2a") && sv.includes("h3a") && !sv.includes("h1a") && !sv.includes("h1b") && !sv.includes("h1u"), JSON.stringify(sv));
+sv = await seen(H2A);
+check("a junior role does not see the seniors' tasks, but sees below", sv.includes("h2a") && sv.includes("h3a") && !sv.some((u) => u.startsWith("h1")), JSON.stringify(sv));
+sv = await seen(H3A);
+check("the most junior sees only their own", JSON.stringify(sv) === JSON.stringify(["h3a"]), JSON.stringify(sv));
+check("an old-settings admin (no role) is outside the hierarchy and sees everything", (await seen(A)).includes("h1a") && (await seen(A)).includes("h3a"));
+check("opening a senior's task directly is refused (403)", (await call(H2A, "GET", `/api/work/tasks/${idOf("h1a")}`)).status === 403);
+check("filtering the list by a senior is refused (403)", (await call(H2A, "GET", "/api/work/tasks?assignee=h1a")).status === 403);
+check("opening a junior's task works", (await call(H2A, "GET", `/api/work/tasks/${idOf("h3a")}`)).status === 200);
+check("a same-rank colleague's task is refused for someone with a team (403)", (await call(H1T, "GET", `/api/work/tasks/${idOf("h1u")}`)).status === 403 && (await call(H1A, "GET", `/api/work/tasks/${idOf("h1u")}`)).status === 200);
+// people lists
+let pp2 = await peopleOf(H2A);
+check("staff lists hide the seniors too, and keep same-rank colleagues", pp2.includes("h3a") && pp2.includes("h2a") && !pp2.includes("h1a"), JSON.stringify(pp2));
+check("a person with a team still sees same-rank colleagues in staff lists", (await peopleOf(H1T)).includes("h1u"));
+pp2 = (await call(H2A, "GET", "/api/work/workload")).data.people.map((x) => x.username);
+check("the workload follows the hierarchy", !pp2.some((u) => u.startsWith("h1")) && pp2.includes("h3a"), JSON.stringify(pp2));
+// exceptions
+await call(A, "POST", "/api/roles/hier2/update", { overrides: { "people.above": true } });
+sv = await seen(H2A);
+check("exception 'see people above their rank': the seniors' tasks and names appear", sv.includes("h1a") && (await peopleOf(H2A)).includes("h1a") && (await call(H2A, "GET", `/api/work/tasks/${idOf("h1a")}`)).status === 200, JSON.stringify(sv));
+await call(A, "POST", "/api/roles/hier2/update", { overrides: { "people.above": null } });
+check("and it goes away when switched off", !(await seen(H2A)).includes("h1a"));
+await call(A, "POST", "/api/roles/hier1/update", { overrides: { "people.same_rank": true } });
+sv = await seen(H1T);
+check("exception 'see same-rank colleagues' tasks when on a team': they appear", sv.includes("h1u") && sv.includes("h1a"), JSON.stringify(sv));
+await call(A, "POST", "/api/roles/hier1/update", { overrides: { "people.same_rank": null } });
+check("a personal exception works too", (await call(A, "POST", "/api/users/perms", { id: rows("SELECT id FROM users WHERE username = 'h3a'")[0].id, overrides: { "people.above": true } })).status === 200 && (await seen(H3A)).includes("h1a"));
+await call(A, "POST", "/api/users/perms", { id: rows("SELECT id FROM users WHERE username = 'h3a'")[0].id, reset: true });
+const ana = (await call(H2A, "GET", "/api/work/efficiency")).data;
+check("efficiency lists leave out the seniors", Array.isArray(ana.users) && !ana.users.some((u) => u.username.startsWith("h1")), JSON.stringify(ana.users && ana.users.map((u) => u.username)));
+sql("DELETE FROM tasks WHERE title LIKE '[h] %'; DELETE FROM task_activity WHERE task_id NOT IN (SELECT id FROM tasks)");
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9','ow9','ob9','own9'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9','ow9','ow9a','ob9','own9','h1a','h1b','h1t','h1u','h2a','h3a'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

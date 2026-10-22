@@ -6,7 +6,7 @@
 
 import { handleWork } from "./work/index.js";
 import { handleRoles } from "./roles.js";
-import { liveBump } from "./work/pulse.js";
+import { liveBump, bumpArea } from "./work/pulse.js";
 import { loadRoles, resolvePerms, rolePerms, legacyColumns, filterPeople } from "./perms.js";
 
 function corsFor(request) {
@@ -2119,7 +2119,15 @@ const worker = {
       const target = reqDate && /^\d{4}-\d{2}-\d{2}$/.test(reqDate) ? reqDate : (latest && latest.d);
       if (!target) return ok({ contacts: [] });
       const bfc = teamAnd();
-      const cr = await env.DB.prepare(`SELECT * FROM contact_log WHERE (snapshot_date = ? OR updated_at >= datetime('now','-7 days'))${bfc.s}`).bind(target, ...bfc.b).all();
+      // ?since=<updated_at of the newest row you already have> returns only what changed after it (a few rows, read through the updated_at index).
+      // Removed rows are announced by the 'contactreset' live counter instead, and the page then asks for the full list.
+      const since = (url.searchParams.get("since") || "").replace("T", " ").slice(0, 19);
+      const base = `(snapshot_date = ? OR updated_at >= datetime('now','-7 days'))${bfc.s}`;
+      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(since)) {
+        const cr = await env.DB.prepare(`SELECT * FROM contact_log WHERE ${base} AND updated_at >= ?`).bind(target, ...bfc.b, since).all();
+        return ok({ contacts: cr.results || [], partial: true });
+      }
+      const cr = await env.DB.prepare(`SELECT * FROM contact_log WHERE ${base}`).bind(target, ...bfc.b).all();
       return ok({ contacts: cr.results || [] });
     }
 
@@ -2230,7 +2238,7 @@ const worker = {
       return ok({
         snapshot_date: target, synced_at: sync?.t || null,
         rows: rows.results, contacts: contacts.results,
-        health: health.results, team: filterPeople(team.results || [], user, roleMap),
+        health: health.results, team: filterPeople(team.results || [], user, roleMap, perms),
         telegram: telegram.results, cooling: cooling.results, reactivation: reactivation.results,
       });
     }
@@ -2252,6 +2260,7 @@ const worker = {
         await env.DB.prepare(
           `DELETE FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?`
         ).bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).run();
+        if (ctx) bumpArea(env, ctx, "contactreset");                      // a removed row cannot be seen by "changed since": everyone takes the full list
         log(user, "clear", `Cleared contact · ${b.player_key} (${b.brand})`);
         return ok({ cleared: true });
       }
@@ -4009,5 +4018,5 @@ export default {
     liveBump(request, res, env, ctx);
     return res;
   },
-  scheduled: (event, env, ctx) => worker.scheduled(event, env, ctx),
+  scheduled: async (event, env, ctx) => { await worker.scheduled(event, env, ctx); bumpArea(env, ctx, "contactreset"); },   // the jobs may have assigned players
 };

@@ -1,6 +1,7 @@
 // Shared state for the Contact + Players pages: board plumbing, contact map, 48h cooldown, Grace status, filters, drill.
 // Reads exactly what the live Queue reads (ctx = the values App.jsx hands Queue today).
 import { can } from "../perms.js";
+import { useLiveTick } from "../live.js";
 import { useEffect, useMemo, useState } from "react";
 import { api, ckey, BRAND_ORDER } from "../../App.jsx";
 import { emptyFilters, filterRows } from "./logic.js";
@@ -53,6 +54,7 @@ export function useDailyFilters(base, { stage = null, mine = false } = {}) {
   const [graceSt, setGraceSt] = useState(null);   // { "username|BRAND": { a: 0|1, v, e } }
   const [graceErr, setGraceErr] = useState("");
   const graceNeeded = f.tg.gnot || f.tg.gact || f.tg.gwatch || f.classes.includes("GRACE");
+  const graceTick = useLiveTick(["feed"]);
   useEffect(() => {
     if (!graceNeeded) return;
     let alive = true;
@@ -60,7 +62,7 @@ export function useDailyFilters(base, { stage = null, mine = false } = {}) {
     api("/api/rtn/grace-status").then((d) => { if (alive) setGraceSt(d.status || {}); })
       .catch((e) => { if (alive) { setGraceSt(null); setGraceErr(e.message || "Could not read the Grace table"); } });
     return () => { alive = false; };
-  }, [graceNeeded, snap]);
+  }, [graceNeeded, snap, graceTick]);
   const graceOf = (r) => (graceSt ? graceSt[`${String(r.player_key).toLowerCase()}|${r.brand}`] || null : null);
 
   // Deep links: from a KPI card / the alert bell (ctx.drill) or ctx.goto('queue', {brand}).

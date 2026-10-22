@@ -7,6 +7,7 @@ import { api, Performance as LivePerformance, BRANDS, CLASSES, ckey, dispName, f
 import { bcolor } from "../daily/widgets.jsx";
 import { Head, Live, Empty } from "../daily2/common.jsx";
 import TaskEfficiency from "./TaskEfficiency.jsx";
+import NeedTeam from "./NeedTeam.jsx";
 
 const TIER_W = { 4: 1.0, 3: 0.75, 2: 0.5, 1: 0.1 };   // comeback-depth weights, same as the live By CS Score column
 const monthOptions = () => {
@@ -140,7 +141,7 @@ export default function Performance({ ctx }) {
       <Head title={admin ? "Performance" : "My performance"} sub={admin ? "Team save rate, retention targets and task efficiency." : "Your save rate, recoveries and task efficiency."}>
         <Seg value={tab} onChange={setTab} options={tabs} />
       </Head>
-      {tab === "tasks" ? <TaskEfficiency ctx={ctx} /> : admin ? (
+      {tab === "tasks" ? <TaskEfficiency ctx={ctx} /> : admin && ctx.viewTeam === "ALL" ? <NeedTeam ctx={ctx} what="Retention and save rate" /> : admin ? (
         ctx.snap || ctx.board ? (
           <Live>
             <LivePerformance data={ctx.teamData || []} team={ctx.team || []} me={me} viewTeam={ctx.viewTeam || "B"} contacts={ctx.contacts || []}

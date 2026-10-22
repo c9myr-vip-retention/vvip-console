@@ -3,7 +3,8 @@
 // one ongoing task per person (the Worker answers 409, shown here with a link to the blocking task); a viewer can only read.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DrawerPanel, MultiSelect, Avatar, toast } from "../ui/index.jsx";
-import { AttachButton, AttachmentView, PendingFiles, usePending } from "./Attachments.jsx";
+import { usePending } from "./Attachments.jsx";
+import { Messages, Composer } from "./Chat.jsx";
 import { useLive } from "../live.js";
 import { tapi, canEditAnyTask, canDeleteAnyTask, canEdit, useNow, useTaskActions, ConflictBanner, StatusPill, DueBadge, CheckProg, dueInfo, elapsedSec, fmtElapsed } from "./common.jsx";
 
@@ -32,6 +33,12 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
   }, [id]);
   useEffect(() => { setD(null); setConfirmDel(false); setEditDesc(null); load(); }, [load]);
   useLive(["tasks"], load);                          // a new comment or a change by someone else shows up on its own
+  // Opening the task (or a new message arriving while it is open) clears its notifications.
+  const seenCount = useRef(-1);
+  useEffect(() => {
+    if (!d) return;
+    if (seenCount.current !== d.comments.length) { seenCount.current = d.comments.length; tapi.readNotifications({ task_id: id }).catch(() => {}); }
+  }, [d && d.comments.length, id]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => { load(); onChange && onChange(); };
   const { run, busy, conflict, clearConflict } = useTaskActions(refresh);
@@ -72,7 +79,7 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
     setDraft(""); pending.clear();
     guard(() => tapi.comment(t.id, body, sending).then(refresh));
   };
-  const drop = (e) => { if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); pending.add(e.dataTransfer.files); } };
+  const react = (commentId, emoji) => guard(() => tapi.react(commentId, emoji).then((r) => setD((cur) => (cur ? { ...cur, comments: r.comments } : cur))));
   const setPrio = () => guard(() => tapi.updateTask(t.id, { high_priority: t.high_priority ? 0 : 1 }).then(refresh));
   const saveDesc = () => { const v = editDesc; setEditDesc(null); if (v !== null && v !== (t.description || "")) guard(() => tapi.updateTask(t.id, { description: v }).then(refresh), "Saved"); };
   const setObservers = (list) => guard(() => tapi.updateTask(t.id, { observers: list }).then(refresh));
@@ -170,28 +177,15 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
           </div>
           <div ref={chatEnd} style={{ flex: 1, overflow: "auto", padding: "4px 16px 8px", minHeight: 0 }}>
             {tab === "comments" && (d.comments.length === 0
-              ? <div className="dim" style={{ padding: "24px 0", textAlign: "center" }}>No comments yet.</div>
-              : d.comments.map((c) => (
-                <div key={c.id} className="cm"><Avatar name={c.author} /><div className="bub"><small>{c.author} · {when(c.created_at)}</small>{c.body}
-                  {(c.attachments || []).length > 0 && <div className="att-list">{c.attachments.map((a) => <AttachmentView key={a.id} a={a} />)}</div>}</div></div>
-              )))}
+              ? <div className="dim" style={{ padding: "24px 0", textAlign: "center" }}>No messages yet. Say something, or tag someone with @.</div>
+              : <Messages comments={d.comments} me={me.username} people={people} canReact={editable} onReact={react} />)}
             {tab === "activity" && (d.activity.length === 0
               ? <div className="dim" style={{ padding: "24px 0", textAlign: "center" }}>No activity yet.</div>
               : d.activity.map((a) => (
                 <div key={a.id} className="cm sys"><div className="bub"><small>{when(a.created_at)}</small><b style={{ color: "var(--txt)", fontWeight: 600 }}>{a.actor}</b> {String(a.text).replace(/^./, (ch) => ch.toLowerCase())}</div></div>
               )))}
           </div>
-          {tab === "comments" && editable && (
-            <div style={{ display: "grid", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--line)" }} onDragOver={(e) => e.dataTransfer && e.dataTransfer.types && [...e.dataTransfer.types].includes("Files") && e.preventDefault()} onDrop={drop}>
-              <PendingFiles files={pending.files} onRemove={pending.remove} />
-              <div style={{ display: "flex", gap: 8 }}>
-                <AttachButton onPick={pending.add} />
-                <input className="input" placeholder="Write a comment… (paste a picture or drop a file here)" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()}
-                  onPaste={(e) => { const fl = e.clipboardData && e.clipboardData.files; if (fl && fl.length) { e.preventDefault(); pending.add(fl); } }} />
-                <button className="btn pri" onClick={send} disabled={!draft.trim() && !pending.files.length}>Send</button>
-              </div>
-            </div>
-          )}
+          {tab === "comments" && editable && <Composer draft={draft} setDraft={setDraft} onSend={send} people={people} me={me.username} pending={pending} />}
         </div>
       </div>
       <div className="df">

@@ -36,6 +36,9 @@ export const work = {
   checklist: (id, b) => post(`/api/work/tasks/${id}/checklist`, b),    // { action: add|toggle|remove, text?, item_id? }
   comment: (id, body, attachments) => post(`/api/work/tasks/${id}/comments`, { body, ...(attachments && attachments.length ? { attachments } : {}) }),   // attachments: [{ name, mime, data (base64) }]
   attachment: (id) => fetchBlob(`/api/work/attachments/${id}`),
+  react: (commentId, emoji) => post(`/api/work/comments/${commentId}/react`, { emoji }),                // toggles; answers with the task's comments
+  notifications: () => get("/api/work/notifications"),                                                  // { items, unread }: tags, new comments, new tasks for me
+  readNotifications: (b) => post("/api/work/notifications/read", b),                                    // { ids } | { task_id } | { all: true }
   deleteTask: (id) => post(`/api/work/tasks/${id}/delete`),
   workload: () => get("/api/work/workload"),
   // roles and accounts (Settings). Needs users.manage; see worker/roles.js

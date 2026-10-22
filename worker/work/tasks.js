@@ -10,6 +10,8 @@
 //  - started_at is set only while status='progress'; spent_seconds accumulates elapsed time.
 //  - delete is soft (deleted_at/deleted_by); an ongoing task becomes 'pending' first so a later restore cannot clash.
 import { filterPeople } from "../perms.js";
+import { REACTIONS, mentionsIn, taggable, notify, reactionsOf } from "./chat.js";
+import { hiddenFor } from "./scope.js";
 
 
 const STATUSES = ["pending", "progress", "done", "deferred"];
@@ -62,7 +64,8 @@ async function commentsOf(db, id) {
   const { results } = await db.prepare("SELECT id, author, body, created_at FROM task_comments WHERE task_id = ? ORDER BY id").bind(id).all();
   let att = [];
   try { att = (await db.prepare("SELECT id, comment_id, name, mime, size FROM task_attachments WHERE task_id = ? ORDER BY id").bind(id).all()).results || []; } catch { /* schema_v30 not run yet */ }
-  return (results || []).map((cm) => ({ ...cm, attachments: att.filter((a) => a.comment_id === cm.id).map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, inline: SHOW_INLINE.has(a.mime) })) }));
+  const rx = await reactionsOf(db, id);
+  return (results || []).map((cm) => ({ ...cm, reactions: rx.get(cm.id) || [], attachments: att.filter((a) => a.comment_id === cm.id).map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, inline: SHOW_INLINE.has(a.mime) })) }));
 }
 
 async function body(c) { try { const b = await c.request.json(); return b && typeof b === "object" && !Array.isArray(b) ? b : {}; } catch { return {}; } }
@@ -103,11 +106,13 @@ async function loadTask(db, id) {
 }
 
 const isObserver = (t, me) => t.observers.includes(me);
-const canSee = (c, t) => c.can("tasks.view_all") || t.assignee === c.user.username || t.owner === c.user.username || isObserver(t, c.user.username);
+// "See everyone's tasks" reaches everyone the hierarchy lets this person see (c._hid is loaded by hiddenFor before this runs).
+const canSee = (c, t) => (c.can("tasks.view_all") && !(c._hid && t.assignee && c._hid.has(t.assignee))) || t.assignee === c.user.username || t.owner === c.user.username || isObserver(t, c.user.username);
 const canEditTask = (c, t) => c.can("tasks.edit_any") || t.assignee === c.user.username || t.owner === c.user.username;
 
 // Loads a task and applies visibility. Returns { t } or { res } (a ready error response).
 async function getVisible(c, id) {
+  await hiddenFor(c);
   const t = await loadTask(c.env.DB, id);
   if (!t) return { res: c.err("Task not found", 404) };
   if (!canSee(c, t)) return { res: c.err("You do not have access to this task", 403) };
@@ -148,6 +153,7 @@ async function checkFields(c, b, keys) {
     if (id === null) return c.err("Bad parent_id");
     const p = await loadTask(db, id);
     if (!p) return c.err("Parent task not found", 404);
+    await hiddenFor(c);
     if (!canSee(c, p)) return c.err("You do not have access to the parent task", 403);
     if (b.__self !== undefined && id === b.__self) return c.err("A task cannot be its own parent");
   }
@@ -161,7 +167,7 @@ async function people(c) {
   let results;
   try { results = (await c.env.DB.prepare("SELECT username, role, role_key, team, on_leaderboard FROM users ORDER BY username COLLATE NOCASE").all()).results; }
   catch { results = (await c.env.DB.prepare("SELECT username, role, team, on_leaderboard FROM users ORDER BY username COLLATE NOCASE").all()).results; }    // schema_v27 not run yet
-  return c.ok({ people: filterPeople(results || [], c.user, c.roles).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0 })) });
+  return c.ok({ people: filterPeople(results || [], c.user, c.roles, c.perms).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0 })) });
 }
 
 // ── GET /tasks ────────────────────────────────────────────────────────────────────────────────
@@ -169,8 +175,10 @@ async function list(c) {
   const q = c.url.searchParams, me = c.user.username;
   const where = ["t.deleted_at IS NULL"], binds = [];
   const assignee = q.get("assignee");
+  const hid = c.can("tasks.view_all") ? await hiddenFor(c) : new Set();
   if (assignee) {
     if (!c.can("tasks.view_all") && assignee !== me) return c.err("You can only filter by your own username", 403);
+    if (hid.has(assignee)) return c.err("You do not have access to that person's tasks", 403);
     where.push("t.assignee = ?"); binds.push(assignee);
   }
   const status = q.get("status");
@@ -191,6 +199,10 @@ async function list(c) {
   if (!c.can("tasks.view_all")) {
     where.push("(t.assignee = ? OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))");
     binds.push(me, me, me);
+  } else if (hid.size) {                                // the hierarchy hides these people's tasks unless I am on the task myself
+    const names = [...hid].slice(0, 200);
+    where.push(`(t.assignee IS NULL OR t.assignee NOT IN (${holes(names)}) OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))`);
+    binds.push(...names, me, me);
   }
   const { results } = await c.env.DB.prepare(
     `${TASK_SELECT} WHERE ${where.join(" AND ")}
@@ -265,6 +277,7 @@ async function create(c) {
     act(db, id, me, "Created the task"),
   ]);
   c.log(c.user, "task", `Created task #${id} "${title}"${assignee !== me ? ` for ${assignee}` : ""}`);
+  await notify(db, [assignee], { kind: "assigned", task_id: id, actor: me, text: title });
   return c.ok({ task: await loadTask(db, id) }, 201);
 }
 
@@ -319,6 +332,7 @@ async function update(c, id) {
   if (changed.length) stmts.push(act(db, id, me, `Edited ${uniq(changed.map((k) => FIELD_LABEL[k] || k)).join(", ")}`));
   try { await db.batch(stmts); }
   catch (e) { if (isUnique(e)) return ongoingClash(c, sets.includes("assignee = ?") ? binds[sets.indexOf("assignee = ?")] : t.assignee); throw e; }
+  if (sets.includes("assignee = ?")) { const to = binds[sets.indexOf("assignee = ?")]; if (to && to !== t.assignee) await notify(db, [to], { kind: "assigned", task_id: id, actor: me, text: t.title }); }
   return c.ok({ task: await loadTask(db, id) });
 }
 
@@ -435,7 +449,37 @@ async function comments(c, id) {
     return c.err("Attachments are not set up yet (schema_v30 has not been run)", 503);
   }
   await db.prepare("UPDATE tasks SET updated_at = datetime('now') WHERE id = ?").bind(id).run();
+
+  // Group chat: @tags pull people in (they become observers so they can read and answer), and everyone on the task is told.
+  const me = c.user.username, t = v.t;
+  const tagged = (await taggable(c, mentionsIn(text))).filter((u) => u !== me);
+  const onTask = new Set([t.assignee, t.owner, ...(t.observers || [])].filter(Boolean));
+  const joined = tagged.filter((u) => !onTask.has(u));
+  if (joined.length) {
+    await db.batch([...joined.map((u) => db.prepare("INSERT OR IGNORE INTO task_observers (task_id, username) VALUES (?, ?)").bind(id, u)),
+      act(db, id, me, `Tagged ${joined.join(", ")} in a comment`)]);
+  }
+  const preview = text || "sent a file";
+  await notify(db, tagged, { kind: "mention", task_id: id, comment_id: cid, actor: me, text: preview });
+  await notify(db, [...onTask].filter((u) => !tagged.includes(u)), { kind: "comment", task_id: id, comment_id: cid, actor: me, text: preview });
   return c.ok({ comments: await commentsOf(db, id) });
+}
+
+// ── POST /comments/:id/react { emoji } — add your reaction, or take it back if you already gave it ──
+async function react(c, commentId) {
+  if (!canEditAny(c)) return noEdit(c);
+  const db = c.env.DB, b = await body(c), emoji = String(b.emoji || "");
+  if (!REACTIONS.includes(emoji)) return c.err("That reaction is not available", 400);
+  const cm = await db.prepare("SELECT id, task_id FROM task_comments WHERE id = ?").bind(commentId).first();
+  if (!cm) return c.err("Comment not found", 404);
+  const v = await getVisible(c, cm.task_id);
+  if (v.res) return v.res;
+  try {
+    const mine = await db.prepare("SELECT 1 AS x FROM task_reactions WHERE comment_id = ? AND emoji = ? AND username = ?").bind(commentId, emoji, c.user.username).first();
+    if (mine) await db.prepare("DELETE FROM task_reactions WHERE comment_id = ? AND emoji = ? AND username = ?").bind(commentId, emoji, c.user.username).run();
+    else await db.prepare("INSERT INTO task_reactions (comment_id, emoji, username, task_id) VALUES (?,?,?,?)").bind(commentId, emoji, c.user.username, cm.task_id).run();
+  } catch { return c.err("Reactions are not set up yet (schema_v34 has not been run)", 503); }
+  return c.ok({ comments: await commentsOf(db, cm.task_id) });
 }
 
 // ── GET /attachments/:id — one file, for anyone who may see its task ──
@@ -511,7 +555,7 @@ async function workload(c) {
   let seen = [...by.values()];
   try {                                                  // who this account may see by role
     const meta = new Map(((await db.prepare("SELECT username, role, role_key, team FROM users").all()).results || []).map((u) => [u.username, u]));
-    const ok = new Set(filterPeople([...meta.values()], c.user, c.roles).map((u) => u.username));
+    const ok = new Set(filterPeople([...meta.values()], c.user, c.roles, c.perms, { tasks: true }).map((u) => u.username));
     seen = seen.filter((p) => ok.has(p.username) || !meta.has(p.username));
   } catch { /* schema_v27 not run yet: nothing to filter by */ }
   const rows = seen.filter((p) => c.can("workload.all") || p.username === c.user.username || (mine && p.team === mine));
@@ -536,6 +580,7 @@ async function clearAll(c) {
   ];
   if (attachments) wipe.unshift(db.prepare("DELETE FROM task_attachments"));
   await db.batch(wipe);
+  try { await db.batch([db.prepare("DELETE FROM task_reactions"), db.prepare("DELETE FROM notifications WHERE task_id IS NOT NULL")]); } catch { /* schema_v34 not run yet */ }
   c.log(c.user, "work", `Cleared all task data (${counts.tasks} tasks, ${counts.comments} comments, ${counts.history} history rows)`);
   return c.ok({ ok: true, cleared: counts });
 }
@@ -547,6 +592,7 @@ export async function handleTasks(c) {
   if (path === "/api/work/workload" && method === "GET") return workload(c);
   if (path === "/api/work/tasks/clear" && method === "POST") return clearAll(c);
   { const am = path.match(/^\/api\/work\/attachments\/(\d+)$/); if (am && method === "GET") return attachment(c, Number(am[1])); }
+  { const rm = path.match(/^\/api\/work\/comments\/(\d+)\/react$/); if (rm && method === "POST") return react(c, Number(rm[1])); }
   if (path === "/api/work/tasks") {
     if (method === "GET") return list(c);
     if (method === "POST") return create(c);

@@ -7,6 +7,7 @@ import { useDailyBase } from "../daily/hooks.js";
 import { sortRows, contactedPayload, isActioned } from "../daily/logic.js";
 import { Banners, SearchBox, BrandMenu, ClassPill, StatusTag, GraceTag, PlayerName, bcolor } from "../daily/widgets.jsx";
 import { Head, Empty, PCell } from "../daily2/common.jsx";
+import { useLive } from "../live.js";
 
 const GSEG = [["reloaded", "Ready to claim"], ["same_day", "Check same-day"], ["in_progress", "Window open"], ["not_reloaded", "Did not reload"], ["unknown", "No amount"], ["all", "All"]];
 
@@ -23,8 +24,9 @@ export default function GraceClaims({ ctx }) {
   const [res, setRes] = useState(null);                // null = loading, { rows, notes } or { error }
   const [filter, setFilter] = useState("reloaded");
   const [loadAll, setLoadAll] = useState(false);       // also list Grace rows for players that are not in the board (other teams / not in this snapshot)
-  const loadClaims = () => { setRes(null); api("/api/rtn/grace-tasks").then(setRes).catch((e) => setRes({ error: e.message || "Could not read the Grace table" })); };
-  useEffect(loadClaims, [snap]);
+  const loadClaims = (quiet) => { if (quiet !== true) setRes(null); api("/api/rtn/grace-tasks").then(setRes).catch((e) => { if (quiet !== true) setRes({ error: e.message || "Could not read the Grace table" }); }); };
+  useEffect(() => { loadClaims(); }, [snap]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useLive(["feed", "contact"], () => loadClaims(true));
   const byKey = useMemo(() => { const m = {}; data.forEach((r) => (m[ckey(r)] = r)); return m; }, [data]);
   const allRows = res && res.rows ? res.rows : [];
   const inBoard = (r) => !!byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`];

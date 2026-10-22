@@ -5,7 +5,7 @@ import { Seg, BrandBadge } from "../ui/index.jsx";
 import { api as sched } from "../schedule/api.js";
 import { Brands, typeOf } from "../schedule/forms.jsx";
 import { HIDE_SHIFTS, byTime, expand, timeStr } from "../schedule/logic.js";
-import { useLive } from "../live.js";
+import { useLive, useLiveTick } from "../live.js";
 import { api, TEAMS, BRAND_ORDER, dispName, dispId, keyMetric, ckey, fmt } from "../../App.jsx";
 import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
@@ -90,13 +90,14 @@ function DailyCards({ ctx }) {
   const brand = brands.includes("SK69") ? "SK69" : brands[0];
   const [chk, setChk] = useState(null);       // login-check payload, { error } or null while loading
   const [gr, setGr] = useState(null);         // grace-tasks payload, { error } or null
+  const dailyTick = useLiveTick(["checkin", "feed", "contact"]);   // a tick or new data: the three cards reload by themselves
   useEffect(() => {
     if (!snap || !me.username || !brand) return;
     let off = false;
     api(`/api/rtn/login-check?${new URLSearchParams({ brand, tier: "V", agent: me.username })}`).then((d) => !off && setChk(d)).catch((e) => !off && setChk({ error: e.message || "Not available" }));
     api("/api/rtn/grace-tasks").then((d) => !off && setGr(d)).catch((e) => !off && setGr({ error: e.message || "Not available" }));
     return () => { off = true; };
-  }, [snap, me.username, brand]);
+  }, [snap, me.username, brand, dailyTick]);
   const byKey = useMemo(() => { const m = {}; (ctx.teamData || []).forEach((r) => (m[ckey(r)] = r)); return m; }, [ctx.teamData]);
   if (!snap) return null;
   const crows = chk && chk.rows ? chk.rows : [];
@@ -172,7 +173,7 @@ export default function MyDay({ ctx }) {
       <div className="hello top">
         <div>
           <h1>{greet()}, {me.username}</h1>
-          <p>{dateLine()}{ctx.viewTeam ? ` · Team ${ctx.viewTeam}` : ""}</p>
+          <p>{dateLine()}{ctx.viewTeam && ctx.viewTeam !== "ALL" ? ` · Team ${ctx.viewTeam}` : ""}</p>
         </div>
         <span className="grow" />
         {ed && <button className="btn pri" onClick={() => newTask({})}>+ New task</button>}

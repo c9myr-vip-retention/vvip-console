@@ -42,7 +42,9 @@ class PageBoundary extends React.Component {
 }
 
 /** Alerts bell. Dismissals share the live console's localStorage key so both shells agree. */
-function Bell({ notices, snap, onGo }) {
+const KIND = { mention: ["@", "tagged you"], comment: ["💬", "commented"], assigned: ["📌", "gave you a task"] };
+
+function Bell({ notices, snap, onGo, inbox, onOpenTask, onRead }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const [gone, setGone] = useState(() => { try { return JSON.parse(localStorage.getItem("notif_dismissed") || "{}"); } catch (e) { return {}; } });
@@ -53,6 +55,7 @@ function Bell({ notices, snap, onGo }) {
     return n;
   });
   const vis = notices.filter((n) => !gone[k(n.id)]);
+  const msgs = (inbox && inbox.items) || [], unread = (inbox && inbox.unread) || 0;
   useEffect(() => {
     if (!open) return;
     const down = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
@@ -62,9 +65,24 @@ function Bell({ notices, snap, onGo }) {
   }, [open]);
   return (
     <div className="bellwrap" ref={ref}>
-      <button className="bell" title="Alerts" aria-label="Alerts" onClick={() => setOpen((o) => !o)}>🔔{vis.length > 0 && <b>{vis.length}</b>}</button>
+      <button className="bell" title="Alerts and messages" aria-label="Alerts and messages" onClick={() => setOpen((o) => !o)}>🔔{vis.length + unread > 0 && <b>{vis.length + unread}</b>}</button>
       {open && (
         <div className="pop">
+          {msgs.length > 0 && (
+            <>
+              <div className="ph">Messages{unread > 0 && <button className="dim" onClick={() => onRead({ all: true })}>mark all read</button>}</div>
+              {msgs.slice(0, 12).map((m) => {
+                const [ico, verb] = KIND[m.kind] || ["💬", "wrote"];
+                return (
+                  <div key={m.id} className={"pi" + (m.read ? "" : " unread")} onClick={() => { if (!m.read) onRead({ ids: [m.id] }); if (m.task_id) onOpenTask(m.task_id); setOpen(false); }}>
+                    <span>{ico}</span>
+                    <div><b>{m.actor}</b> {verb}{m.task_title ? <> in <b>{m.task_title}</b></> : null}{m.text && m.kind !== "assigned" && <><br /><span className="dim">{m.text.length > 90 ? m.text.slice(0, 90) + "…" : m.text}</span></>}</div>
+                    {!m.read && <span className="udot" title="Unread" />}
+                  </div>
+                );
+              })}
+            </>
+          )}
           <div className="ph">Alerts{vis.length > 0 && <button className="dim" onClick={() => dismiss(vis.map((n) => n.id))}>clear all</button>}</div>
           {vis.length === 0 && <div className="pe">Nothing needs attention ✓</div>}
           {vis.map((n) => (
@@ -117,6 +135,17 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
   const contactN = useMemo(
     () => contactTodo(ctx.teamData, ctx.contacts, snap, isAdmin ? null : me.username).length,
     [snap, ctx.contacts, ctx.teamData, isAdmin, me.username]);
+  // Messages for me: tags, new comments and new tasks. Reloaded when the live counter for my notifications moves.
+  const [inbox, setInbox] = useState({ items: [], unread: 0 });
+  const loadInbox = () => { if (localStorage.getItem("revamp_mock") === "1") return; work.notifications().then(setInbox).catch(() => {}); };
+  useEffect(() => { loadInbox(); }, [me.username]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useLive(["notif"], loadInbox);
+  const readInbox = (b) => { work.readNotifications(b).then(loadInbox).catch(() => {}); };
+  const openTask = (id) => {                            // go to Tasks and open that task (the Tasks page picks the request up)
+    try { sessionStorage.setItem("rv_open_task", String(id)); } catch (e) { /* private mode */ }
+    window.dispatchEvent(new CustomEvent("rv-open-task", { detail: id }));
+    ctx.goto("tasks");
+  };
   const [tk, setTk] = useState({ open: 0, over: 0 });
   const runTk = useRef(null);
   useLive(["tasks"], () => runTk.current && runTk.current());
@@ -168,12 +197,12 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
           <header className="topbar">
             <span className="ttl sel-team">
               {isAdmin
-                ? <>TEAM <Select className="sm" value={viewTeam} onChange={(t) => ctx.setViewTeam(t)} options={ctx.teamKeys.map((t) => ({ value: t, label: t }))} style={{ width: "auto", minWidth: 64 }} /> · VIP RTN</>
+                ? <>TEAM <Select className="sm" value={viewTeam} onChange={(t) => ctx.setViewTeam(t)} options={ctx.teamKeys.map((t) => ({ value: t, label: t === "ALL" ? "All teams" : t }))} style={{ width: "auto", minWidth: 64 }} /> · VIP RTN</>
                 : `TEAM ${me.team || "B"} · VIP RTN`}
             </span>
             <span className="dim">Daily action console</span>
             <span className="grow" />
-            {snap && <Bell notices={notices} snap={snap} onGo={(n) => ctx.goto(n.tab, n.keys ? { keys: n.keys, label: n.focusLabel } : null)} />}
+            <Bell notices={snap ? notices : []} snap={snap || "none"} onGo={(n) => ctx.goto(n.tab, n.keys ? { keys: n.keys, label: n.focusLabel } : null)} inbox={inbox} onOpenTask={openTask} onRead={readInbox} />
             <button className="btn sm" onClick={() => ctx.loadBoard(ctx.viewDate)}>{loading ? "…" : "Refresh"}</button>
             <button className="btn sm" onClick={onSignOut}>{me.username} · Sign out</button>
           </header>

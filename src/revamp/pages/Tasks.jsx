@@ -1,5 +1,5 @@
 // Tasks: List | Deadline | Planner | Calendar | Gantt over one filtered set of tasks, the task drawer and the New task popup.
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Seg, Select } from "../ui/index.jsx";
 import Deadline from "./TaskViews/Deadline.jsx";
 import Planner from "./TaskViews/Planner.jsx";
@@ -29,6 +29,14 @@ export default function Tasks({ ctx }) {
   const admin = isAdmin(me);
   const { tasks, people, projects, loading, error, reload } = useTasksData();
   const { overlays, openTask, newTask } = useTaskOverlays({ me, people, projects, tasks, onChange: reload });
+  // A notification asked for a task: open it (it may arrive before this page is on screen, or while it is).
+  useEffect(() => {
+    const take = (id) => { if (id) { try { sessionStorage.removeItem("rv_open_task"); } catch (e) { /* private mode */ } openTask(Number(id)); } };
+    try { take(sessionStorage.getItem("rv_open_task")); } catch (e) { /* private mode */ }
+    const on = (e) => take(e.detail);
+    window.addEventListener("rv-open-task", on);
+    return () => window.removeEventListener("rv-open-task", on);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const [view, setViewState] = useState(() => (VIEWS[read("rv_task_view", "list")] ? read("rv_task_view", "list") : "list"));
   const setView = (v) => { setViewState(v); write("rv_task_view", v); };
   const [preset, setPreset] = useState("active");

@@ -5,6 +5,8 @@
 // Time: tasks.created_at / completed_at are UTC 'YYYY-MM-DD HH:MM:SS'. Deadlines (due_date) are Malaysia dates,
 // so every "on time" test converts the UTC stamp with date(x,'+8 hours') before comparing to due_date.
 
+import { hiddenFor } from "./scope.js";
+
 const DEADLINES = ["Same day", "1 day", "2 days", "3 days", "7 days", "No deadline"];
 const BIN_TYPES = { task: "tasks", project: "projects", flow: "flows", template: "task_templates" };
 const BIN_NAME = { task: "title", project: "name", flow: "name", template: "name" };
@@ -113,8 +115,9 @@ async function projects(c, m) {
     const p = (await projectRows(c, { id: Number(m[1]) }))[0];
     if (!p) return c.err("Project not found", 404);
     // member activity feed, limited to tasks this person may see (admin: all; agent: assignee/owner/observer)
-    const scope = c.can("tasks.view_all") ? "" : " AND (t.assignee = ? OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))";
-    const sb = c.can("tasks.view_all") ? [] : [c.user.username, c.user.username, c.user.username];
+    const hidP = c.can("tasks.view_all") ? [...(await hiddenFor(c))].slice(0, 200) : [];           // the hierarchy hides these people's tasks
+    const scope = c.can("tasks.view_all") ? (hidP.length ? ` AND (t.assignee IS NULL OR t.assignee NOT IN (${holes(hidP)}) OR t.owner = ?)` : "") : " AND (t.assignee = ? OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))";
+    const sb = c.can("tasks.view_all") ? (hidP.length ? [...hidP, c.user.username] : []) : [c.user.username, c.user.username, c.user.username];
     const { results } = await db.prepare(
       `SELECT a.id, a.actor, a.text, a.created_at, t.id AS task_id, t.title FROM task_activity a JOIN tasks t ON t.id = a.task_id
         WHERE t.project_id = ? AND t.deleted_at IS NULL${scope} ORDER BY a.id DESC LIMIT 30`
@@ -289,8 +292,9 @@ async function analytics(c) {
   const rate = Object.fromEntries([...comp.values()].map((x) => [x.username, pct(x.on_time, x.den)]));
   const compliance = [...comp.values()].map((x) => ({ username: x.username, rate: rate[x.username], completed: x.completed }))
     .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || a.username.localeCompare(b.username));
-  const workload = (wl.results || []).map((r) => ({ username: r.username, open: r.open, rate: rate[r.username] ?? null }));
-  return c.ok({ days, since, created_vs_completed, workload, flows: fl.results || [], compliance });
+  const hid = await hiddenFor(c);                                       // the role hierarchy: people this person may not see
+  const workload = (wl.results || []).filter((r) => !hid.has(r.username)).map((r) => ({ username: r.username, open: r.open, rate: rate[r.username] ?? null }));
+  return c.ok({ days, since, created_vs_completed, workload, flows: fl.results || [], compliance: compliance.filter((x) => !hid.has(x.username)) });
 }
 
 // ───────────────────────────── efficiency (admin: all or one; agent: self) ─────────────────────────────
@@ -299,6 +303,8 @@ async function efficiency(c) {
   const q = c.url.searchParams;
   let user = q.get("user") || "";
   if (!c.can("analytics.view")) { if (user && user !== me) return c.err("You can only see your own task efficiency", 403); user = me; }
+  const hidE = await hiddenFor(c);
+  if (user && hidE.has(user)) return c.err("You do not have access to that person's tasks", 403);
   const d = parseInt(q.get("days"), 10);
   const days = d > 0 ? Math.min(365, d) : null;                    // optional window for completions; default all time
   const since = days ? mytShift(today, -(days - 1)) : "0000-00-00";
@@ -321,7 +327,7 @@ async function efficiency(c) {
   for (const r of done.results || []) Object.assign(get(r.username), { completed: r.completed, timed: r.timed || 0, on_time: r.on_time || 0, avg_sec: r.avg_sec });
   for (const r of open.results || []) Object.assign(get(r.username), { assigned: r.assigned, in_progress: r.in_progress || 0, overdue: r.overdue || 0 });
   if (user) get(user);                                             // a person with no tasks still gets a row
-  const users = [...by.values()].map((x) => ({
+  const users = [...by.values()].filter((x) => !hidE.has(x.username)).map((x) => ({
     username: x.username, assigned: x.assigned, in_progress: x.in_progress, completed: x.completed,
     on_time_rate: pct(x.on_time, x.timed + x.overdue),             // overdue open tasks count against the score
     avg_minutes: x.avg_sec ? Math.round(x.avg_sec / 60) : null, overdue: x.overdue,

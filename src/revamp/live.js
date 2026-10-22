@@ -1,7 +1,7 @@
 // "Live" updates without websockets. One poller asks the Worker's GET /api/work/pulse every few seconds (only while the tab is visible) and
 // calls the pages that care about an area (tasks, schedule, projects, people) when that area's number moved. A page then reloads its own data
 // quietly, so nobody has to refresh. The Worker bumps an area's number after every successful change (worker/work/pulse.js, schema_v31).
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { http } from "./api/work.js";
 
 const EVERY = 10000;
@@ -13,6 +13,7 @@ const total = () => { let n = 0; subs.forEach((s) => { n += s.size; }); return n
 
 async function poll() {
   if (busy || (typeof document !== "undefined" && document.hidden) || !total() || mock()) return;
+  try { if (!localStorage.getItem("session_token")) return; } catch { return; }          // signed out: nothing to ask
   busy = true;
   try {
     const next = (await http("/api/work/pulse")).areas || {};
@@ -31,6 +32,13 @@ function start() {
   poll();
 }
 function stop() { if (timer && !total()) { clearInterval(timer); timer = null; } }
+
+/** A number that goes up each time one of these areas changes: put it in a useEffect's dependency list to reload that data. */
+export function useLiveTick(areas) {
+  const [n, set] = useState(0);
+  useLive(areas, () => set((x) => x + 1));
+  return n;
+}
 
 /** Call fn (a quiet reload) whenever one of these areas changes. fn may change between renders. */
 export function useLive(areas, fn) {

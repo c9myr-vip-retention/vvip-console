@@ -458,6 +458,8 @@
 .rv .topbar{position:relative}
 .rv .topbar .sel-team{display:inline-flex;align-items:center;gap:6px}
 .rv .bellwrap{position:relative}
+.rv .pop .pi.unread{background:color-mix(in srgb,var(--blue) 10%,transparent)}
+.rv .pop .udot{width:8px;height:8px;border-radius:50%;background:var(--blue);flex:none;align-self:center}
 .rv .pop{position:absolute;right:0;top:calc(100% + 10px);width:340px;max-width:92vw;max-height:70vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;z-index:40;box-shadow:0 12px 40px rgba(0,0,0,.5)}
 .rv .pop .pi{align-items:flex-start}
 .rv .pop .pe{padding:16px 14px;color:var(--dim);text-align:center}
@@ -614,3 +616,41 @@
 .rv .att-chip .att-ic{width:40px;text-align:center;font-size:20px}
 .rv .att-chip button{background:none;border:0;color:var(--dim);cursor:pointer;font:inherit;padding:2px 6px}
 .rv .att-chip button:hover{color:var(--txt)}
+/* task comments as a group chat */
+.rv .chat-day{display:flex;justify-content:center;margin:14px 0 8px}
+.rv .chat-day span{font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:2px 10px}
+.rv .chat-msg{display:flex;gap:8px;margin-bottom:4px;align-items:flex-end}
+.rv .chat-msg.mine{flex-direction:row-reverse}
+.rv .chat-av-gap{width:28px;flex:none}
+.rv .chat-col{display:flex;flex-direction:column;min-width:0;max-width:82%}
+.rv .chat-msg.mine .chat-col{align-items:flex-end}
+.rv .chat-name{font-size:11px;color:var(--dim);margin:6px 0 2px 2px}
+.rv .chat-bub{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:14px 14px 14px 4px;padding:7px 11px 16px;min-width:64px}
+.rv .chat-msg.mine .chat-bub{background:color-mix(in srgb,var(--blue) 22%,var(--panel2));border-color:color-mix(in srgb,var(--blue) 45%,var(--line));border-radius:14px 14px 4px 14px}
+.rv .chat-text{white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+.rv .chat-time{position:absolute;right:9px;bottom:3px;font-size:10px;color:var(--dim)}
+.rv .chat-tag{color:var(--blue);font-weight:600}
+.rv .chat-tag.me{background:color-mix(in srgb,var(--amber) 28%,transparent);color:var(--txt);border-radius:4px;padding:0 3px}
+.rv .chat-rx{display:flex;flex-wrap:wrap;gap:4px;margin:3px 0 6px;position:relative}
+.rv .chat-chip{display:inline-flex;gap:4px;align-items:center;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:99px;padding:1px 8px;font:inherit;font-size:12px;cursor:pointer;line-height:1.5}
+.rv .chat-chip.mine{border-color:var(--blue);background:color-mix(in srgb,var(--blue) 20%,var(--panel2))}
+.rv .chat-chip.add{color:var(--dim);opacity:.0;transition:opacity .12s}
+.rv .chat-msg:hover .chat-chip.add,.rv .chat-chip.add:focus-visible{opacity:1}
+.rv .chat-chip:hover{border-color:var(--dim)}
+.rv .chat-add{position:relative}
+.rv .chat-pop{position:absolute;z-index:30;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.rv .chat-pop.quick{bottom:28px;left:0;display:flex;gap:2px;padding:4px}
+.rv .chat-msg.mine .chat-pop.quick{left:auto;right:0}
+.rv .chat-pop.quick button,.rv .chat-emoji-grid button{background:none;border:0;font-size:18px;cursor:pointer;border-radius:6px;padding:3px 5px;line-height:1}
+.rv .chat-pop.quick button:hover,.rv .chat-emoji-grid button:hover{background:var(--panel2)}
+.rv .chat-comp{position:relative;display:grid;gap:8px;padding:10px 16px;border-top:1px solid var(--line)}
+.rv .chat-row{display:flex;gap:8px;align-items:flex-end}
+.rv .chat-input{resize:none;min-height:34px;max-height:120px;line-height:1.4;padding-top:7px;padding-bottom:7px}
+.rv .chat-pop.emoji{bottom:100%;left:16px;width:min(330px,calc(100% - 32px));margin-bottom:6px;padding:6px}
+.rv .chat-pop-tabs{display:flex;gap:4px;align-items:center;margin-bottom:4px}
+.rv .chat-pop-tabs button{background:none;border:0;color:var(--dim);cursor:pointer;font:inherit;font-size:12px;padding:3px 8px;border-radius:6px}
+.rv .chat-pop-tabs button.on{background:var(--panel2);color:var(--txt)}
+.rv .chat-emoji-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:2px;max-height:170px;overflow:auto}
+.rv .chat-pop.mention{bottom:100%;left:16px;margin-bottom:6px;min-width:200px;padding:4px;display:grid}
+.rv .chat-pop.mention button{display:flex;gap:8px;align-items:center;background:none;border:0;color:var(--txt);font:inherit;padding:5px 8px;border-radius:6px;cursor:pointer;text-align:left}
+.rv .chat-pop.mention button.on,.rv .chat-pop.mention button:hover{background:var(--panel2)}
