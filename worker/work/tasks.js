@@ -448,11 +448,30 @@ async function workload(c) {
   return c.ok({ people: rows.sort((a, b) => a.username.localeCompare(b.username)), my_team: mine });
 }
 
+// ── POST /tasks/clear — wipe every task and everything hanging off them (reset after testing) ──
+// { preview: true } only counts. Otherwise { confirm: "CLEAR TASKS" } is required, so a stray call cannot delete anything.
+// Tasks, checklists, observers, comments and the task history go. Projects, flows, templates and people stay.
+async function clearAll(c) {
+  if (!c.can("tasks.clear")) return c.err("You do not have permission to clear task data", 403);
+  const db = c.env.DB, b = await body(c);
+  const count = async (t) => (await db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).first()).n;
+  const counts = { tasks: await count("tasks"), checklist: await count("task_checklist"), observers: await count("task_observers"), comments: await count("task_comments"), history: await count("task_activity") };
+  if (b.preview) return c.ok({ counts });
+  if (b.confirm !== "CLEAR TASKS") return c.err('Type CLEAR TASKS to confirm', 400);
+  await db.batch([
+    db.prepare("DELETE FROM task_checklist"), db.prepare("DELETE FROM task_observers"), db.prepare("DELETE FROM task_comments"),
+    db.prepare("DELETE FROM task_activity"), db.prepare("DELETE FROM tasks"),
+  ]);
+  c.log(c.user, "work", `Cleared all task data (${counts.tasks} tasks, ${counts.comments} comments, ${counts.history} history rows)`);
+  return c.ok({ ok: true, cleared: counts });
+}
+
 // ── router ────────────────────────────────────────────────────────────────────────────────────
 export async function handleTasks(c) {
   const { path, method } = c;
   if (path === "/api/work/people" && method === "GET") return people(c);
   if (path === "/api/work/workload" && method === "GET") return workload(c);
+  if (path === "/api/work/tasks/clear" && method === "POST") return clearAll(c);
   if (path === "/api/work/tasks") {
     if (method === "GET") return list(c);
     if (method === "POST") return create(c);

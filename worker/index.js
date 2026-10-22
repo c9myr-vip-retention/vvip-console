@@ -6,7 +6,7 @@
 
 import { handleWork } from "./work/index.js";
 import { handleRoles } from "./roles.js";
-import { loadRoles, resolvePerms, rolePerms } from "./perms.js";
+import { loadRoles, resolvePerms, rolePerms, legacyColumns } from "./perms.js";
 
 function corsFor(request) {
   const origin = request.headers.get("Origin") || "";
@@ -1780,7 +1780,8 @@ async function autoAssignOneRoster(env, brand, tier, assignedBy) {
      WHERE pd.snapshot_date = ? AND pd.brand = ? AND pd.tier_segment = ?
        AND NOT EXISTS (SELECT 1 FROM player_assignment a
                         WHERE a.brand = pd.brand AND a.tier_segment = pd.tier_segment
-                          AND a.player_key = pd.player_key AND a.active = 1)
+                          AND a.player_key = pd.player_key AND a.active = 1
+                          AND a.agent IN (SELECT username FROM users))
      ORDER BY pd.daily_deposit DESC, pd.player_key
   `).bind(latest.d, brand, tier).all();
   const players = (un.results || []).map((r) => r.player_key);
@@ -2246,7 +2247,7 @@ export default {
       // belongs to one agent; who actually ticks a row is recorded in filled_by.
       const agent = url.searchParams.get("agent") || null;
 
-      const conds = ["a.brand = ?", "a.tier_segment = ?", "a.active = 1"];
+      const conds = ["a.brand = ?", "a.tier_segment = ?", "a.active = 1", "a.agent IN (SELECT username FROM users)"];   // players owned by a deleted account show as unassigned
       // ? order: c=date, pdd=date, pdl=latest, pdy=date(-1 day), then brand, tier, [agent]
       const rowBinds = [date, date, latest, date, brand, tier];
       if (agent) { conds.push("a.agent = ?"); rowBinds.push(agent); }
@@ -2296,7 +2297,8 @@ export default {
          WHERE pd.snapshot_date = ? AND pd.brand = ? AND pd.tier_segment = ?
            AND NOT EXISTS (SELECT 1 FROM player_assignment a
                             WHERE a.brand = pd.brand AND a.tier_segment = pd.tier_segment
-                              AND a.player_key = pd.player_key AND a.active = 1)
+                              AND a.player_key = pd.player_key AND a.active = 1
+                          AND a.agent IN (SELECT username FROM users))
          ORDER BY pd.daily_deposit DESC, pd.player_key
       `).bind(latest, brand, tier).all();
 
@@ -3782,7 +3784,7 @@ export default {
           const perms = rolePerms(picked, roleMap), f2 = (k) => (perms.has(k) ? 1 : 0);
           await env.DB.prepare(
             "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team, role_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-          ).bind(b.username.trim().toLowerCase(), hash, picked.base === "none" ? "viewer" : picked.base,
+          ).bind(b.username.trim().toLowerCase(), hash, legacyColumns(picked, roleMap).role,
             f2("contact.edit"), f2("contact.delete"), f2("kpi.scored"), f2("users.manage"), newTeam, picked.key).run();
           log(user, "user", `Created account · ${b.username.trim().toLowerCase()} (${picked.name})`);
           return ok({ message: "User created" });
@@ -3836,7 +3838,9 @@ export default {
         if ((others?.c || 0) === 0) return err("Can't delete the last manager — promote someone else first", 400);
       }
       await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
-      log(user, "user", `Deleted account · ${target.username}`);
+      // release the players this account owned, so they show as unassigned and get dealt to someone who is still here
+      const released = await env.DB.prepare("UPDATE player_assignment SET active = 0 WHERE agent = ? AND active = 1").bind(target.username).run();
+      log(user, "user", `Deleted account · ${target.username}${released.meta && released.meta.changes ? ` (released ${released.meta.changes} assigned players)` : ""}`);
       return ok({ message: "User deleted" });
     }
 

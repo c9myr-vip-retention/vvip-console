@@ -223,5 +223,24 @@ check("admin deletes a task he owns", (await call(A, "POST", `/api/work/tasks/${
 check("delete twice -> 404", (await call(A, "POST", `/api/work/tasks/${T2}/delete`)).status === 404);
 check("unknown sub-route is not ours (404)", (await call(A, "POST", `/api/work/tasks/${T1}/explode`)).status === 404);
 
+// ---- clear all task data (a reset after testing). Runs last: it empties the task tables. ----
+for (const [who, tok] of [["agent", S], ["viewer", V]]) check(`${who} cannot clear task data (403)`, (await call(tok, "POST", "/api/work/tasks/clear", { preview: true })).status === 403);
+check("unauthenticated is 401", (await call(null, "POST", "/api/work/tasks/clear", { preview: true })).status === 401);
+const n = (t) => rows(`SELECT COUNT(*) n FROM ${t}`)[0].n;
+r = await call(A, "POST", "/api/work/tasks/clear", { preview: true });
+check("preview counts match the database and deletes nothing", r.status === 200 && r.data.counts.tasks === n("tasks") && r.data.counts.tasks > 0 && r.data.counts.checklist === n("task_checklist") && r.data.counts.comments === n("task_comments") && r.data.counts.history === n("task_activity"), JSON.stringify(r.data));
+const before = n("tasks");
+check("without the confirmation it refuses (400)", (await call(A, "POST", "/api/work/tasks/clear", {})).status === 400);
+check("with the wrong word it refuses (400)", (await call(A, "POST", "/api/work/tasks/clear", { confirm: "yes" })).status === 400);
+check("nothing was deleted by the refusals", n("tasks") === before);
+r = await call(A, "POST", "/api/work/tasks/clear", { confirm: "CLEAR TASKS" });
+check("clear everything", r.status === 200 && r.data.cleared.tasks === before, JSON.stringify(r.data));
+check("every task table is empty", ["tasks", "task_checklist", "task_observers", "task_comments", "task_activity"].every((t) => n(t) === 0));
+check("people and accounts are untouched", n("users") > 0);
+check("the board is empty for everyone", (await call(S, "GET", "/api/work/tasks?include=done")).data.tasks.length === 0 && (await call(A, "GET", "/api/work/tasks?include=done")).data.tasks.length === 0);
+check("a new task can be made after the reset", (await call(S, "POST", "/api/work/tasks", { title: "[t] after reset" })).status === 201);
+await new Promise((res) => setTimeout(res, 600));
+check("the reset is written to the activity log", rows("SELECT COUNT(*) n FROM activity_log WHERE detail LIKE 'Cleared all task data%'")[0].n >= 1);
+
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

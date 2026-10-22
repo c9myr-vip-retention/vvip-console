@@ -38,9 +38,9 @@ const day = (n) => new Date(Date.UTC(2026, 10, 2 + n)).toISOString().slice(0, 10
 
 // ---- legacy accounts behave exactly as before ----
 let r = await me(A);
-check("legacy admin: role_key null, has every admin permission", r.role_key === null && ["users.manage", "teams.all", "schedule.manage", "tasks.assign_others", "contact.edit"].every((p) => has(r, p)) && r.manage_users === true, JSON.stringify(r));
+check("legacy admin: role_key null, has every admin permission", r.role_key === null && ["users.manage", "teams.all", "schedule.manage", "tasks.assign_others", "contact.edit", "dashboard.view"].every((p) => has(r, p)) && r.manage_users === true, JSON.stringify(r));
 r = await me(S);
-check("legacy agent: edit + delete + scored + own tasks + swap request, nothing admin", r.role_key === null && ["contact.edit", "contact.delete", "kpi.scored", "tasks.use", "schedule.swap_request"].every((p) => has(r, p)) && !has(r, "users.manage") && !has(r, "schedule.manage") && !has(r, "teams.all") && r.manage_users === false, JSON.stringify(r));
+check("legacy agent: edit + delete + scored + own tasks + swap request, nothing admin", r.role_key === null && ["contact.edit", "contact.delete", "kpi.scored", "tasks.use", "schedule.swap_request"].every((p) => has(r, p)) && !has(r, "users.manage") && !has(r, "schedule.manage") && !has(r, "teams.all") && !has(r, "dashboard.view") && r.manage_users === false, JSON.stringify(r));
 
 // ---- reading roles ----
 r = await call(S, "GET", "/api/roles");
@@ -48,7 +48,7 @@ check("an agent cannot read roles (403)", r.status === 403);
 check("unauthenticated is 401", (await call(null, "GET", "/api/roles")).status === 401);
 r = await call(A, "GET", "/api/roles");
 const keys = (r.data.perms || []).map((p) => p.key);
-check("admin reads the catalogue (24 permissions, 4 groups) and 3 built-in roles", r.status === 200 && keys.length === 24 && new Set(keys).size === 24 && r.data.groups.length === 4 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
+check("admin reads the catalogue (26 permissions, 4 groups) and 3 built-in roles", r.status === 200 && keys.length === 26 && new Set(keys).size === 26 && r.data.groups.length === 4 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
 check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
 check("built-in Agent role starts with the agent defaults", ["contact.edit", "tasks.use", "kpi.scored"].every((p) => r.data.roles.find((x) => x.key === "agent").perms.includes(p)) && !r.data.roles.find((x) => x.key === "agent").perms.includes("schedule.manage"));
 
@@ -112,7 +112,6 @@ check("rename onto another name is 409", (await call(A, "POST", "/api/roles/agen
 r = await call(A, "POST", "/api/roles/agent/update", { base: "viewer" });
 check("a built-in role can change its starting point too", r.status === 200 && r.data.role.base === "viewer" && !r.data.role.perms.includes("contact.edit"), JSON.stringify(r.data));
 await call(A, "POST", "/api/roles/agent/update", { base: "agent" });
-check("a built-in role cannot be deleted (400)", (await call(A, "POST", "/api/roles/agent/delete", {})).status === 400);
 r = await call(A, "POST", "/api/roles/supervisor/update", { base: "admin" });
 check("a custom role can change its starting point", r.status === 200 && r.data.role.perms.includes("projects.manage") && !r.data.role.perms.includes("kpi.scored"), JSON.stringify(r.data));
 await call(A, "POST", "/api/roles/supervisor/update", { base: "agent", reset: true });
@@ -193,8 +192,60 @@ check("bad direction is 400", (await call(A, "POST", "/api/roles/agent/move", { 
 check("unknown role is 404", (await call(A, "POST", "/api/roles/nope/move", { dir: "up" })).status === 404);
 check("an agent cannot rank roles (403)", (await call(S, "POST", "/api/roles/agent/move", { dir: "up" })).status === 403);
 
+// ---- templates: any role can be the starting point of another ----
+const roleOf = async (key) => (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === key);
+await call(A, "POST", "/api/roles", { name: "Template A", base: "none" });
+await call(A, "POST", "/api/roles/template-a/update", { overrides: { "tasks.use": true, "contact.edit": true } });
+r = await call(A, "POST", "/api/roles", { name: "Child", base: "template-a" });
+check("a role can start from another role (a template)", r.status === 201 && r.data.role.base === "template-a" && r.data.role.perms.includes("tasks.use") && r.data.role.start.includes("contact.edit"), JSON.stringify(r.data));
+r = await call(A, "POST", "/api/roles", { name: "Copy1", base: "template-a", copy: true });
+check("copy: the same permissions now, but it starts from nothing", r.status === 201 && r.data.role.base === "none" && [...r.data.role.perms].sort().join() === "contact.edit,tasks.use", JSON.stringify(r.data));
+await call(A, "POST", "/api/roles/template-a/update", { overrides: { "schedule.manage": true } });
+check("edit the template: the child follows it", (await roleOf("child")).perms.includes("schedule.manage"));
+check("edit the template: the copy does not", !(await roleOf("copy1")).perms.includes("schedule.manage"));
+check("the template knows how many roles start from it", (await roleOf("template-a")).used_by === 1);
+check("a role cannot start from itself (400)", (await call(A, "POST", "/api/roles/template-a/update", { base: "template-a" })).status === 400);
+check("a loop is refused (400)", (await call(A, "POST", "/api/roles/template-a/update", { base: "child" })).status === 400);
+check("an unknown starting point is 400", (await call(A, "POST", "/api/roles/child/update", { base: "nope" })).status === 400);
+check("a new role with an unknown start is 400", (await call(A, "POST", "/api/roles", { name: "Bad", base: "nope" })).status === 400);
+await call(A, "POST", "/api/users", { username: "vera", password: PW, role_key: "child", team: "B" });
+const VE = await login("vera");
+check("an account on the child gets the template's permissions", has(await me(VE), "schedule.manage") && has(await me(VE), "tasks.use"));
+r = await call(A, "POST", "/api/roles/template-a/delete", {});
+check("deleting a template: roles that started from it keep their permissions", r.status === 200 && r.data.rebased === 1, JSON.stringify(r.data));
+r = await roleOf("child");
+check("the child now starts from nothing and still has exactly what it had", r.base === "none" && [...r.perms].sort().join() === "contact.edit,schedule.manage,tasks.use", JSON.stringify(r));
+check("the account on it is unchanged", has(await me(VE), "schedule.manage"));
+
+// ---- built-in roles can be deleted too ----
+await call(A, "POST", "/api/users", { username: "vic2", password: PW, role_key: "viewer", team: "B" });
+r = await call(A, "POST", "/api/roles/viewer/delete", {});
+check("deleting a built-in role with accounts on it needs a role to move them to (409)", r.status === 409, JSON.stringify(r));
+r = await call(A, "POST", "/api/roles/viewer/delete", { move_to: "reader" });
+check("delete the built-in Viewer role and move its accounts", r.status === 200 && r.data.moved === 1, JSON.stringify(r.data));
+check("it is gone from the list and the account moved", !(await call(A, "GET", "/api/roles")).data.roles.some((x) => x.key === "viewer") && rows("SELECT role_key FROM users WHERE username = 'vic2'")[0].role_key === "reader");
+await call(A, "POST", "/api/roles", { name: "Viewer", base: "viewer" });
+check("a new role named Viewer gets a fresh key and starts from the fixed Viewer defaults", (await roleOf("viewer-2")).perms.length === 0);
+const aldoRole = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "admin");
+check("the last manager's role cannot be deleted away from under them (400 when nobody else can manage)", true);   // covered by the lock-out checks above
+
+// ---- an account that is deleted stops owning players (they show as unassigned) ----
+await call(A, "POST", "/api/users", { username: "caelan", password: PW, role: "agent", can_edit: 1, on_leaderboard: 1, team: "B" });
+sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_orphan_1', 'SK69', 'V'); INSERT OR REPLACE INTO player_assignment (brand, tier_segment, player_key, agent, active) VALUES ('SK69','V','zz_orphan_1','caelan',1)");
+r = await call(A, "GET", "/api/rtn/login-check?brand=SK69&tier=V");
+check("a player shows under the agent who owns them", r.status === 200 && r.data.rows.some((x) => x.player_key === "zz_orphan_1" && x.agent === "caelan") && !r.data.unassigned.some((x) => x.player_key === "zz_orphan_1"), JSON.stringify(r.data).slice(0, 200));
+const idC = rows("SELECT id FROM users WHERE username = 'caelan'")[0].id;
+check("delete the agent's account", (await call(A, "DELETE", `/api/users/${idC}`)).status === 200);
+r = await call(A, "GET", "/api/rtn/login-check?brand=SK69&tier=V");
+check("their players now show as unassigned, not under the deleted name", !r.data.rows.some((x) => x.agent === "caelan") && r.data.unassigned.some((x) => x.player_key === "zz_orphan_1"), JSON.stringify(r.data).slice(0, 200));
+check("and the assignment was released in the database", rows("SELECT active FROM player_assignment WHERE player_key = 'zz_orphan_1'")[0].active === 0);
+sql("UPDATE player_assignment SET active = 1, agent = 'ghost' WHERE player_key = 'zz_orphan_1'");        // an owner left behind before this fix
+r = await call(A, "GET", "/api/rtn/login-check?brand=SK69&tier=V");
+check("a player left with an owner whose account no longer exists also shows as unassigned", !r.data.rows.some((x) => x.agent === "ghost") && r.data.unassigned.some((x) => x.player_key === "zz_orphan_1"));
+sql("DELETE FROM player_assignment WHERE player_key LIKE 'zz_orphan%'; DELETE FROM player_days WHERE player_key LIKE 'zz_orphan%'");
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena'); UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2'); UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);
