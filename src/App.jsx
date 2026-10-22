@@ -5744,6 +5744,14 @@ export default function App() {
     });
   }
 
+  // Pull just the contact rows again (who owns which player) and swap them into the board. Used by pages that refresh by themselves.
+  async function refreshContacts(date) {
+    try {
+      const r = await api("/api/rtn/board-contacts" + (date ? `?date=${date}` : ""));
+      setBoard((b) => (b ? { ...b, contacts: r.contacts || [] } : b));
+    } catch { /* keep what is on screen */ }
+  }
+
   async function clearContact(payload) {
     await api("/api/rtn/contact", { method: "POST", body: JSON.stringify({ ...payload, clear: true }) });
     setBoard((b) => {
@@ -5807,7 +5815,7 @@ export default function App() {
     };
     const ctx = {
       me, viewTeam, board, data, teamData, teamBrands, contacts: board?.contacts || [], dates, viewDate, setViewDate, isPast,
-      readOnly: queueRO, saveContact, clearContact, loadBoard, drill, setDrill, goto,
+      readOnly: queueRO, saveContact, clearContact, loadBoard, refreshContacts, drill, setDrill, goto,
       setViewTeam, teamKeys: TEAM_KEYS, team: scopeTeam(board?.team, viewTeam, me), health: board?.health || [], snap: board?.snapshot_date || null, loading,
     };
     return (<><Style scope /><RevampShell ctx={ctx} tab={rvTab || (me.manage_users ? "dash" : "home")} notices={notices} loading={loading} loadErr={loadErr} onSignOut={signOut} /></>);

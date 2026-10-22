@@ -2112,6 +2112,33 @@ const worker = {
     }
 
     // ── GET /api/rtn/board — everything the console needs in one call ─────────
+    // GET /api/rtn/board-contacts?date= : only the contact rows the board carries, so a page can refresh who owns what without the whole board.
+    if (path === "/api/rtn/board-contacts" && method === "GET") {
+      const latest = await env.DB.prepare("SELECT MAX(snapshot_date) AS d FROM player_days").first();
+      const reqDate = url.searchParams.get("date");
+      const target = reqDate && /^\d{4}-\d{2}-\d{2}$/.test(reqDate) ? reqDate : (latest && latest.d);
+      if (!target) return ok({ contacts: [] });
+      const bfc = teamAnd();
+      const cr = await env.DB.prepare(`SELECT * FROM contact_log WHERE (snapshot_date = ? OR updated_at >= datetime('now','-7 days'))${bfc.s}`).bind(target, ...bfc.b).all();
+      return ok({ contacts: cr.results || [] });
+    }
+
+    // POST /api/rtn/unassign { snapshot_date, team } : take every player of the team back that is assigned but not contacted yet. Players who already
+    // have a real status (contacted, responded, recovered...) keep their owner, so no contact history is lost.
+    if (path === "/api/rtn/unassign" && method === "POST") {
+      if (!can("assign.manage")) return err("Managers only", 403);
+      const b = await request.json().catch(() => ({}));
+      const brands = (TEAM_BRANDS[b.team] || []).filter((x) => brandAllowed(x));
+      if (!brands.length) return err("Unknown team", 400);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.snapshot_date || "")) return err("snapshot_date must be YYYY-MM-DD", 400);
+      const r = await env.DB.prepare(
+        `UPDATE contact_log SET assigned_to = NULL, updated_by = ?, updated_at = datetime('now')
+          WHERE snapshot_date = ? AND brand IN (${brands.map(() => "?").join(",")}) AND assigned_to IS NOT NULL AND (status IS NULL OR status = 'ASSIGNED')`
+      ).bind(user.username, b.snapshot_date, ...brands).run();
+      log(user, "assign", `Unassigned ${r.meta.changes} player${r.meta.changes === 1 ? "" : "s"} · Team ${b.team}`);
+      return ok({ unassigned: r.meta.changes });
+    }
+
     if (path === "/api/rtn/board" && method === "GET") {
       const latest = await env.DB.prepare("SELECT MAX(snapshot_date) AS d FROM player_days").first();
       if (!latest || !latest.d) return ok({ snapshot_date: null, rows: [], contacts: [], health: [], team: [] });

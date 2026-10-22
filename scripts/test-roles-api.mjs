@@ -444,6 +444,22 @@ execFileSync("npx", ["wrangler", "d1", "execute", "groupb-tracker-db", "--local"
 check("migration: running it twice changes nothing more", rows("SELECT COUNT(*) n FROM role_permissions WHERE role_key = 'mig9'")[0].n === 5);
 sql("DELETE FROM role_permissions WHERE role_key = 'mig9'; DELETE FROM roles WHERE key = 'mig9'");
 
+// ---- Assignments: unassign everyone not contacted yet, and the contact rows alone for live refresh ----
+sql(`DELETE FROM contact_log WHERE player_key LIKE 'zz_un%'; INSERT INTO contact_log (snapshot_date, player_key, brand, tier_segment, assigned_to, status, updated_by) VALUES ('${snap}', 'zz_un_idle', 'SK69', 'V', 'sara', 'ASSIGNED', 'aldo'), ('${snap}', 'zz_un_blank', 'SK69', 'V', 'sara', NULL, 'aldo'), ('${snap}', 'zz_un_done', 'SK69', 'V', 'sara', 'CONTACTED', 'sara'), ('${snap}', 'zz_un_free', 'SK69', 'V', NULL, 'ASSIGNED', 'aldo'), ('${snap}', 'zz_un_other', 'JOM99', 'V', 'sara', 'ASSIGNED', 'aldo')`);
+check("an agent cannot unassign (403)", (await call(S, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "B" })).status === 403);
+check("a bad team or date is 400", (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "Z" })).status === 400 && (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: "nope", team: "B" })).status === 400);
+const bc0 = (await call(A, "GET", `/api/rtn/board-contacts?date=${snap}`)).data.contacts;
+check("board-contacts returns just the contact rows", Array.isArray(bc0) && bc0.some((x) => x.player_key === "zz_un_done") && !("rows" in (await call(A, "GET", `/api/rtn/board-contacts?date=${snap}`)).data));
+const pu0 = (await call(A, "GET", "/api/work/pulse")).data.areas.contact || 0;
+r = await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "B" });
+const who = Object.fromEntries(rows("SELECT player_key, assigned_to FROM contact_log WHERE player_key LIKE 'zz_un%'").map((x) => [x.player_key, x.assigned_to]));
+check("unassign takes back the assigned players not contacted yet, only", r.status === 200 && r.data.unassigned === 2 && isNull(who.zz_un_idle) && isNull(who.zz_un_blank) && isNull(who.zz_un_free) && who.zz_un_done === "sara", JSON.stringify([r.data, who]));
+check("a player of another team (Team A brand) is left alone", who.zz_un_other === "sara", JSON.stringify(who));
+await new Promise((r2) => setTimeout(r2, 700));
+check("the change bumps the 'contact' live counter", ((await call(A, "GET", "/api/work/pulse")).data.areas.contact || 0) === pu0 + 1);
+check("running it again unassigns nobody", (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "B" })).data.unassigned === 0);
+sql("DELETE FROM contact_log WHERE player_key LIKE 'zz_un%'");
+
 // ---- leave the throwaway database the way the other suites expect it ----
 sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9','ow9','ob9','own9'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 

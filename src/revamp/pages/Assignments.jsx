@@ -4,6 +4,8 @@
 import { can } from "../perms.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { Seg, Select, toast } from "../ui";
+import { useLive } from "../live.js";
+import { Confirm } from "../setup/common.jsx";
 import { api, AssignedView, AAStyle, ParityBar, DupeCard, DryRunCard, ckey, fmt, fmtK, tap } from "../../App.jsx";
 import { useDailyBase } from "../daily/hooks.js";
 import { stageOf, isActioned, assignPayload, buildBands, sortPriority } from "../daily/logic.js";
@@ -27,6 +29,13 @@ export function AssignmentsPanel({ ctx }) {
   const [dupOpen, setDupOpen] = useState(false);
 
   useEffect(() => { setBatch(1); }, [viewTeam]);
+  // Someone else assigned, unassigned or contacted a player: pull the owners again (at most every 12 seconds, and not while this page is busy assigning).
+  const lastPull = React.useRef(0);
+  useLive(["contact"], () => {
+    if (Date.now() - lastPull.current < 12000 || busyRef.current) return;
+    lastPull.current = Date.now();
+    if (ctx.refreshContacts) ctx.refreshContacts(ctx.viewDate || undefined);
+  });
   useEffect(() => {
     let alive = true;
     setDealBusy(true); setDealErr("");
@@ -70,6 +79,8 @@ export function AssignmentsPanel({ ctx }) {
   const [to, setTo] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [work, setWork] = useState(null);              // { done, total } while assigning
+  const busyRef = React.useRef(false); busyRef.current = !!work;
+  const [askUn, setAskUn] = useState(false), [unBusy, setUnBusy] = useState(false);
   useEffect(() => { if (!to && agents.length) setTo(agents[0]); }, [agents, to]);
   const needle = q.trim().toLowerCase();
   const list = needle ? unassigned.filter((r) => `${r.username || ""} ${r.uid || ""} ${r.addressing || ""} ${r.brand}`.toLowerCase().includes(needle)) : unassigned;
@@ -89,6 +100,18 @@ export function AssignmentsPanel({ ctx }) {
     }
     setWork(null); setSel(new Set());
     toast(bad ? `Assigned ${ok} of ${jobs.length}. Stopped on: ${bad}` : `Assigned ${ok} player${ok === 1 ? "" : "s"}`);
+  };
+  // Everyone assigned but not contacted yet goes back to Unassigned (one call; players who already have a status keep their owner).
+  const assignedIdle = useMemo(() => data.filter((r) => contactMap[ckey(r)]?.assigned_to && !isActioned(contactMap[ckey(r)])).length, [data, contactMap]);
+  const unassignAll = async () => {
+    setUnBusy(true);
+    try {
+      const r = await api("/api/rtn/unassign", { method: "POST", body: JSON.stringify({ snapshot_date: snap, team: viewTeam }) });
+      toast(`Unassigned ${r.unassigned} player${r.unassigned === 1 ? "" : "s"}`);
+      setSel(new Set()); setAskUn(false);
+      if (ctx.refreshContacts) await ctx.refreshContacts(ctx.viewDate || undefined);
+    } catch (e) { toast(e.message || "Could not unassign"); }
+    setUnBusy(false);
   };
   const assignSel = () => { if (!to) return; run(unassigned.filter((r) => sel.has(ckey(r))).map((r) => [r, to])); };
   const evenly = () => {   // deal the selection (or everyone unassigned) round-robin, always to the agent with the lightest load
@@ -155,6 +178,8 @@ export function AssignmentsPanel({ ctx }) {
           <button className="btn sm" disabled={readOnly || !sel.size || !to || !!work} onClick={assignSel}>Assign{sel.size ? ` ${sel.size}` : ""}</button>
           <span className="grow" />
           {work && <span className="dim">Assigning {work.done} of {work.total}…</span>}
+          <button className="btn sm danger" disabled={readOnly || !assignedIdle || !!work} onClick={() => setAskUn(true)}
+            title="Take every assigned player who has not been contacted yet back to Unassigned">Unassign all{assignedIdle ? ` (${assignedIdle})` : ""}</button>
           <button className="btn sm pri" disabled={readOnly || !unassigned.length || !agents.length || !!work} onClick={evenly}
             title={sel.size ? "Deal the ticked players evenly across the agents" : "Deal every unassigned player evenly across the agents"}>Auto-assign evenly{sel.size ? ` (${sel.size})` : ""}</button>
         </div>
@@ -173,6 +198,8 @@ export function AssignmentsPanel({ ctx }) {
             {!list.length && <tr><td colSpan="5" className="dim" style={{ padding: 26, textAlign: "center", cursor: "default" }}>Everyone who needs contact is assigned.</td></tr>}
           </tbody>
         </table></div>
+        {askUn && <Confirm title="Unassign all" action="Unassign all" busy={unBusy} onCancel={() => setAskUn(false)} onConfirm={unassignAll}
+          text={<>Take <b>{assignedIdle}</b> assigned player{assignedIdle === 1 ? "" : "s"} on Team {viewTeam} back to Unassigned? Players who were already contacted keep their agent, so no contact history is lost.</>} />}
         {list.length > SHOW && <div className="wmore" onClick={() => setShowAll((s) => !s)}>{showAll ? "Show less" : `Show all ${fmt(list.length)}`}</div>}
       </div>
     </>

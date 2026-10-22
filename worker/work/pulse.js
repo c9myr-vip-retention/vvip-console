@@ -8,6 +8,7 @@ export function areaOf(path) {
   if (path.startsWith("/api/work/tasks") || path.startsWith("/api/work/attachments")) return "tasks";
   if (/^\/api\/work\/(projects|flows|templates|bin)/.test(path)) return "projects";
   if (path.startsWith("/api/users") || path.startsWith("/api/roles")) return "people";
+  if (path === "/api/rtn/contact" || path === "/api/rtn/unassign" || path.startsWith("/api/rtn/auto-assign") || path.startsWith("/api/rtn/login-check")) return "contact";   // who owns which player
   return null;
 }
 
