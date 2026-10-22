@@ -6,8 +6,9 @@ import Deadline from "../pages/TaskViews/Deadline.jsx";
 import Planner from "../pages/TaskViews/Planner.jsx";
 import Calendar from "../pages/TaskViews/Calendar.jsx";
 import Gantt from "../pages/TaskViews/Gantt.jsx";
-import { Seg } from "../ui/index.jsx";
+import { Seg, ToastHost } from "../ui/index.jsx";
 import { MOCK_PEOPLE, mockTasks } from "./fixtures.js";
+import "../revamp.css";
 import "./harness.css";
 
 localStorage.setItem("revamp_mock", "1");
@@ -23,17 +24,15 @@ function App() {
   const tasks = me.manage_users ? all : all.filter((t) => t.assignee === user || t.owner === user);
   const View = V[view], opened = useState(null);
   return (
-    <div style={{ padding: 20 }}>
-      <div className="top" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 14 }}>
-        <h1 style={{ fontSize: 20 }}>Tasks</h1>
+    <div className="rv"><div className="app" style={{ gridTemplateColumns: "minmax(0,1fr)" }}><div className="colmain"><main className="main">
+      <div className="top">
+        <h1>Tasks</h1>
         <Seg value={view} onChange={setView} options={[{ value: "deadline", label: "Deadline" }, { value: "planner", label: "Planner" }, { value: "cal", label: "Calendar" }, { value: "gantt", label: "Gantt" }]} />
-        <span style={{ color: "var(--dim)" }}>{user} ({role}) · {tasks.length} tasks</span>
-        <span id="opened" style={{ marginLeft: "auto", color: "var(--dim)" }}>{opened[0] ? `opened #${opened[0]}` : ""}</span>
+        <span className="dim">{user} ({role}) · {tasks.length} tasks</span>
+        <span id="opened" className="dim grow" style={{ textAlign: "right" }}>{opened[0] ? `opened #${opened[0]}` : ""}</span>
       </div>
       <View key={view} tasks={tasks} people={MOCK_PEOPLE} me={me} onOpen={(id) => opened[1](id)} onChange={() => bump((n) => n + 1)} />
-      <div id="toasts" />
-    </div>
+    </main></div></div><ToastHost /></div>
   );
 }
-window.addEventListener("rv-toast", (e) => { const d = document.createElement("div"); d.className = "t"; d.textContent = e.detail; document.getElementById("toasts").appendChild(d); setTimeout(() => d.remove(), 2500); });
 createRoot(document.getElementById("root")).render(<App />);

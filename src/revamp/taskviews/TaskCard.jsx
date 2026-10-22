@@ -26,10 +26,10 @@ export default function TaskCard({ t, drag, onOpen, assigneeName }) {
       onDragStart={drag ? (e) => dragStart(e, t.id) : undefined} onDragEnd={drag ? dragEnd : undefined}
       onClick={() => onOpen && onOpen(t.id)} tabIndex={0} role="button" onKeyDown={(e) => { if (e.key === "Enter") onOpen && onOpen(t.id); }}>
       <div className="tv-title">{t.high_priority ? <span className="tv-fire" title="High priority">!</span> : null}{t.title}</div>
-      {t.tags && t.tags.length > 0 && <div className="tv-tags">{t.tags.slice(0, 3).map((x) => <span key={x} className="tv-tag">{x}</span>)}</div>}
+      {t.tags && t.tags.length > 0 && <div className="tv-tags">{t.tags.slice(0, 3).map((x) => <span key={x} className="tag">{x}</span>)}</div>}
       {meta.length > 0 && <div className="tv-metas">{meta}</div>}
       {t.status === "progress" && <div className="tv-ong"><i /> Ongoing · <MiniTimer t={t} /></div>}
-      <div className="tv-foot"><span className={`tv-due ${due.cls}`}>{due.text}</span><span title={assigneeName || t.assignee}><Avatar name={t.assignee} /></span></div>
+      <div className="tv-foot"><span className={`dl ${due.cls}`}>{due.text}</span><span title={assigneeName || t.assignee}><Avatar name={t.assignee} /></span></div>
     </div>
   );
 }

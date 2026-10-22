@@ -35,7 +35,7 @@ export default function Calendar({ tasks, people, me, onOpen, onChange }) {
 
   return (
     <div className="tv tv-calendar">
-      <div className={`tv-cal-wrap${sel !== null ? " side" : ""}`}>
+      <div className={`tv-cal-wrap${sel !== null ? " has-day" : ""}`}>
         <div className="tv-panel">
           <div className="tv-cal-h">
             <b>{title}</b><span className="tv-grow" />

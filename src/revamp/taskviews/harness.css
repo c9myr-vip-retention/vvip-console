@@ -1,56 +1,8 @@
-/* dev harness only: a minimal copy of the mockup's base styles so the views render without the shell */
-
+/* DEV ONLY. Page-level tokens that src/App.jsx <Style> normally provides on :root (live console values). Component classes come from ../revamp.css. */
 :root{
-  /* tokens copied from the live console (src/App.jsx :root) - colours unchanged, layout only */
   --bg:#0B0E13; --panel:#12161E; --panel2:#171C26; --line:#232A37; --txt:#E7EAF0; --dim:#8B94A7;
-  --gold:#D4AF37; --accent:#E9E3D3; --on-accent:#15181E; --brand:var(--accent);
-  --neg:#F2727F; --pos:#4CC38A; --warn:#E39A4B; --slate:#94A3B8; --blue:#5F9AD6; --teal:#56B6C2; --amber:#FBBF24;
-  --band-act:#FF6A3D; --band-today:#E39A4B; --band-win:#B79A7C;
-  --radius:10px;
+  --gold:#D4AF37; --accent:#E9E3D3; --neg:#F2727F; --pos:#4CC38A;
 }
-
 *{box-sizing:border-box;margin:0;padding:0}
-
 html,body{height:100%}
-
-body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;line-height:1.4;font-variant-numeric:tabular-nums}
-
-button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-
-input,select,textarea{font:inherit;color:inherit}
-
-.mono{font-family:'IBM Plex Mono',monospace}
-
-.dim{color:var(--dim)}
- .pos{color:var(--pos)}
- .neg{color:var(--neg)}
-
-.av{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;background:var(--panel2);border:1px solid var(--line);flex:none}
-
-
-.btn{padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:var(--panel);font-weight:500;white-space:nowrap}
-
-.btn:hover{background:var(--panel2)}
-
-.btn.pri{background:var(--brand);border-color:var(--brand);color:var(--on-accent);font-weight:600}
-
-.btn.pri:hover{filter:brightness(1.08)}
-
-.btn.gold{background:var(--gold);border-color:var(--gold);color:#1a1405;font-weight:600}
-
-.btn.sm{padding:4px 9px;font-size:12px}
-
-.btn.danger{color:var(--neg)}
-
-.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:2px}
-
-.seg button{padding:5px 12px;border-radius:6px;color:var(--dim);font-weight:500;white-space:nowrap}
-
-.seg button.on{background:var(--panel2);color:var(--txt);box-shadow:0 0 0 1px var(--line) inset}
-
-.input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 11px;outline:none}
-
-.btn.on{background:color-mix(in srgb,var(--brand) 10%,var(--panel));border-color:var(--brand)}
-
-.btn:disabled{opacity:.45;cursor:not-allowed}
-#toasts{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);display:grid;gap:6px}#toasts .t{background:#E7EAF0;color:#15181E;padding:8px 14px;border-radius:8px}
+body{background:var(--bg);color:var(--txt)}
