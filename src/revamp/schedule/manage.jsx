@@ -1,8 +1,9 @@
-// Admin "Manage" dialog for the Schedule page: shift times (the Quick fill list) and deleting many schedule items at once.
+// Admin "Manage" dialog for the Schedule page: schedule types (rename, recolour, delete), deleting many items at once, and shift times (hidden while shifts live in the HR portal).
 import React, { useEffect, useState } from "react";
 import { Modal, Select, Seg, toast } from "../ui";
 import { api } from "./api.js";
-import { addDays, addMonths, fmtD, mondayOf, monthStart, timeOptionsFor, todayMyt } from "./logic.js";
+import { addDays, addMonths, fmtD, HIDE_SHIFTS, mondayOf, monthStart, timeOptionsFor, todayMyt } from "./logic.js";
+import { SWATCHES } from "./forms.jsx";
 
 const timeOpts = (...v) => timeOptionsFor(...v).filter((o) => o.value !== "");
 const over = (s, e) => s && e && e <= s;
@@ -119,13 +120,61 @@ function DeleteItems({ types, onDone }) {
   );
 }
 
-export function ManageModal({ types, shifts, tab0 = "shifts", onShifts, onClose, onDeleted }) {
-  const [tab, setTab] = useState(tab0);
+function TypeRow({ t, onChanged }) {
+  const [f, setF] = useState({ name: t.name, color: t.color }), [busy, setBusy] = useState(false), [err, setErr] = useState(""), [ask, setAsk] = useState(null);
+  const dirty = f.name.trim() !== t.name || f.color.toLowerCase() !== t.color.toLowerCase();
+  const swatches = SWATCHES.some((c) => c.toLowerCase() === t.color.toLowerCase()) ? SWATCHES : [t.color, ...SWATCHES];
+  const save = async () => {
+    setBusy(true); setErr("");
+    try { const r = await api.updateType(t.key, f); toast(`Saved "${r.type.name}"`); onChanged(); } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  const askDelete = async () => { setErr(""); try { setAsk((await api.deleteType(t.key, { preview: true })).items); } catch (e) { setErr(e.message); } };
+  const del = async () => {
+    setBusy(true);
+    try { await api.deleteType(t.key, {}); toast(`Deleted "${t.name}"`); onChanged(); } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return (
+    <div className="ent">
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(140px,1.4fr) auto auto auto", gap: 10, alignItems: "end" }}>
+        <label>Name<input className="input" value={f.name} maxLength={40} onChange={(e) => setF({ ...f, name: e.target.value })} /></label>
+        <div className="chiprow" role="group" aria-label="Colour">
+          {swatches.map((c) => <button key={c} type="button" className={"swatch" + (c.toLowerCase() === f.color.toLowerCase() ? " on" : "")} style={{ background: c }} onClick={() => setF({ ...f, color: c })} aria-label={c} />)}
+        </div>
+        <button className="btn pri" disabled={busy || !dirty} onClick={save}>Save</button>
+        <button className="btn danger" disabled={busy} onClick={askDelete}>Delete</button>
+      </div>
+      {ask !== null && (
+        <div className="ent" style={{ marginTop: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ marginRight: "auto" }}>Delete "{t.name}"{ask ? ` and its ${ask} item${ask === 1 ? "" : "s"} on the board` : ""}? This cannot be undone from the board.</span>
+          <button className="btn" onClick={() => setAsk(null)}>Keep it</button>
+          <button className="btn danger" disabled={busy} onClick={del}>Yes, delete</button>
+        </div>
+      )}
+      {err && <div className="neg" style={{ marginTop: 6 }}>{err}</div>}
+    </div>
+  );
+}
+
+function Types({ types, onChanged }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div className="dim">Rename a schedule type, change its colour, or delete it. Deleting a type also removes every item of that type from the board, and you are told how many first. Use “+ New schedule type” on the page to add one.</div>
+      {types.map((t) => <TypeRow key={t.key + t.name + t.color} t={t} onChanged={onChanged} />)}
+      {!types.length && <div className="dim">No schedule types.</div>}
+    </div>
+  );
+}
+
+export function ManageModal({ types, shifts, tab0, onShifts, onClose, onDeleted, onTypes }) {
+  const tabs = [{ value: "types", label: "Types" }, ...(HIDE_SHIFTS ? [] : [{ value: "shifts", label: "Shift times" }]), { value: "delete", label: "Delete items" }];
+  const [tab, setTab] = useState(tab0 || tabs[0].value);
   return (
     <Modal title="Manage schedule" onClose={onClose} width="min(760px,95vw)" footer={<button className="btn" onClick={onClose}>Close</button>}>
       <div className="sch-modal-body" style={{ display: "grid", gap: 14 }}>
-        <Seg value={tab} onChange={setTab} options={[{ value: "shifts", label: "Shift times" }, { value: "delete", label: "Delete items" }]} />
-        {tab === "shifts" ? <ShiftTimes shifts={shifts} onChange={onShifts} /> : <DeleteItems types={types} onDone={onDeleted} />}
+        <Seg value={tab} onChange={setTab} options={tabs} />
+        {tab === "types" ? <Types types={types} onChanged={onTypes} />
+          : tab === "shifts" ? <ShiftTimes shifts={shifts} onChange={onShifts} />
+          : <DeleteItems types={types} onDone={onDeleted} />}
       </div>
     </Modal>
   );

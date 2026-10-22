@@ -66,6 +66,12 @@ export const TIME_OPTIONS = (() => {
 })();
 export const timeOptionsFor = (...vals) => { const o = [...TIME_OPTIONS]; for (const v of vals) if (v && !o.some((x) => x.value === v)) o.splice(1, 0, { value: v, label: v }); return o; };
 
+/** Shifts live in the HR portal now, so every shift screen is hidden. Set to false to bring them back (Roster, shift times, swaps, "on duty now"). */
+export const HIDE_SHIFTS = true;
+
+/** While shifts are hidden, the shift-swap permissions are hidden from the role screens too. */
+export const hiddenPerm = (key) => HIDE_SHIFTS && String(key).startsWith("schedule.swap");
+
 /** Shift times used until the Worker sends the admin-managed list (and by older Workers that do not send one). */
 export const DEFAULT_SHIFTS = [
   { key: "am", name: "Morning", start_time: "09:00", end_time: "17:00" },

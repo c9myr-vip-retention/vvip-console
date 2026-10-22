@@ -575,3 +575,11 @@
 .rv .acc-tbl td{padding:8px 12px;border-top:1px solid var(--line);vertical-align:middle}
 .rv .acc-new{display:grid;grid-template-columns:1.2fr 1.2fr 1fr .8fr auto;gap:10px;align-items:center}
 @media (max-width:900px){.rv .acc-new{grid-template-columns:1fr 1fr}}
+.rv .rl-rank{display:flex;align-items:center;gap:4px;padding:6px 8px 6px 4px}
+.rv .rl-pick{display:flex;align-items:center;gap:8px;flex:1;min-width:0;background:none;border:0;color:inherit;font:inherit;text-align:left;padding:4px 4px 4px 8px;cursor:pointer}
+.rv .rl-n{width:20px;flex:none}
+.rv .rl-name{display:grid;gap:2px;min-width:0}
+.rv .rl-name .dim{font-size:12px}
+.rv .rl-arrow{width:26px;height:26px;flex:none;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);cursor:pointer;font:inherit;line-height:1;padding:0}
+.rv .rl-arrow:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.rv .rl-arrow:disabled{opacity:.3;cursor:default}

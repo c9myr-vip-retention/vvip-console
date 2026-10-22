@@ -101,6 +101,18 @@ export const addScheduleType = ({ name, color }) => {
   const t = { key: name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + nid++, name, color, builtin: 0 };
   types = [...types, t]; return wait({ type: t });
 };
+export const updateScheduleType = (key, b) => {
+  if (!admin()) return fail("Admin only", 403);
+  const t = types.find((x) => x.key === key); if (!t) return fail("Schedule type not found", 404);
+  if (b.name !== undefined && types.some((x) => x.key !== key && x.name.toLowerCase() === String(b.name).trim().toLowerCase())) return fail("A schedule type with that name already exists", 409);
+  Object.assign(t, { name: b.name === undefined ? t.name : String(b.name).trim(), color: b.color || t.color }); return wait({ type: t });
+};
+export const deleteScheduleType = (key, b) => {
+  if (!admin()) return fail("Admin only", 403);
+  const n = items.filter((i) => i.type_key === key).length;
+  if (b && b.preview) return wait({ items: n });
+  types = types.filter((t) => t.key !== key); items = items.filter((i) => i.type_key !== key); return wait({ ok: true, items: n });
+};
 export const requestSwap = (id, note) => {
   const it = items.find((i) => i.id === id);
   if (!it) return fail("Schedule item not found", 404);

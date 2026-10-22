@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Avatar } from "../ui";
 import { api } from "../schedule/api.js";
-import { addDays, nowLabel, nowMinutes, occursOn, onDuty, todayMyt } from "../schedule/logic.js";
+import { HIDE_SHIFTS, addDays, nowLabel, nowMinutes, occursOn, onDuty, todayMyt } from "../schedule/logic.js";
 
 const NA = <span className="dim" title="Tracking not built yet">NA</span>;
 const mins = (t) => { if (!t) return null; const [h, m] = t.split(":"); return Number(h) * 60 + Number(m); };
@@ -30,6 +30,7 @@ export default function DashStaff({ viewTeam }) {
   useEffect(() => { api.people().then((r) => setPeople(r.people || []), () => setPeople([])); }, []);
   useEffect(() => {
     let live = true;
+    if (HIDE_SHIFTS) { setItems([]); return undefined; }                  // shifts live in the HR portal: nothing to read here
     api.schedule(addDays(today, -1), today).then((r) => { if (live) { setItems(r.items || []); setErr(""); } }, (e) => { if (live) { setItems([]); setErr(e.message || "Could not read the schedule"); } });
     return () => { live = false; };
   }, [tick, today]);
@@ -37,7 +38,7 @@ export default function DashStaff({ viewTeam }) {
 
   const agents = useMemo(() => (people || []).filter((p) => p.role === "agent" && p.team === viewTeam).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const nOn = rows.filter((r) => r.on).length;
   const needle = q.trim().toLowerCase();
   const shown = rows.filter((r) => (pick === "all" || (pick === "on") === r.on) && (!needle || r.u.toLowerCase().includes(needle)))
@@ -56,18 +57,18 @@ export default function DashStaff({ viewTeam }) {
         <div>
           <div className="dim dst-eyebrow">RIGHT NOW · GMT+8 · {nowLabel()}</div>
           <h2 style={{ margin: "2px 0 0" }}>Live board <span className="dim" style={{ fontSize: 13, fontWeight: 400 }}>· Team {viewTeam}</span></h2>
-          <div className="dim">Who is on shift now, from the Schedule. Clock-in and chat status come later.</div>
+          <div className="dim">{HIDE_SHIFTS ? "Shift times live in the HR portal. Shift, clock-in and chat status come later." : "Who is on shift now, from the Schedule. Clock-in and chat status come later."}</div>
         </div>
         <span className="grow" />
         <input className="input" placeholder="Search staff…" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 190 }} aria-label="Search staff" />
       </div>
       <div className="dst-chips">
         <Chip id="all" n={rows.length} label="Tracked" />
-        <Chip id="on" n={nOn} label="On shift now" />
+        <Chip id="on" n={nOn} label="On shift now" na={HIDE_SHIFTS} />
         <Chip id="acc" label="Accepting" na />
         <Chip id="nacc" label="Not accepting" na />
         <Chip id="viol" label="In violation now" na />
-        <Chip id="off" n={rows.length - nOn} label="Offline" />
+        <Chip id="off" n={rows.length - nOn} label="Offline" na={HIDE_SHIFTS} />
       </div>
       {err && <div className="banner warn">{err}</div>}
       {people === null || items === null ? <div className="dim" style={{ padding: 10 }}>Loading…</div>

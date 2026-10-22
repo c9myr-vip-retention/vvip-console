@@ -1,22 +1,25 @@
-// Schedule. One board for shifts, reload events, meetings, maintenance, reports, training and any custom type.
+// Schedule. One board for reload events, meetings, maintenance, reports, training and any custom type. (Shifts live in the HR portal: every
+// shift screen is hidden while HIDE_SHIFTS is true in ../schedule/logic.js.)
 // Everyone reads it (week, lanes, month). Admin adds items for many dates and people at once, edits, drags one-offs to another day,
 // manages types and decides swap requests. An agent sees own shifts highlighted and can request a swap on a shift they are on.
 // Repeats are stored once by the Worker; this page expands them (see ../schedule/logic.js).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, MultiSelect, Select, Seg, toast } from "../ui";
+import { BRAND_ORDER } from "../tokens.js";
 import { api } from "../schedule/api.js";
 import { can } from "../perms.js";
 import { AddModal, SwapsModal, TypeModal, ViewModal } from "../schedule/forms.jsx";
 import { ManageModal } from "../schedule/manage.jsx";
-import { GroupsModal } from "../schedule/groups.jsx";
+import { BulkModal } from "../schedule/bulk.jsx";
 import { Lanes, Month, WeekBoard } from "../schedule/views.jsx";
 import Roster from "../schedule/roster.jsx";
 import {
-  DEFAULT_SHIFTS, addDays, addMonths, byTime, expand, fmtD, mondayOf, monthLabel, monthStart, nowLabel, nowMinutes, onDuty, todayMyt, weekLabel,
+  DEFAULT_SHIFTS, HIDE_SHIFTS, addDays, addMonths, byTime, expand, fmtD, mondayOf, monthLabel, monthStart, nowLabel, nowMinutes, onDuty, todayMyt, weekLabel,
 } from "../schedule/logic.js";
 import "../schedule/schedule.css";
 
-const VIEWS = [{ value: "week", label: "Week" }, { value: "lanes", label: "Lanes" }, { value: "month", label: "Month" }, { value: "roster", label: "Roster" }];
+const VIEWS = [{ value: "week", label: "Week" }, { value: "lanes", label: "Lanes" }, { value: "month", label: "Month" }, { value: "roster", label: "Roster" }].filter((v) => !(HIDE_SHIFTS && v.value === "roster"));
+const noShift = (list, key) => (HIDE_SHIFTS ? list.filter((x) => (x[key] || x.key) !== "shift") : list);
 const getPref = (k, d) => { try { return localStorage.getItem("revamp_sched_" + k) || d; } catch { return d; } };
 const setPref = (k, v) => { try { localStorage.setItem("revamp_sched_" + k, v); } catch { /* storage blocked: the page still works */ } };
 
@@ -25,7 +28,7 @@ export default function Schedule({ ctx }) {
   api.setMe(ctx?.me);
   const today = todayMyt();
 
-  const [view, setView] = useState(() => (["week", "lanes", "month", "roster"].includes(getPref("view", "")) ? getPref("view", "week") : "week"));
+  const [view, setView] = useState(() => (VIEWS.some((v) => v.value === getPref("view", "")) ? getPref("view", "week") : "week"));
   const [anchor, setAnchor] = useState(today);
   const [hidden, setHidden] = useState([]);                 // type keys switched off in the filter
   const [scope, setScope] = useState("all");                // 'all' | 'mine'
@@ -33,7 +36,7 @@ export default function Schedule({ ctx }) {
   const [state, setState] = useState({ loading: true, error: "" });
   const [people, setPeople] = useState([]);
   const [openSwaps, setOpenSwaps] = useState(0);
-  const [modal, setModal] = useState(null);                 // {kind:'add'|'edit'|'view'|'type'|'swaps'|'manage'|'groups', ...}
+  const [modal, setModal] = useState(null);                 // {kind:'add'|'edit'|'view'|'type'|'swaps'|'manage'|'bulk', ...}
   const [tick, setTick] = useState(0);
   const reload = useCallback(() => setTick((n) => n + 1), []);
   const seq = useRef(0);
@@ -52,12 +55,12 @@ export default function Schedule({ ctx }) {
     const n = ++seq.current;
     setState((s) => ({ ...s, loading: true, error: "" }));
     api.schedule(fetchFrom, fetchTo).then(
-      (r) => { if (n === seq.current) { setData({ types: r.types || [], items: r.items || [], my_swaps: r.my_swaps || [], shifts: r.shifts || DEFAULT_SHIFTS }); setState({ loading: false, error: "" }); } },
+      (r) => { if (n === seq.current) { setData({ types: noShift(r.types || [], "key"), items: noShift(r.items || [], "type_key"), my_swaps: r.my_swaps || [], shifts: r.shifts || DEFAULT_SHIFTS }); setState({ loading: false, error: "" }); } },
       (e) => { if (n === seq.current) setState({ loading: false, error: e.message || "Could not load the schedule" }); },
     );
   }, [fetchFrom, fetchTo, tick]);
   useEffect(() => { if (admin) api.people().then((r) => setPeople(r.people || []), () => {}); }, [admin]);
-  useEffect(() => { if (canSwaps) api.swaps().then((r) => setOpenSwaps((r.swaps || []).filter((s) => s.status === "open").length), () => {}); }, [canSwaps, tick]);
+  useEffect(() => { if (canSwaps && !HIDE_SHIFTS) api.swaps().then((r) => setOpenSwaps((r.swaps || []).filter((s) => s.status === "open").length), () => {}); }, [canSwaps, tick]);
 
   const types = data.types, items = data.items;
   const visibleTypes = types.filter((t) => !hidden.includes(t.key));
@@ -112,49 +115,50 @@ export default function Schedule({ ctx }) {
         {!atNow && <button className="btn sm" onClick={() => setAnchor(today)}>{view === "month" ? "This month" : "This week"}</button>}
         {admin && (
           <>
-            <button className="btn sm" onClick={() => setModal({ kind: "swaps" })}>Swap requests{openSwaps ? ` · ${openSwaps}` : ""}</button>
+            {!HIDE_SHIFTS && canSwaps && <button className="btn sm" onClick={() => setModal({ kind: "swaps" })}>Swap requests{openSwaps ? ` · ${openSwaps}` : ""}</button>}
             {view === "week" && <button className="btn sm" onClick={copyLastWeek}>Copy last week</button>}
             <button className="btn sm" onClick={() => setModal({ kind: "type" })}>+ New schedule type</button>
-            <button className="btn sm" onClick={() => setModal({ kind: "groups" })}>Shift groups</button>
-            <button className="btn sm" onClick={() => setModal({ kind: "manage" })}>Manage shifts &amp; delete</button>
+            <button className="btn sm" onClick={() => setModal({ kind: "bulk" })}>Bulk schedule</button>
+            <button className="btn sm" onClick={() => setModal({ kind: "manage" })}>{HIDE_SHIFTS ? "Manage types & delete" : "Manage shifts & delete"}</button>
             <button className="btn pri" onClick={() => setModal({ kind: "add", date: view === "month" ? today : days.includes(today) ? today : mon })}>+ Add to schedule</button>
           </>
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: 14 }}>
+      {!HIDE_SHIFTS && <div className="card" style={{ marginBottom: 14 }}>
         <div className="body sch-duty">
           <b>On duty now · {nowLabel()}</b>
           {duty.length ? duty.map((s) => <span key={s.id} className="who"><Avatar name={s.who[0]} />{s.who[0]} <span className="pill np" style={{ "--c": (types.find((t) => t.key === "shift") || {}).color || "#5F9AD6" }}>{s.title}</span></span>) : <span className="dim">nobody</span>}
           <span className="grow" />
           {todayList.length > 0 && <span className="dim">Today: {todayList.slice(0, 3).map((o) => `${o.item.start_time || "all day"} ${o.item.title}`).join(" · ")}</span>}
         </div>
-      </div>
+      </div>}
 
       <div className="sch-tools">
         <MultiSelect label="Schedules" value={picked} onChange={onTypes} options={typeOpts} />
         <Select className="sm" value={scope} onChange={setScope} style={{ width: "auto", minWidth: 190 }} options={[{ value: "all", label: "Whole team" }, { value: "mine", label: "Only items with my name" }]} />
         <span className="dim sch-hint">
-          {admin ? "Click an item to edit it. Drag a one-off item to another day to move it. “+ Add to schedule” takes several dates and several entries at once."
-            : "Read-only. Items with your name are highlighted. Open one of your shifts to request a swap."}
+          {admin ? "Click an item to edit it. Drag a one-off item to another day to move it. “+ Add to schedule” takes several dates and entries at once; “Bulk schedule” sets brand events for a whole month."
+            : HIDE_SHIFTS ? "Read-only." : "Read-only. Items with your name are highlighted. Open one of your shifts to request a swap."}
         </span>
       </div>
 
       {state.error && <div className="card"><div className="body neg">{state.error}</div></div>}
       {!state.error && state.loading && !types.length && <div className="dim" style={{ padding: 14 }}>Loading…</div>}
+      {!state.error && !state.loading && !types.length && <div className="card"><div className="body dim">No schedule types yet. {admin ? "Add one with “+ New schedule type”." : "Ask an admin to add one."}</div></div>}
       {types.length > 0 && !state.error && (
-        view === "week" ? <WeekBoard days={days} today={today} occs={occs} types={types} me={me} admin={admin} hideShifts={hidden.includes("shift")} onOpen={open} onAdd={(d) => setModal({ kind: "add", date: d })} onMove={move} />
+        view === "week" ? <WeekBoard days={days} today={today} occs={occs} types={types} me={me} admin={admin} hideShifts={HIDE_SHIFTS || hidden.includes("shift")} onOpen={open} onAdd={(d) => setModal({ kind: "add", date: d })} onMove={move} />
         : view === "lanes" ? <Lanes days={days} today={today} occs={occs} types={visibleTypes} me={me} admin={admin} onOpen={open} onAdd={(d, t) => setModal({ kind: "add", date: d, type: t })} onMove={move} />
         : view === "roster" ? <Roster days={days} today={today} items={items} people={people} shifts={data.shifts} admin={admin} me={me} onChanged={reload} />
         : <Month month={monthFirst} today={today} occs={occs} types={types} me={me} onOpen={open} onDay={(d) => { setAnchor(d); setV("week"); }} />
       )}
 
-      {modal?.kind === "add" && <AddModal types={types} people={people} shifts={data.shifts} date0={modal.date} type0={modal.type} onClose={() => setModal(null)} onDone={done} />}
-      {modal?.kind === "edit" && <AddModal types={types} people={people} shifts={data.shifts} item={modal.item} onClose={() => setModal(null)} onDone={done} />}
+      {modal?.kind === "add" && <AddModal types={types} people={people} shifts={HIDE_SHIFTS ? [] : data.shifts} date0={modal.date} type0={modal.type} onClose={() => setModal(null)} onDone={done} />}
+      {modal?.kind === "edit" && <AddModal types={types} people={people} shifts={HIDE_SHIFTS ? [] : data.shifts} item={modal.item} onClose={() => setModal(null)} onDone={done} />}
       {modal?.kind === "view" && <ViewModal occ={modal.occ} types={types} me={me} canEdit={canEdit} swapState={swapState(modal.occ.item.id)} onClose={() => setModal(null)} onSwapped={() => done(null)} />}
       {modal?.kind === "type" && <TypeModal onClose={() => setModal(null)} onCreated={() => done(null)} />}
-      {modal?.kind === "manage" && <ManageModal types={types} shifts={data.shifts} onShifts={(l) => setData((d) => ({ ...d, shifts: l }))} onClose={() => setModal(null)} onDeleted={reload} />}
-      {modal?.kind === "groups" && <GroupsModal people={people} shifts={data.shifts} onClose={() => setModal(null)} onDone={done} />}
+      {modal?.kind === "manage" && <ManageModal types={types} shifts={data.shifts} onShifts={(l) => setData((d) => ({ ...d, shifts: l }))} onClose={() => setModal(null)} onDeleted={reload} onTypes={reload} />}
+      {modal?.kind === "bulk" && <BulkModal types={types} brands={[...new Set([...(ctx?.teamBrands || []), ...BRAND_ORDER])]} onClose={() => setModal(null)} onDone={done} />}
       {modal?.kind === "swaps" && <SwapsModal onClose={() => setModal(null)} onChanged={reload} />}
     </>
   );

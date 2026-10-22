@@ -4,7 +4,7 @@ import { Avatar, BrandBadge, Modal, MultiSelect, Select, toast } from "../ui";
 import { brandColor, BRAND_ORDER } from "../tokens.js";
 import { api } from "./api.js";
 import {
-  DAYS, DEFAULT_SHIFTS, REPEAT_OPTIONS, TIME_OPTIONS, addDays, addMonths, dayNum, fmtD, fmtDow, monthGrid, monthLabel, monthStart,
+  DAYS, DEFAULT_SHIFTS, HIDE_SHIFTS, REPEAT_OPTIONS, TIME_OPTIONS, addDays, addMonths, dayNum, fmtD, fmtDow, monthGrid, monthLabel, monthStart,
   quickDates, timeOptionsFor, timeStr, todayMyt,
 } from "./logic.js";
 
@@ -57,7 +57,7 @@ function EntryForm({ e, i, n, types, people, shifts, edit, onChange, onRemove })
     <div className="ent">
       <div className="ent-h">
         <b>{edit ? "Entry" : `Entry ${i + 1}`}</b><span className="grow" />
-        {!edit && (
+        {!edit && !HIDE_SHIFTS && shifts.length > 0 && (
           <Select value="" placeholder="Quick fill a shift…" onChange={quick} style={{ width: 190 }}
             options={[...shifts.map((s) => ({ value: s.key, label: `${s.name} ${s.start_time}–${s.end_time}` })), { value: "OFF", label: "Day off" }]} />
         )}
@@ -205,7 +205,7 @@ export function ViewModal({ occ, types, me, canEdit, swapState, onClose, onSwapp
   );
 }
 
-const SWATCHES = ["#E11D48", "#F97316", "#EAB308", "#14B8A6", "#0EA5E9", "#A855F7", "#EC4899", "#84CC16"];
+export const SWATCHES = ["#E11D48", "#F97316", "#EAB308", "#14B8A6", "#0EA5E9", "#A855F7", "#EC4899", "#84CC16"];
 export function TypeModal({ onClose, onCreated }) {
   const [name, setName] = useState(""), [color, setColor] = useState(SWATCHES[0]), [busy, setBusy] = useState(false), [err, setErr] = useState("");
   const save = async () => {
