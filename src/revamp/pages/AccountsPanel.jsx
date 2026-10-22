@@ -19,8 +19,11 @@ function legacySet(u, perms) {
 /** Moves every "old settings" account onto the built-in role named in its old role, so edits to that role apply to it. */
 function AdoptModal({ users, roles, perms, onClose, onDone }) {
   const [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  const olds = [...new Set(users.filter((u) => !u.role_key).map((u) => u.role || "viewer"))];            // the old roles still in use: admin, agent, viewer
+  // which role each old group moves to: the role of the same name when it still exists, else the first role there is
+  const [target, setTarget] = useState(() => Object.fromEntries(olds.map((o) => [o, (roles.find((r) => r.key === o) || roles[0] || {}).key])));
   const rows = users.filter((u) => !u.role_key).map((u) => {
-    const role = roles.find((r) => r.key === u.role) || roles.find((r) => r.key === "viewer");
+    const role = roles.find((r) => r.key === target[u.role || "viewer"]) || roles[0];
     const now = legacySet(u, perms), next = new Set(role ? role.perms : []);
     const label = (k) => (perms.find((p) => p.key === k) || {}).label || k;
     return { u, role, gain: [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label), lose: [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label) };
@@ -33,9 +36,15 @@ function AdoptModal({ users, roles, perms, onClose, onDone }) {
   };
   return (
     <Modal title="Move old-settings accounts onto roles" onClose={onClose} width="min(640px,94vw)"
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn pri" disabled={busy || !rows.length} onClick={go}>Move {rows.length} account{rows.length === 1 ? "" : "s"}</button></>}>
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn pri" disabled={busy || !rows.length || !roles.length} onClick={go}>Move {rows.length} account{rows.length === 1 ? "" : "s"}</button></>}>
       <div style={{ display: "grid", gap: 12 }}>
-        <div>Each account joins the built-in role that matches its old role (Admin, Agent or Viewer), so any change you make to that role applies to it from then on.</div>
+        <div>Each account joins a role, so any change you make to that role applies to it from then on. Choose the role for each old group:</div>
+        {olds.map((o) => (
+          <label key={o} style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: 10, alignItems: "center", flexDirection: "row" }}>
+            <span>Old <b>{o}</b> accounts</span>
+            <Select value={target[o] || ""} onChange={(v) => setTarget((t) => ({ ...t, [o]: v }))} options={roles.map((r) => ({ value: r.key, label: r.name }))} />
+          </label>
+        ))}
         {differ.length ? (
           <div>
             <b>{differ.length} account{differ.length === 1 ? "" : "s"} would change:</b>

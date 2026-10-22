@@ -3,9 +3,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Avatar } from "../ui";
 import { api } from "../schedule/api.js";
+import { tapi, useNow, fmtElapsed, CheckProg } from "../tasks/common.jsx";
 import { HIDE_SHIFTS, addDays, nowLabel, nowMinutes, occursOn, onDuty, todayMyt } from "../schedule/logic.js";
 
 const NA = <span className="dim" title="Tracking not built yet">NA</span>;
+const parseUtc = (s) => Date.parse(String(s).replace(" ", "T") + "Z");
+const liveSec = (o) => (o.spent_seconds || 0) + (o.started_at ? Math.max(0, (Date.now() - parseUtc(o.started_at)) / 1000) : 0);
 const mins = (t) => { if (!t) return null; const [h, m] = t.split(":"); return Number(h) * 60 + Number(m); };
 
 /** What the schedule says about one person right now: { tone, text }. */
@@ -27,7 +30,14 @@ export default function DashStaff({ viewTeam }) {
   const [tick, setTick] = useState(0);
   const today = todayMyt(), minute = nowMinutes();
 
+  const [ongoing, setOngoing] = useState({});            // username -> the task they have running right now
   useEffect(() => { api.people().then((r) => setPeople(r.people || []), () => setPeople([])); }, []);
+  useEffect(() => {
+    let live = true;
+    tapi.workload().then((r) => { if (live) setOngoing(Object.fromEntries((r.people || []).filter((x) => x.ongoing).map((x) => [x.username, x.ongoing]))); }, () => { if (live) setOngoing({}); });
+    return () => { live = false; };
+  }, [tick]);
+  useNow(Object.keys(ongoing).length > 0);                 // the timers tick once a second
   useEffect(() => {
     let live = true;
     if (HIDE_SHIFTS) { setItems([]); return undefined; }                  // shifts live in the HR portal: nothing to read here
@@ -39,10 +49,11 @@ export default function DashStaff({ viewTeam }) {
   const agents = useMemo(() => (people || []).filter((p) => p.role === "agent" && p.team === viewTeam).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const nOn = rows.filter((r) => r.on).length;
+  const nOn = rows.filter((r) => r.on).length, nTask = rows.filter((r) => ongoing[r.u]).length;
   const needle = q.trim().toLowerCase();
-  const shown = rows.filter((r) => (pick === "all" || (pick === "on") === r.on) && (!needle || r.u.toLowerCase().includes(needle)))
-    .sort((a, b) => (b.on - a.on) || a.u.localeCompare(b.u));
+  const match = (r) => (pick === "all" ? true : pick === "task" ? !!ongoing[r.u] : (pick === "on") === r.on);
+  const shown = rows.filter((r) => match(r) && (!needle || r.u.toLowerCase().includes(needle)))
+    .sort((a, b) => (!!ongoing[b.u] - !!ongoing[a.u]) || (b.on - a.on) || a.u.localeCompare(b.u));
 
   const Chip = ({ id, n, label, na }) => (
     <button type="button" className={"dst-chip" + (pick === id ? " on" : "") + (na ? " na" : "")} disabled={na} aria-pressed={pick === id}
@@ -64,6 +75,7 @@ export default function DashStaff({ viewTeam }) {
       </div>
       <div className="dst-chips">
         <Chip id="all" n={rows.length} label="Tracked" />
+        <Chip id="task" n={nTask} label="On a task now" />
         <Chip id="on" n={nOn} label="On shift now" na={HIDE_SHIFTS} />
         <Chip id="acc" label="Accepting" na />
         <Chip id="nacc" label="Not accepting" na />
@@ -86,6 +98,13 @@ export default function DashStaff({ viewTeam }) {
                   <span className={"pill np dst-sh " + r.shift.tone}>{r.shift.text}</span>
                 </div>
                 <div className="dst-pills"><span className="dim dst-tag">Clocked in: {NA}</span></div>
+                {ongoing[r.u] ? (
+                  <div className="dst-task on">
+                    <div className="dim dst-tl">Ongoing task</div>
+                    <div className="dst-tt"><b title={ongoing[r.u].title}>{ongoing[r.u].title}</b><span className="timer mono">{fmtElapsed(liveSec(ongoing[r.u]))}</span></div>
+                    <CheckProg t={ongoing[r.u]} />
+                  </div>
+                ) : <div className="dst-task"><span className="dim">No ongoing task</span></div>}
               </div>
             ))}
           </div>

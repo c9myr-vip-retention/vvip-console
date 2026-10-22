@@ -5,9 +5,10 @@ import { Settings as LiveSettings, ActivityLog } from "../../App.jsx";
 import RecycleBin from "./RecycleBin.jsx";
 import AccountsPanel from "./AccountsPanel.jsx";
 import RolesPanel from "./RolesPanel.jsx";
+import TaskDataPanel from "./TaskDataPanel.jsx";
 import { can } from "../perms.js";
 
-const TABS = [["acc", "Accounts", "users.manage"], ["roles", "Roles & permissions", "users.manage"], ["log", "Activity log", "activity.view"], ["bin", "Recycle bin", "bin.manage"]];
+const TABS = [["acc", "Accounts", "users.manage"], ["roles", "Roles & permissions", "users.manage"], ["log", "Activity log", "activity.view"], ["bin", "Recycle bin", "bin.manage"], ["tdata", "Task data", "tasks.clear"]];
 
 export default function SettingsPage({ ctx }) {
   const [tab, setTab] = useState(() => { try { return sessionStorage.getItem("rv_set_tab") || "acc"; } catch (e) { return "acc"; } });
@@ -25,6 +26,7 @@ export default function SettingsPage({ ctx }) {
       {cur === "roles" && <RolesPanel />}
       {cur === "log" && <div className="rv-live"><ActivityLog viewTeam={ctx.viewTeam} /></div>}
       {cur === "bin" && <RecycleBin ctx={ctx} />}
+      {cur === "tdata" && <TaskDataPanel />}
     </>
   );
 }

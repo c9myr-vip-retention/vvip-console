@@ -583,3 +583,7 @@
 .rv .rl-arrow{width:26px;height:26px;flex:none;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--txt);cursor:pointer;font:inherit;line-height:1;padding:0}
 .rv .rl-arrow:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
 .rv .rl-arrow:disabled{opacity:.3;cursor:default}
+.rv .dst-task{border-top:1px solid var(--line);padding-top:8px;display:grid;gap:4px;min-width:0}
+.rv .dst-tl{font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+.rv .dst-tt{display:flex;gap:10px;align-items:center;min-width:0}
+.rv .dst-tt b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

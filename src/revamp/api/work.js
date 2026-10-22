@@ -49,6 +49,7 @@ export const work = {
   deleteScheduleItems: (b) => post("/api/work/schedule/items/bulk-delete", b),    // { type_key?, from?, to?, preview? } -> { count, repeating } | { deleted }
   addScheduleType: (b) => post("/api/work/schedule/types", b),
   updateScheduleType: (key, b) => post(`/api/work/schedule/types/${key}/update`, b),   // { name?, color? }
+  clearTasks: (b) => post("/api/work/tasks/clear", b),                                 // { preview: true } -> { counts }; { confirm: "CLEAR TASKS" } -> { cleared }
   deleteScheduleType: (key, b) => post(`/api/work/schedule/types/${key}/delete`, b),   // { preview? } -> { items }
   addShiftPreset: (b) => post("/api/work/schedule/shifts", b),                   // { name, start_time, end_time }
   updateShiftPreset: (key, b) => post(`/api/work/schedule/shifts/${key}/update`, b),

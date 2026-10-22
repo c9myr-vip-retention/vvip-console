@@ -1,5 +1,6 @@
 // Settings > Roles. Roles are ranked, most senior first (move them with the arrows). Make a role, name it, pick a starting point and switch any
-// function on or off. A role based on Admin, Agent or Viewer starts from that role AS IT IS NOW, so editing Agent changes every role based on it.
+// function on or off. Any role can be a template: a role that starts from another role either follows it (changes to the template also change
+// this role) or is a one-off copy. Every role can be deleted, built-in ones too (accounts on it are moved first).
 // One switch = one permission = one function. A switch that differs from the starting point is marked "changed". The Worker enforces all of it
 // (worker/perms.js, worker/roles.js); this page only edits it. Needs the users.manage permission.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -7,37 +8,49 @@ import { Modal, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
 import { hiddenPerm } from "../schedule/logic.js";
 
-// A built-in role starts from the fixed defaults; any other role starts from the built-in role it is based on, as it is now.
-const BASES_BUILTIN = [
-  { value: "admin", label: "Admin defaults" }, { value: "agent", label: "Agent defaults" },
-  { value: "viewer", label: "Viewer defaults" }, { value: "none", label: "Nothing (start empty)" },
-];
-const BASES = [
-  { value: "admin", label: "Same as the Admin role" }, { value: "agent", label: "Same as the Agent role" },
-  { value: "viewer", label: "Same as the Viewer role" }, { value: "none", label: "Nothing (start empty)" },
-];
-const baseLabel = (b) => (BASES.find((x) => x.value === b) || BASES[3]).label;
+const FIXED = { admin: "Admin", agent: "Agent", viewer: "Viewer" };           // the fixed starting sets built into the code
+/** What a role can start from: nothing, another role (a template), or a fixed default set when no role of that name is left. selfKey is left out. */
+function baseOptions(roles, selfKey) {
+  const out = [{ value: "none", label: "Nothing (start empty)" }];
+  for (const r of roles) if (r.key !== selfKey) out.push({ value: r.key, label: `Same as ${r.name}` });
+  for (const [k, n] of Object.entries(FIXED)) if (k === selfKey || !roles.some((r) => r.key === k)) out.push({ value: k, label: `Fixed ${n} defaults` });
+  return out;
+}
+const baseName = (roles, role) => (role.base === "none" ? "nothing" : (roles.find((r) => r.key === role.base && r.key !== role.key) || {}).name || (FIXED[role.base] ? `fixed ${FIXED[role.base]} defaults` : role.base));
 
 function Switch({ on, onChange, label, disabled }) {
   return <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled} className={"rl-sw" + (on ? " on" : "")} onClick={() => onChange(!on)}><span /></button>;
 }
 
-function NewRole({ onClose, onCreated }) {
-  const [name, setName] = useState(""), [base, setBase] = useState("agent"), [busy, setBusy] = useState(false), [err, setErr] = useState("");
+function NewRole({ roles, onClose, onCreated }) {
+  const [name, setName] = useState(""), [base, setBase] = useState(() => (roles.find((r) => r.key === "agent") || roles[0] || {}).key || "none");
+  const [copy, setCopy] = useState(false), [busy, setBusy] = useState(false), [err, setErr] = useState("");
   const save = async () => {
     if (!name.trim()) return setErr("Give the role a name");
     setBusy(true); setErr("");
-    try { const r = await work.createRole({ name: name.trim(), base }); toast(`Created "${r.role.name}"`); onCreated(r.role); }
+    try { const r = await work.createRole({ name: name.trim(), base, copy: copy && base !== "none" }); toast(`Created "${r.role.name}"`); onCreated(r.role); }
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
     <Modal title="New role" onClose={onClose} width="min(480px,94vw)" footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn pri" disabled={busy} onClick={save}>Create role</button></>}>
       <div style={{ display: "grid", gap: 14 }}>
         <label>Name<input className="input" autoFocus value={name} maxLength={30} placeholder="e.g. Supervisor, Team lead, Trainer" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} /></label>
-        <label>Start from
-          <Select value={base} onChange={setBase} options={BASES} />
-          <span className="dim" style={{ fontSize: 12 }}>The role begins with that set of permissions. You switch individual functions on or off after it is created.</span>
+        <label>Start from (any role works as a template)
+          <Select value={base} onChange={setBase} options={baseOptions(roles, "")} />
         </label>
+        {base !== "none" && (
+          <div style={{ display: "grid", gap: 8 }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "row" }}>
+              <input type="radio" name="rl-copy" className="chk" checked={!copy} onChange={() => setCopy(false)} />
+              <span><b>Keep in step with it.</b> <span className="dim">When that role changes, this role changes too, except for the switches you set on this role yourself.</span></span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "row" }}>
+              <input type="radio" name="rl-copy" className="chk" checked={copy} onChange={() => setCopy(true)} />
+              <span><b>Copy it once.</b> <span className="dim">Take its permissions as they are now. Later changes to that role do not reach this one.</span></span>
+            </label>
+          </div>
+        )}
+        <span className="dim" style={{ fontSize: 12 }}>You switch individual functions on or off after the role is created.</span>
         {err && <div className="neg">{err}</div>}
       </div>
     </Modal>
@@ -46,19 +59,22 @@ function NewRole({ onClose, onCreated }) {
 
 function DeleteRole({ role, others, onClose, onDeleted }) {
   const [to, setTo] = useState(""), [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  const held = role.assigned || 0;                       // accounts given this role (accounts on old settings are not moved)
   const go = async () => {
-    if (role.users && !to) return setErr("Choose a role to move them to");
+    if (held && !to) return setErr("Choose a role to move them to");
     setBusy(true); setErr("");
-    try { await work.deleteRole(role.key, role.users ? { move_to: to } : {}); toast(`Deleted "${role.name}"`); onDeleted(); }
+    try { await work.deleteRole(role.key, held ? { move_to: to } : {}); toast(`Deleted "${role.name}"`); onDeleted(); }
     catch (e) { setErr(e.message); setBusy(false); }
   };
   return (
     <Modal title={`Delete "${role.name}"?`} onClose={onClose} width="min(480px,94vw)" footer={<><button className="btn" onClick={onClose}>Keep it</button><button className="btn danger" disabled={busy} onClick={go}>Delete role</button></>}>
       <div style={{ display: "grid", gap: 12 }}>
-        {role.users > 0
-          ? <><div>{role.users} account{role.users === 1 ? " is" : "s are"} on this role. They move to another role and take its permissions.</div>
+        {role.builtin && <div className="dim">This is a built-in role. You can delete it; you can always make a role with the same name again.</div>}
+        {held > 0
+          ? <><div>{held} account{held === 1 ? " is" : "s are"} on this role. They move to another role and take its permissions.</div>
               <label>Move them to<Select value={to} onChange={setTo} placeholder="Choose a role" options={others.map((r) => ({ value: r.key, label: r.name }))} /></label></>
-          : <div>Nobody is on this role.</div>}
+          : <div>Nobody has been given this role.</div>}
+        {role.used_by > 0 && <div className="dim">{role.used_by} role{role.used_by === 1 ? " starts" : "s start"} from this one. {role.used_by === 1 ? "It keeps" : "They keep"} the permissions {role.used_by === 1 ? "it has" : "they have"} now.</div>}
         {err && <div className="neg">{err}</div>}
       </div>
     </Modal>
@@ -90,7 +106,7 @@ export default function RolesPanel() {
   const change = async (body, ok) => {
     try {
       const r = await work.updateRole(role.key, body); patch(r.role); if (ok) toast(ok);
-      if (role.builtin || body.base !== undefined) load(role.key);       // roles based on this one change with it: fetch them all again
+      if (role.builtin || role.used_by || body.base !== undefined) load(role.key);       // roles that follow this one change with it: fetch them all again
     } catch (e) { toast(e.message || "Could not save"); load(role.key); }
   };
   const move = async (r, dir) => {
@@ -124,7 +140,7 @@ export default function RolesPanel() {
             <button type="button" className="rl-pick" onClick={() => setSel(r.key)}>
               <span className="dim rl-n">{i + 1}.</span>
               <span className="rl-name"><b>{r.name}</b>
-                <span className="dim">{r.users} {r.users === 1 ? "person" : "people"} · {r.builtin ? "built in" : baseLabel(r.base).replace("Same as the ", "like ").replace(" role", "")}</span></span>
+                <span className="dim">{r.users} {r.users === 1 ? "person" : "people"} · {r.builtin && r.base === r.key ? "built in" : `from ${baseName(data.roles, r)}`}{r.used_by ? ` · ${r.used_by} based on it` : ""}</span></span>
             </button>
             <button type="button" className="rl-arrow" disabled={i === 0} aria-label={`Move ${r.name} up`} onClick={() => move(r, "up")}>↑</button>
             <button type="button" className="rl-arrow" disabled={i === data.roles.length - 1} aria-label={`Move ${r.name} down`} onClick={() => move(r, "down")}>↓</button>
@@ -138,13 +154,13 @@ export default function RolesPanel() {
           <div className="card"><div className="body rl-head">
             <label>Role name<input className="input" value={name} maxLength={30} onChange={(e) => setName(e.target.value)} onBlur={rename} onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }} /></label>
             <label>Starts from
-              <Select value={role.base} options={role.builtin ? BASES_BUILTIN : BASES} onChange={(v) => change({ base: v }, "Starting point changed")} />
+              <Select value={role.base} options={baseOptions(data.roles, role.key)} onChange={(v) => change({ base: v }, "Starting point changed")} />
             </label>
             <div className="rl-sum">
               <b className="mono">{onCount}</b> of {total} on{changed ? <> · <b className="mono">{changed}</b> changed from the starting point</> : " · same as the starting point"}
               <div className="rl-act">
                 <button className="btn sm" disabled={!changed} onClick={() => change({ reset: true }, "Back to the starting point")}>Reset to starting point</button>
-                {!role.builtin && <button className="btn sm danger" onClick={() => setModal({ kind: "delete" })}>Delete role</button>}
+                <button className="btn sm danger" onClick={() => setModal({ kind: "delete" })}>Delete role</button>
               </div>
             </div>
           </div></div>
@@ -173,7 +189,7 @@ export default function RolesPanel() {
         </div>
       )}
 
-      {modal && modal.kind === "new" && <NewRole onClose={() => setModal(null)} onCreated={(r) => { setModal(null); load(r.key); }} />}
+      {modal && modal.kind === "new" && <NewRole roles={data.roles} onClose={() => setModal(null)} onCreated={(r) => { setModal(null); load(r.key); }} />}
       {modal && modal.kind === "delete" && role && <DeleteRole role={role} others={data.roles.filter((r) => r.key !== role.key)} onClose={() => setModal(null)} onDeleted={() => { setModal(null); setSel(null); load(); }} />}
     </div>
   );

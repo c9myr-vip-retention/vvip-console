@@ -5,6 +5,7 @@ import { Dashboard as LiveDashboard, BRANDS, fmtK } from "../../App.jsx";
 import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
 import DashStaff from "./DashStaff.jsx";
+import { can } from "../perms.js";
 
 function BrandCards({ ctx }) {
   const { teamBrands, teamData, contacts, snap, health, goto } = ctx;
@@ -36,6 +37,7 @@ function BrandCards({ ctx }) {
 export default function Dashboard({ ctx }) {
   const { me, viewTeam, teamData, teamBrands, board, contacts, dates, isPast, readOnly, saveContact, clearContact, snap, health } = ctx;
   const staleList = (health || []).filter((h) => h.last_fed && h.last_fed !== snap).map((h) => h.brand).filter((b) => teamBrands.includes(b));
+  if (!can(me, "dashboard.view")) return <div className="card"><div className="body dim">The Dashboard needs the “See the admin Dashboard” permission.</div></div>;
   return (
     <>
       <div className="top"><h1>Dashboard</h1><span className="badge admin">Admin only</span></div>

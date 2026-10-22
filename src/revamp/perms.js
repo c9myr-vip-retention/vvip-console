@@ -16,12 +16,12 @@ export const canAny = (me, keys) => keys.some((k) => can(me, k));
 
 // Pages that need a permission. Anything not listed is open to everyone.
 const PAGE_PERM = {
-  dash: "teams.all", perf: "teams.all", assign: "assign.manage", flows: "flows.manage", tpl: "templates.manage", ana: "analytics.view",
-  bin: "bin.manage", set: ["users.manage", "activity.view", "bin.manage"],
+  dash: "dashboard.view", perf: "teams.all", assign: "assign.manage", flows: "flows.manage", tpl: "templates.manage", ana: "analytics.view",
+  bin: "bin.manage", set: ["users.manage", "activity.view", "bin.manage", "tasks.clear"],
 };
 // Admin pages added to an agent-style sidebar when the role holds the permission: [section, page key, label]
 const EXTRA = [
-  ["Daily work", "assign", "Assignments"], ["Work", "flows", "Flows"], ["Work", "tpl", "Templates"],
+  ["Overview", "dash", "Dashboard"], ["Daily work", "assign", "Assignments"], ["Work", "flows", "Flows"], ["Work", "tpl", "Templates"],
   ["Task insight", "ana", "Analytics"], ["Task insight", "bin", "Recycle bin"], ["Admin", "set", "Settings"],
 ];
 export const canOpen = (me, key) => { const p = PAGE_PERM[key]; return !p || (Array.isArray(p) ? canAny(me, p) : can(me, p)); };
@@ -34,7 +34,7 @@ export function navFor(me) {
     for (const [h, k, label] of EXTRA) {
       if (!canOpen(me, k)) continue;
       let sec = out.find(([x]) => x === h);
-      if (!sec) { sec = [h, []]; out.push(sec); }
+      if (!sec) { sec = [h, []]; if (h === "Overview") out.unshift(sec); else out.push(sec); }
       sec[1].push([k, label]);
     }
   }
