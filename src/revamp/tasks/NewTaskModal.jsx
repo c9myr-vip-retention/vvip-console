@@ -131,9 +131,16 @@ export default function NewTaskModal({ me, people = [], projects = [], initial =
               <Select value={me.username} options={assigneeOpts} disabled onChange={() => {}} />
             </label>
           )}
-          <div className="row2">
-            <label>Deadline<DatePick value={f.due_date} onChange={(v) => set("due_date", v)} placeholder="No deadline" /></label>
-            <label>Time<Select value={f.due_time} options={TIMES} onChange={(v) => set("due_time", v)} disabled={!f.due_date} /></label>
+          <div style={{ display: "grid", gap: 6 }}>
+            <div className="row2">
+              <label>Deadline<DatePick value={f.due_date} onChange={(v) => set("due_date", v)} placeholder="Always going" /></label>
+              <label>Time<Select value={f.due_time} options={TIMES} onChange={(v) => set("due_time", v)} disabled={!f.due_date} /></label>
+            </div>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", flexDirection: "row" }}>
+              <input type="checkbox" className="chk" checked={!f.due_date}
+                onChange={(e) => setF((x) => ({ ...x, due_date: e.target.checked ? "" : addDaysIso(todayMY(), 1), due_time: e.target.checked ? "" : x.due_time }))} />
+              <span><b>Always going</b> <span className="dim">· no deadline, never overdue, stays on the list until someone completes it</span></span>
+            </label>
           </div>
         </div>
         <div className="row2">

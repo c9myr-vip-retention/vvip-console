@@ -123,7 +123,7 @@ export default function Gantt({ tasks, people, me, onOpen, onChange, projects: p
       </div>
       <div className="tv-legend">
         {[["#5F9AD6", "In progress"], ["#8B94A7", "Pending"], ["#E39A4B", "Deferred"], ["#4CC38A", "Completed"], ["#F2727F", "Overdue"]].map(([c, l]) => <span key={l}><i style={{ background: c }} />{l}</span>)}
-        <span><i style={{ border: "1px dashed var(--tx,#E7EAF0)" }} />No deadline</span>
+        <span><i style={{ border: "1px dashed var(--tx,#E7EAF0)" }} />Always going (no deadline)</span>
       </div>
     </div>
   );

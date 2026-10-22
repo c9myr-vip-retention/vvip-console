@@ -75,7 +75,7 @@ function ProjectDetail({ ctx, id, onBack, onChanged }) {
             {ts.map((t) => (
               <tr key={t.id} onClick={() => openTask(t.id)} style={{ cursor: "pointer" }}>
                 <td><span style={t.status === "done" ? { textDecoration: "line-through", opacity: 0.6 } : undefined}>{t.title}</span></td>
-                <td className={t.status !== "done" && t.due_date && t.due_date < today ? "neg" : "dim"}>{t.due_date ? fmtDay(t.due_date) : "No deadline"}</td>
+                <td className={t.status !== "done" && t.due_date && t.due_date < today ? "neg" : "dim"}>{t.due_date ? fmtDay(t.due_date) : "Always going"}</td>
                 <td><Pill s={t.status} /></td><td>{person(t.assignee)}</td>
               </tr>
             ))}

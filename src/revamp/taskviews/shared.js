@@ -25,7 +25,7 @@ export const canReassign = (t, me) => canEdit(me) && can(me, "tasks.assign_other
 // ---- deadline buckets (calendar weeks, Monday to Sunday) ----
 export const BUCKETS = [
   ["over", "Overdue", "#F2727F"], ["today", "Today", "#E39A4B"], ["week", "This week", "#5F9AD6"], ["next", "Next week", "#56B6C2"],
-  ["later", "Later", "#8B94A7"], ["none", "No deadline", "#6B7385"], ["done", "Completed", "#4CC38A"],
+  ["later", "Later", "#8B94A7"], ["none", "Always going", "#6B7385"], ["done", "Completed", "#4CC38A"],
 ];
 export function bucketOf(t, today = todayNum()) {
   if (t.status === "done") return "done";
@@ -49,7 +49,7 @@ export function bucketDate(key, today = todayNum()) {
 }
 
 export function dueInfo(t, today = todayNum()) {
-  if (!t.due_date) return { text: "No deadline", cls: "" };
+  if (!t.due_date) return { text: "Always going", cls: "" };                 // no deadline: never overdue
   const d = toNum(t.due_date), time = t.due_time ? ` · ${fmtTime(t.due_time)}` : "";
   if (t.status === "done") return { text: fmtDay(d), cls: "done" };
   if (d < today) return { text: `${fmtDay(d)} · ${today - d}d late`, cls: "over" };

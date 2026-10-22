@@ -37,7 +37,7 @@ export default function Planner({ tasks, people, me, onOpen, onChange }) {
 
   return (
     <div className="tv tv-planner">
-      <p className="tv-hint">{isAdmin(me) ? "One column per person. Drag a card to another person to reassign it." : "Your tasks and the people you work with. Only an admin can reassign."} Drop on “No deadline” to clear a deadline.</p>
+      <p className="tv-hint">{isAdmin(me) ? "One column per person. Drag a card to another person to reassign it." : "Your tasks and the people you work with. Only an admin can reassign."} Drop on “Always going” to remove a deadline.</p>
       <div className="tv-board" style={{ gridAutoColumns: "minmax(190px,1fr)" }}>
         {cols.map((u) => {
           const items = dated(u), on = ongoing(u);
@@ -62,7 +62,7 @@ export default function Planner({ tasks, people, me, onOpen, onChange }) {
         onDragOver={(e) => { e.preventDefault(); if (over !== "__tray") setOver("__tray"); }}
         onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver((o) => (o === "__tray" ? null : o)); }}
         onDrop={dropTray}>
-        <h4>No deadline <span>{nodue.length}</span></h4>
+        <h4>Always going <span>{nodue.length}</span></h4>
         {nodue.length ? <div className="tv-trayg">{nodue.map((t) => <TaskCard key={t.id} t={t} drag={dragOK(t)} onOpen={onOpen} />)}</div>
           : <div className="tv-empty">Drop a card here to remove its deadline</div>}
       </div>
