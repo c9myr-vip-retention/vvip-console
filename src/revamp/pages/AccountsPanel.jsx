@@ -5,6 +5,7 @@ import { Avatar, Modal, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
 import { useLive } from "../live.js";
 import { hiddenPerm } from "../schedule/logic.js";
+import { SCOPE_BY_KEY, SCOPE_OPTIONS, levelOf, wantedFor } from "../permScopes.js";
 
 const TEAMS = [{ value: "", label: "No team" }, { value: "A", label: "Team A" }, { value: "B", label: "Team B" }, { value: "C", label: "Team C" }];
 /** What an account without a role can do today (mirrors legacyPerms in worker/perms.js). */
@@ -84,7 +85,7 @@ function PermsModal({ u, role, groups, perms, onClose }) {
   const eff = withOv(rolePerms, ov), n = Object.keys(ov).length;
   const set = async (key, v) => {
     setBusy(true);
-    try { const r = await work.setAccountPerms({ id: u.id, overrides: { [key]: v } }); setOv(r.overrides); setRolePerms(new Set(r.role_perms)); }
+    try { const r = await work.setAccountPerms({ id: u.id, overrides: typeof key === "object" ? key : { [key]: v } }); setOv(r.overrides); setRolePerms(new Set(r.role_perms)); }
     catch (e) { toast(e.message || "Could not save"); }
     setBusy(false);
   };
@@ -106,6 +107,24 @@ function PermsModal({ u, role, groups, perms, onClose }) {
           <div key={gk}>
             <div className="rl-gh">{gl}</div>
             {shown.filter((p) => p.group === gk).map((p) => {
+              const sc = SCOPE_BY_KEY[p.key];
+              if (sc) {
+                if (p.key !== sc.own) return null;                                // a pair shows once: None / Own only / Own + others, or what the role says
+                const touched = sc.own in ov || sc.any in ov, lvl = levelOf(eff, sc), roleLvl = levelOf(rolePerms, sc), nameOf = (v) => SCOPE_OPTIONS.find((o) => o.value === v).label;
+                const pick = (v) => { if (v === "role") return set({ [sc.own]: null, [sc.any]: null }); const w = wantedFor(v); return set({ [sc.own]: w.own, [sc.any]: w.any }); };
+                return (
+                  <div key={sc.id} className="rl-row" style={{ alignItems: "center" }}>
+                    <span className={"pu-dot" + (lvl !== "none" ? " on" : "")} title={lvl === "none" ? "Cannot do this" : "Can do this"} />
+                    <div className="grow"><b>{sc.label}</b>{touched && <span className="rl-chg">{lvl === "none" ? "blocked for them" : `${nameOf(lvl).toLowerCase()} for them`}</span>}
+                      <div className="dim rl-desc">{sc.desc}</div></div>
+                    <div className="seg" role="group" aria-label={sc.label}>
+                      {[["role", `Role (${nameOf(roleLvl)})`], ...SCOPE_OPTIONS.map((o) => [o.value, o.label])].map(([v, l]) => (
+                        <button key={v} type="button" className={(v === "role" ? !touched : touched && lvl === v) ? "on" : ""} disabled={busy} onClick={() => pick(v)}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
               const c = choice(p.key), on = eff.has(p.key), roleOn = rolePerms.has(p.key);
               return (
                 <div key={p.key} className="rl-row" style={{ alignItems: "center" }}>

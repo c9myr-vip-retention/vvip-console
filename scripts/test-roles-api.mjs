@@ -311,32 +311,29 @@ sql("UPDATE users SET manage_users = 1 WHERE username = 'aldo'");
 const peopleOf = async (tok) => (await call(tok, "GET", "/api/work/people")).data.people.map((x) => x.username).sort();
 check("the 'see people from every team' permission exists and is off for everyone by default", !(await roleOf("admin")).perms.includes("people.all") && !(await roleOf("agent")).perms.includes("people.all") && keys.includes("people.all"));
 for (const n of ["Boss2", "Mid2", "Junior2"]) await call(A, "POST", "/api/roles", { name: n, base: "agent" });
-for (const [u, rk] of [["bo", "boss2"], ["mi", "mid2"], ["ju", "junior2"]]) await call(A, "POST", "/api/users", { username: u, password: PW, role_key: rk, team: "B" });
+for (const [u, rk, tm] of [["bo", "boss2", "B"], ["mi", "mid2", "B"], ["ju", "junior2", "B"], ["ot1", "junior2", "A"]]) await call(A, "POST", "/api/users", { username: u, password: PW, role_key: rk, team: tm });
 const BO = await login("bo"), MI = await login("mi"), JU = await login("ju");
 let pp = await peopleOf(MI);
-check("by default everyone sees everyone", pp.includes("bo") && pp.includes("ju") && pp.includes("mi"), JSON.stringify(pp));
-r = await call(A, "POST", "/api/roles/mid2/update", { sees: { mode: "rank" } });
-check("set a role to see its own rank and below", r.status === 200 && r.data.role.sees.mode === "rank", JSON.stringify(r.data));
+check("by default everyone sees everyone, every team", pp.includes("bo") && pp.includes("ju") && pp.includes("mi") && pp.includes("ot1"), JSON.stringify(pp));
+r = await call(A, "POST", "/api/roles/mid2/update", { sees: { team: "own" } });
+check("set a role to see only its own team", r.status === 200 && r.data.role.sees.team === "own", JSON.stringify(r.data));
 pp = await peopleOf(MI);
-check("Mid2 sees itself and the more junior Junior2, not the more senior Boss2", pp.includes("mi") && pp.includes("ju") && !pp.includes("bo"), JSON.stringify(pp));
-r = await call(A, "POST", "/api/roles/boss2/update", { sees: { mode: "list", list: ["junior2", "nope", "boss2"] } });
-check("or only the roles you pick (unknown ones and itself are dropped)", r.status === 200 && r.data.role.sees.mode === "list" && r.data.role.sees.list.join() === "junior2", JSON.stringify(r.data));
-check("Boss2 sees only itself and Junior2", JSON.stringify(await peopleOf(BO)) === JSON.stringify(["bo", "ju"]), JSON.stringify(await peopleOf(BO)));
-check("Junior2 still sees everyone (its own setting is the default)", (await peopleOf(JU)).includes("bo"));
-check("the admin account still sees everyone", (await peopleOf(A)).length >= 6);
-check("an account on old settings sees everyone", (await peopleOf(await login("leg1"))).includes("bo"));
-check("a bad mode is 400", (await call(A, "POST", "/api/roles/mid2/update", { sees: { mode: "everything" } })).status === 400);
-check("an agent cannot change who a role sees (403)", (await call(S, "POST", "/api/roles/mid2/update", { sees: { mode: "all" } })).status === 403);
+check("Mid2 sees its own team (and itself), not the other team", pp.includes("mi") && pp.includes("bo") && pp.includes("ju") && !pp.includes("ot1"), JSON.stringify(pp));
+check("Boss2 still sees everyone (its own setting is the default)", (await peopleOf(BO)).includes("ot1"));
+check("the admin account still sees everyone", (await peopleOf(A)).includes("ot1"));
+check("an account on old settings sees everyone", (await peopleOf(await login("leg1"))).includes("ot1"));
+check("a bad value is 400, and the old rank / roles settings are gone (400)", (await call(A, "POST", "/api/roles/mid2/update", { sees: { team: "everything" } })).status === 400 && (await call(A, "POST", "/api/roles/mid2/update", { sees: { mode: "rank" } })).status === 400);
+check("an agent cannot change who a role sees (403)", (await call(S, "POST", "/api/roles/mid2/update", { sees: { team: "all" } })).status === 403);
 pp = (await call(MI, "GET", "/api/work/workload")).data.people.map((x) => x.username);
-check("the workload list follows it too", !pp.includes("bo"), JSON.stringify(pp));
+check("the workload list follows it too", pp.includes("bo") && !pp.includes("ot1"), JSON.stringify(pp));
 sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_vis_1', 'SK69', 'V')");
 r = await call(MI, "GET", "/api/rtn/board");
 const names = (r.data.team || []).map((x) => x.username);
-check("the board's agent list follows it too, and now carries team and role", r.status === 200 && names.includes("mi") && names.includes("ju") && !names.includes("bo") && r.data.team.every((x) => "team" in x && "role" in x), JSON.stringify(r.data.team || r.data).slice(0, 200));
+check("the board's agent list follows it too, and carries team and role", r.status === 200 && names.includes("mi") && names.includes("ju") && !names.includes("ot1") && r.data.team.every((x) => "team" in x && "role" in x), JSON.stringify(r.data.team || r.data).slice(0, 200));
 r = await call(A, "GET", "/api/rtn/board");
-check("the admin's board list still has everyone", (r.data.team || []).some((x) => x.username === "bo") && (r.data.team || []).some((x) => x.username === "mi"));
-await call(A, "POST", "/api/roles/boss2/update", { sees: { mode: "all" } });
-check("setting it back to everyone", (await peopleOf(BO)).includes("mi") && (await roleOf("boss2")).sees.mode === "all");
+check("the admin's board list still has everyone", (r.data.team || []).some((x) => x.username === "ot1") && (r.data.team || []).some((x) => x.username === "mi"));
+await call(A, "POST", "/api/roles/mid2/update", { sees: { team: "all" } });
+check("setting it back to everyone", (await peopleOf(MI)).includes("ot1") && (await roleOf("mid2")).sees.team === "all" && isNull(rows("SELECT sees FROM roles WHERE key = 'mid2'")[0].sees));
 sql("DELETE FROM player_days WHERE player_key LIKE 'zz_vis%'");
 
 // ---- an agent is anyone with a team and "Counts as a scored CS agent", whatever their role is called ----
@@ -357,29 +354,15 @@ r = await call(A, "GET", "/api/rtn/board");
 check("the board agent list carries the scored flag and team", jrow(r.data.team) && jrow(r.data.team).on_leaderboard === 1 && jrow(r.data.team).team === "A", JSON.stringify((r.data.team || []).slice(0, 3)));
 sql("DELETE FROM player_days WHERE player_key LIKE 'zz_sc%'");
 
-// ---- a role can be limited to the people of its own team ----
+// ---- a role limited to its own team: the board, people and workload lists follow the account's team, not the team in view ----
 const OT = (await call(A, "POST", "/api/roles", { name: "OwnTeam9", base: "agent" })).data.role.key;
 await call(A, "POST", "/api/users", { username: "ow9", password: PW, role_key: OT, team: "A" });
 await call(A, "POST", "/api/users", { username: "ob9", password: PW, role_key: JR, team: "B" });
 const OW = await login("ow9");
-check("by default a role sees every team", (await peopleOf(OW)).includes("ob9") && (await roleOf(OT)).sees.team === "all");
-r = await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", list: [], team: "own" } });
-check("a role can be limited to its own team", r.status === 200 && r.data.role.sees.team === "own" && r.data.role.sees.mode === "all", JSON.stringify(r.data));
+await call(A, "POST", `/api/roles/${OT}/update`, { sees: { team: "own" } });
 pp = await peopleOf(OW);
-check("it then sees its own team (and itself), not the other team", pp.includes("ow9") && pp.includes("jn9") && pp.includes("vw9") && !pp.includes("ob9") && !pp.includes("aldo"), JSON.stringify(pp));
-check("the admin still sees every team", (await peopleOf(A)).includes("ob9"));
-pp = (await call(OW, "GET", "/api/work/workload")).data.people.map((x) => x.username);
-check("the workload follows it too", pp.includes("jn9") && !pp.includes("ob9"), JSON.stringify(pp));
-sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_ot_1', 'BM69', 'V')");
-r = await call(OW, "GET", "/api/rtn/board");
-check("and so does the board's agent list", (r.data.team || []).some((x) => x.username === "jn9") && !(r.data.team || []).some((x) => x.username === "ob9"), JSON.stringify((r.data.team || []).map((x) => x.username)));
-sql("DELETE FROM player_days WHERE player_key LIKE 'zz_ot%'");
-r = await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "rank" } });
-check("changing only the role limit keeps the team limit", r.status === 200 && r.data.role.sees.mode === "rank" && r.data.role.sees.team === "own", JSON.stringify(r.data.role.sees));
-check("a bad team value is 400", (await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", team: "nope" } })).status === 400);
-check("an agent cannot change it (403)", (await call(S, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", team: "all" } })).status === 403);
-await call(A, "POST", `/api/roles/${OT}/update`, { sees: { mode: "all", list: [], team: "all" } });
-check("setting it back to every team", (await peopleOf(OW)).includes("ob9") && (await roleOf(OT)).sees.team === "all" && isNull(rows(`SELECT sees FROM roles WHERE key = '${OT}'`)[0].sees));
+check("an own-team role sees its team (jn9, vw9) and itself, not the other team", pp.includes("ow9") && pp.includes("jn9") && pp.includes("vw9") && !pp.includes("ob9") && !pp.includes("aldo"), JSON.stringify(pp));
+await call(A, "POST", `/api/roles/${OT}/update`, { sees: { team: "all" } });
 
 // ---- every permission comes as "own" and "any": switch the "any" one off and the person keeps working on their own things ----
 sql("UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0, perm_overrides = NULL WHERE username = 'sara'");   // sara is a plain old-settings agent again

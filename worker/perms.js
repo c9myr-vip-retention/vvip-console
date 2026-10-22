@@ -118,37 +118,21 @@ export async function loadRoles(db) {
   } catch { return null; }
 }
 
-/** Which people a role can see: { mode: "all" | "rank" | "list", list: [role keys], team: "all" | "own" }. mode limits by role; team "own" limits to the
- *  person's own team (whatever the team in view is). Anything unreadable means everyone, as before. */
+/** Who a role can see in agent and staff lists: { team: "all" | "own" }. "own" limits every list to the person's own team (whatever team is in
+ *  view). Anything unreadable, and the older rank / roles-I-pick settings, mean everyone. */
 export function parseSees(raw) {
   try {
     const o = JSON.parse(raw || "null");
-    if (o && ["all", "rank", "list"].includes(o.mode)) return { mode: o.mode, list: Array.isArray(o.list) ? o.list.filter((x) => typeof x === "string") : [], team: o.team === "own" ? "own" : "all" };
+    if (o && o.team === "own") return { team: "own" };
   } catch { /* fall through */ }
-  return { mode: "all", list: [], team: "all" };
+  return { team: "all" };
 }
 
-/** The role keys this account may see in people lists, or null for everyone. An account without a role sees everyone, as today.
- *  "rank" follows the hierarchy: its own rank and every more junior role (later in the ranked list). */
-export function visibleRoles(user, roles) {
-  const rk = user && user.role_key;
-  if (!rk || !roles || !roles.has(rk)) return null;
-  const sees = roles.get(rk).sees || { mode: "all", list: [] };
-  if (sees.mode === "all") return null;
-  const keys = [...roles.keys()];
-  if (sees.mode === "rank") return new Set(keys.filter((_, i) => i >= keys.indexOf(rk)));
-  return new Set([rk, ...sees.list.filter((k) => roles.has(k))]);
-}
-/** The role an account counts as: its own role, or for an old-settings account the built-in role named in its old `role`. */
-export const roleKeyOf = (row) => row.role_key || row.role || "";
-/** People this account may see: everyone, or only those in roles it can see, and only its own team when the role says so (always including itself).
- *  Rows need a `team` for the own-team limit. */
+/** People this account may see: everyone, or only its own team when its role says so (always including itself). Rows need a `team`. */
 export function filterPeople(rows, user, roles) {
-  const vis = visibleRoles(user, roles);
   const rk = user && user.role_key, sees = rk && roles && roles.has(rk) ? roles.get(rk).sees : null;
-  const own = !!(sees && sees.team === "own");
-  if (!vis && !own) return rows;
-  return rows.filter((r) => r.username === user.username || ((!vis || vis.has(roleKeyOf(r))) && (!own || (!!user.team && r.team === user.team))));
+  if (!sees || sees.team !== "own") return rows;
+  return rows.filter((r) => r.username === user.username || (!!user.team && r.team === user.team));
 }
 
 /** The permissions a role starts from. base is "none", a fixed code default set ("admin", "agent", "viewer"), or the key of another role,

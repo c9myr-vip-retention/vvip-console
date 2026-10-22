@@ -4,7 +4,8 @@
 // One switch = one permission = one function. A switch that differs from the starting point is marked "changed". The Worker enforces all of it
 // (worker/perms.js, worker/roles.js); this page only edits it. Needs the users.manage permission.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, MultiSelect, Select, toast } from "../ui/index.jsx";
+import { Modal, Select, Seg, toast } from "../ui/index.jsx";
+import { SCOPES, SCOPE_BY_KEY, SCOPE_OPTIONS, levelOf, wantedFor } from "../permScopes.js";
 import { work } from "../api/work.js";
 import { useLive } from "../live.js";
 import { hiddenPerm } from "../schedule/logic.js";
@@ -121,6 +122,17 @@ export default function RolesPanel() {
     patch({ key: role.key, overrides, perms });                                      // optimistic; the Worker's answer replaces it
     change({ overrides: { [key]: on === def ? null : on } });
   };
+  // A paired permission (own / others) is one row with three choices; this sets both real permissions at once.
+  const setScope = (s, level) => {
+    const want = wantedFor(level), overrides = { ...role.overrides }, body = {};
+    let perms = [...role.perms];
+    for (const [key, on] of [[s.own, want.own], [s.any, want.any]]) {
+      if (on === defaults[key]) { delete overrides[key]; body[key] = null; } else { overrides[key] = on; body[key] = on; }
+      perms = on ? [...new Set([...perms, key])] : perms.filter((x) => x !== key);
+    }
+    patch({ key: role.key, overrides, perms });
+    change({ overrides: body });
+  };
   const rename = () => { const n = name.trim(); if (!n) return setName(role.name); if (n !== role.name) change({ name: n }, "Renamed"); };
 
   if (!data) return <div className="dim" style={{ padding: 14 }}>Loading…</div>;
@@ -169,26 +181,33 @@ export default function RolesPanel() {
 
           <div className="card"><div className="body" style={{ display: "grid", gap: 10 }}>
             <div className="rl-gh">Who they can see</div>
-            <div className="dim">Decides which people show in agent and staff lists for this role. The role hierarchy (the order in the list on the left) is what “rank” follows: roles lower down are more junior. A role can always see itself.</div>
+            <div className="dim">Decides which people show in agent and staff lists for this role: everyone, or only the people on their own team. A role can always see itself.</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-              <Select value={(role.sees || { mode: "all" }).mode} style={{ width: "auto", minWidth: 330 }}
-                options={[{ value: "all", label: "Everyone (no limit)" }, { value: "rank", label: "Their own rank and more junior roles" }, { value: "list", label: "Only the roles I pick" }]}
-                onChange={(m) => change({ sees: { mode: m, list: m === "list" ? ((role.sees || {}).list || []) : [] } }, "Saved")} />
-              {(role.sees || {}).mode === "list" && (
-                <MultiSelect label="Roles they can see" value={(role.sees || {}).list || []} options={data.roles.filter((r) => r.key !== role.key).map((r) => ({ value: r.key, label: r.name }))}
-                  onChange={(v) => change({ sees: { mode: "list", list: v } })} />
-              )}
-              <Select value={(role.sees || {}).team === "own" ? "own" : "all"} style={{ width: "auto", minWidth: 250 }}
-                options={[{ value: "all", label: "Every team" }, { value: "own", label: "Only their own team" }]}
-                onChange={(t) => change({ sees: { mode: (role.sees || { mode: "all" }).mode, list: (role.sees || {}).list || [], team: t } }, "Saved")} />
+              <Select value={(role.sees || {}).team === "own" ? "own" : "all"} style={{ width: "auto", minWidth: 330 }}
+                options={[{ value: "all", label: "Everyone (no limit)" }, { value: "own", label: "Only their own team" }]}
+                onChange={(t) => change({ sees: { team: t } }, "Saved")} />
             </div>
-            <div className="dim" style={{ fontSize: 12 }}>“Only their own team” limits every agent and staff list to the team on their account, whichever team is in view. With “Every team”, lists follow the team in view unless “See people from every team” is switched on below.</div>
+            <div className="dim" style={{ fontSize: 12 }}>“Only their own team” limits every list to the team on their account, whichever team is in view. With “Everyone”, lists follow the team in view unless “See people from every team” is switched on below.</div>
           </div></div>
 
           {data.groups.map(([gk, gl]) => (
             <div key={gk} className="card"><div className="body">
               <div className="rl-gh">{gl}</div>
               {shownPerms.filter((p) => p.group === gk).map((p) => {
+                const sc = SCOPE_BY_KEY[p.key];
+                if (sc) {
+                  if (p.key !== sc.own) return null;                              // the pair shows once, where its "own" permission sits
+                  const lvl = levelOf(new Set(role.perms), sc), diffS = [sc.own, sc.any].some((k) => k in role.overrides && role.overrides[k] !== defaults[k]);
+                  return (
+                    <div key={sc.id} className="rl-row" style={{ alignItems: "center" }}>
+                      <div className="grow">
+                        <div><b>{sc.label}</b>{diffS && <span className="rl-chg" title="Different from the starting point">changed</span>}</div>
+                        <div className="dim rl-desc">{sc.desc}</div>
+                      </div>
+                      <Seg value={lvl} onChange={(v) => v !== lvl && setScope(sc, v)} options={SCOPE_OPTIONS} />
+                    </div>
+                  );
+                }
                 const on = role.perms.includes(p.key), diff = p.key in role.overrides && role.overrides[p.key] !== defaults[p.key];
                 return (
                   <div key={p.key} className="rl-row">
