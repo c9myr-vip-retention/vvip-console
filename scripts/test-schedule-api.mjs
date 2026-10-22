@@ -1,6 +1,6 @@
 // Local checks for the schedule routes (board items, types, swaps) and their permissions.
 // LOCAL ONLY: talks to `wrangler dev --local` and seeds a THROWAWAY local D1 with `wrangler d1 execute --local`. Never --remote.
-//   1) apply schema.sql, schema_v2..v25 with: npx wrangler d1 execute groupb-tracker-db --local --persist-to <dir> --file=...
+//   1) apply schema.sql, schema_v2..v26 with: npx wrangler d1 execute groupb-tracker-db --local --persist-to <dir> --file=...
 //   2) npx wrangler dev --local --persist-to <dir> --port 8798 --var SESSION_SECRET:x --var PASSWORD_SALT:y --var INGEST_TOKEN:x
 //   3) BASE=http://127.0.0.1:8798 PERSIST=<dir> node scripts/test-schedule-api.mjs
 import { execFileSync } from "node:child_process";
@@ -137,6 +137,56 @@ const open2 = (await call(A, "GET", `${W}/swaps`)).data.swaps.find((s) => s.stat
 check("open swaps are listed first", (await call(A, "GET", `${W}/swaps`)).data.swaps[0].status === "open");
 check("admin declines", (await call(A, "POST", `${W}/swaps/${open2.id}`, { status: "declined" })).data.swap.status === "declined");
 check("an unknown schedule path falls through (404)", (await call(A, "GET", `${W}/nothing`)).status === 404);
+
+// ---- shift times (the quick-fill presets) ----
+sql("DELETE FROM schedule_shift_presets WHERE key NOT IN ('am','pm','nt'); UPDATE schedule_shift_presets SET deleted_at = NULL, name = CASE key WHEN 'am' THEN 'Morning' WHEN 'pm' THEN 'Afternoon' ELSE 'Night' END, start_time = CASE key WHEN 'am' THEN '09:00' WHEN 'pm' THEN '13:00' ELSE '21:00' END, end_time = CASE key WHEN 'am' THEN '17:00' WHEN 'pm' THEN '21:00' ELSE '05:00' END");
+r = await call(S, "GET", W);
+check("board carries the three default shifts", r.status === 200 && ["Morning", "Afternoon", "Night"].every((n) => (r.data.shifts || []).some((x) => x.name === n)), JSON.stringify(r.data.shifts));
+for (const [who, tok] of [["agent", S], ["viewer", V]]) {
+  check(`${who} cannot add a shift (403)`, (await call(tok, "POST", `${W}/shifts`, { name: "Mid", start_time: "11:00", end_time: "19:00" })).status === 403);
+  check(`${who} cannot change a shift (403)`, (await call(tok, "POST", `${W}/shifts/am/update`, { start_time: "08:00" })).status === 403);
+  check(`${who} cannot remove a shift (403)`, (await call(tok, "POST", `${W}/shifts/am/delete`)).status === 403);
+}
+r = await call(A, "POST", `${W}/shifts`, { name: "Mid", start_time: "11:00", end_time: "19:00" });
+const MID = r.data.shift && r.data.shift.key;
+check("admin adds a shift (201)", r.status === 201 && MID === "mid", JSON.stringify(r));
+check("a duplicate name is 409", (await call(A, "POST", `${W}/shifts`, { name: "mid", start_time: "10:00", end_time: "18:00" })).status === 409);
+check("bad time is 400", (await call(A, "POST", `${W}/shifts`, { name: "X", start_time: "25:00", end_time: "18:00" })).status === 400);
+check("same start and end is 400", (await call(A, "POST", `${W}/shifts`, { name: "X", start_time: "10:00", end_time: "10:00" })).status === 400);
+check("blank name is 400", (await call(A, "POST", `${W}/shifts`, { name: "  ", start_time: "10:00", end_time: "18:00" })).status === 400);
+check("Day off is built in (400)", (await call(A, "POST", `${W}/shifts`, { name: "Day off", start_time: "10:00", end_time: "18:00" })).status === 400);
+r = await call(A, "POST", `${W}/shifts/am/update`, { start_time: "08:30", end_time: "16:30" });
+check("admin changes Morning times", r.status === 200 && r.data.shift.name === "Morning" && r.data.shift.start_time === "08:30", JSON.stringify(r.data));
+check("renaming onto another shift is 409", (await call(A, "POST", `${W}/shifts/am/update`, { name: "Night" })).status === 409);
+check("unknown shift is 404", (await call(A, "POST", `${W}/shifts/nope/update`, { name: "Z" })).status === 404);
+r = await call(S, "GET", W);
+check("everyone sees the new list in order", r.data.shifts.map((x) => x.name).join() === "Morning,Afternoon,Night,Mid" && r.data.shifts[0].start_time === "08:30", JSON.stringify(r.data.shifts));
+check("admin removes Mid (soft)", (await call(A, "POST", `${W}/shifts/${MID}/delete`)).status === 200 && !(await call(S, "GET", W)).data.shifts.some((x) => x.key === MID));
+check("removing it twice is 404", (await call(A, "POST", `${W}/shifts/${MID}/delete`)).status === 404);
+
+// ---- delete many ----
+sql("DELETE FROM schedule_items");
+await call(A, "POST", `${W}/items`, { items: [
+  { type_key: "reload", date: "2026-12-01", title: "[b] r1" }, { type_key: "reload", date: "2026-12-10", title: "[b] r2" }, { type_key: "meeting", date: "2026-12-10", title: "[b] m1" },
+  { type_key: "shift", date: "2026-12-12", title: "[b] Morning", who: ["sara"], repeat: "weekly" }, { type_key: "reload", date: "2027-01-05", title: "[b] r3" },
+] });
+const bd = (b) => call(A, "POST", `${W}/items/bulk-delete`, b);
+check("agent cannot bulk delete (403)", (await call(S, "POST", `${W}/items/bulk-delete`, { from: "2026-12-01" })).status === 403);
+check("viewer cannot bulk delete (403)", (await call(V, "POST", `${W}/items/bulk-delete`, { from: "2026-12-01" })).status === 403);
+r = await bd({ from: "2026-12-01", to: "2026-12-31", preview: true });
+check("preview counts December and flags the repeating one", r.status === 200 && r.data.count === 4 && r.data.repeating === 1, JSON.stringify(r.data));
+check("preview deletes nothing", rows("SELECT COUNT(*) n FROM schedule_items WHERE deleted_at IS NULL")[0].n === 5);
+r = await bd({ type_key: "reload", from: "2026-12-01", to: "2026-12-31", preview: true });
+check("type + dates narrows to the two December reloads", r.data.count === 2, JSON.stringify(r.data));
+check("bad date is 400", (await bd({ from: "2026-13-01" })).status === 400);
+check("start after end is 400", (await bd({ from: "2026-12-31", to: "2026-12-01" })).status === 400);
+check("unknown type is 400", (await bd({ type_key: "nope" })).status === 400);
+r = await bd({ type_key: "reload", from: "2026-12-01", to: "2026-12-31" });
+check("deletes the two December reloads", r.status === 200 && r.data.deleted === 2, JSON.stringify(r.data));
+check("the others are untouched", rows("SELECT COUNT(*) n FROM schedule_items WHERE deleted_at IS NULL")[0].n === 3);
+r = await bd({});
+check("no filters deletes every remaining item", r.data.deleted === 3 && rows("SELECT COUNT(*) n FROM schedule_items WHERE deleted_at IS NULL")[0].n === 0, JSON.stringify(r.data));
+check("nothing left -> deleted 0", (await bd({})).data.deleted === 0);
 
 console.log(`\n${passes} passed, ${fails} failed`);
 console.log(fails ? `${fails} check(s) FAILED` : "All checks passed");

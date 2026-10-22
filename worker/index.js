@@ -5,6 +5,8 @@
 // ═══════════════════════════════════════════════════
 
 import { handleWork } from "./work/index.js";
+import { handleRoles } from "./roles.js";
+import { loadRoles, resolvePerms, rolePerms } from "./perms.js";
 
 function corsFor(request) {
   const origin = request.headers.get("Origin") || "";
@@ -2002,14 +2004,18 @@ export default {
 
     // Per-account permissions (enforced server-side). The flags are the single source of truth;
     // a manage_users account always keeps edit+delete. The last-manager guard prevents lockout.
-    const canManage = !!user.manage_users;
-    const canEdit = !!user.can_edit || canManage;
-    const canDelete = !!user.can_delete || canManage;
+    // Roles: an account with a role_key gets that role's permissions; every other account keeps exactly what its old flags give it.
+    const roleMap = user.role_key ? await loadRoles(env.DB) : null;
+    const perms = resolvePerms(user, roleMap);
+    const can = (k) => perms.has(k);
+    const canManage = can("users.manage");
+    const canEdit = can("contact.edit");
+    const canDelete = can("contact.delete");
     const NOEDIT = () => err("View-only — your account has no edit permission", 403);
 
     // Team wall: managers see every brand; everyone else is locked to their team's brands.
     // allowedBrands === null → no restriction. Else an array (empty array → sees nothing).
-    const allowedBrands = canManage ? null : (TEAM_BRANDS[user.team] || []);
+    const allowedBrands = can("teams.all") ? null : (TEAM_BRANDS[user.team] || []);
     // SQL fragment to AND onto a query that already has a WHERE. `col` is the brand column.
     const teamAnd = (col = "brand") =>
       allowedBrands === null ? { s: "", b: [] }
@@ -2018,12 +2024,13 @@ export default {
     const brandAllowed = (b) => allowedBrands === null || allowedBrands.includes(b);
 
     // Work management (tasks, schedule, projects...). Routes live in worker/work/*.js.
-    { const w = await handleWork({ path, method, url, request, env, user, canManage, ok, err, log, ctx }); if (w) return w; }
+    { const w = await handleWork({ path, method, url, request, env, user, canManage, can, perms, ok, err, log, ctx }); if (w) return w; }
+    { const r = await handleRoles({ path, method, url, request, env, user, can, perms, ok, err, log, ctx }); if (r) return r; }
 
     // Aggregate endpoints (trend/performance/kpi) accept ?team=A|B|C so a MANAGER can narrow
     // the all-teams view to one team. Non-managers stay pinned to their own team (param ignored).
     const reqTeam = url.searchParams.get("team");
-    const scopeBrands = canManage ? (TEAM_BRANDS[reqTeam] || null) : allowedBrands;
+    const scopeBrands = can("teams.all") ? (TEAM_BRANDS[reqTeam] || null) : allowedBrands;
     const scopeAnd = (col = "brand") =>
       scopeBrands === null ? { s: "", b: [] }
       : scopeBrands.length === 0 ? { s: " AND 1=0", b: [] }
@@ -2032,7 +2039,8 @@ export default {
     // ── GET /api/me ────────────────────────────────────────────────────────────
     if (path === "/api/me" && method === "GET") {
       return ok({ username: user.username, role: user.role, can_edit: canEdit,
-        can_delete: canDelete, on_leaderboard: !!user.on_leaderboard, manage_users: canManage, team: user.team || null });
+        can_delete: canDelete, on_leaderboard: !!user.on_leaderboard, manage_users: canManage, team: user.team || null,
+        role_key: user.role_key || null, role_name: (roleMap && roleMap.get(user.role_key) || {}).name || null, perms: [...perms] });
     }
 
     // ── POST /api/logout — record sign-out (token is cleared client-side) ───────
@@ -2043,7 +2051,7 @@ export default {
 
     // ── GET /api/activity — audit trail (managers only) — filters: username, action, date ──
     if (path === "/api/activity" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("activity.view")) return err("Managers only", 403);
       const fu = url.searchParams.get("username"), fa = url.searchParams.get("action"), fd = url.searchParams.get("date"), ft = url.searchParams.get("team");
       const where = [], binds = [];
       if (ft && ["A", "B", "C"].includes(ft)) { where.push("username IN (SELECT username FROM users WHERE team = ?)"); binds.push(ft); }
@@ -2328,7 +2336,7 @@ export default {
 
     // ── POST /api/rtn/login-check/assign — set/move/retire an owner (admin only) ──
     if (path === "/api/rtn/login-check/assign" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("assign.manage")) return err("Managers only", 403);
       const b = await request.json();
       const brand = b.brand || "SK69", tier = b.tier_segment || "V";
       if (!b.player_key || !b.agent) return err("Missing player_key or agent");
@@ -2346,7 +2354,7 @@ export default {
 
     // ── POST /api/rtn/login-check/auto-assign — deal unassigned players evenly (admin) ──
     if (path === "/api/rtn/login-check/auto-assign" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("assign.manage")) return err("Managers only", 403);
       const b = await request.json().catch(() => ({}));
       const brand = b.brand || "SK69", tier = b.tier_segment || "V";
       if (!brandAllowed(brand)) return err("Not your team", 403);
@@ -2503,7 +2511,7 @@ export default {
       // Staff who moved OUT of the viewed team: their work on the new team's brands since the move,
       // returned separately so By CS can show it as an extra "<agent> · Team X" row (and only there —
       // By Class / By Brand stay this team's own brands).
-      const viewT = canManage ? (TEAM_BRANDS[reqTeam] ? reqTeam : null) : user.team;
+      const viewT = can("teams.all") ? (TEAM_BRANDS[reqTeam] ? reqTeam : null) : user.team;
       const moves = STAFF_MOVES.filter((m) => m.on.slice(0, 7) <= month && (m.from === viewT || m.to === viewT));
       const away = [];
       for (const m of moves.filter((x) => x.from === viewT)) {
@@ -2724,7 +2732,7 @@ export default {
 
     // DELETE /api/rtn/livechat/:id — remove a log entry (managers only — it's an audit trail)
     if (path.startsWith("/api/rtn/livechat/") && method === "DELETE") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const id = path.split("/").pop();
       if (!id) return err("Missing id");
       await env.DB.prepare("DELETE FROM livechat_log WHERE id = ?").bind(id).run();
@@ -2786,7 +2794,7 @@ export default {
     // POST /api/rtn/engagement-sync?date=YYYY-MM-DD — run the Lark engagement count now (managers).
     // &dry=1 → count only, writes nothing.
     if (path === "/api/rtn/engagement-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await larkEngagementSync(env, { date: url.searchParams.get("date"), dryRun });
@@ -2798,7 +2806,7 @@ export default {
     // POST /api/rtn/feeders/run — start every brand's feeder now, same as the 12:15 cron (managers).
     // ?dry=1 → only list how many feeder URLs are configured; starts nothing.
     if (path === "/api/rtn/feeders/run" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       if (url.searchParams.get("dry") === "1") return ok({ dryRun: true, configured: feederUrls(env).length });
       const r = await kickFeeders(env);
       log(user, "feed", `Feeders started by hand · ${r.ok ?? 0}/${r.kicked ?? 0} ok`);
@@ -2819,7 +2827,7 @@ export default {
     // POST /api/rtn/engagement-sync?date=YYYY-MM-DD — run the Lark engagement count now (managers).
     // &dry=1 → count only, writes nothing.
     if (path === "/api/rtn/engagement-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await larkEngagementSync(env, { date: url.searchParams.get("date"), dryRun });
@@ -2832,7 +2840,7 @@ export default {
     // ?dry=1 → counts (incl. how many stored links would be removed) + sample only, writes nothing.
     // ?force=1 → allow a run even if Lark returns less than half of the stored links (the safety stop).
     if (path === "/api/rtn/lark-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await larkTelegramSync(env, { dryRun, force: url.searchParams.get("force") === "1" });
@@ -2844,7 +2852,7 @@ export default {
     // POST /api/rtn/feed-check — run the daily feed-health check now (managers).
     // ?dry=1 → compute + return the card JSON, post nothing. Otherwise posts to Lark.
     if (path === "/api/rtn/feed-check" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await feedCheckReport(env, { dryRun });
@@ -2872,7 +2880,7 @@ export default {
        excuse to coast. */
     if (path === "/api/rtn/contact-rate" && method === "GET") {
       const reqT = url.searchParams.get("team");
-      const team = canManage ? (TEAM_BRANDS[reqT] ? reqT : (user.team || "B")) : user.team;
+      const team = can("teams.all") ? (TEAM_BRANDS[reqT] ? reqT : (user.team || "B")) : user.team;
       const brands = TEAM_BRANDS[team];
       if (!brands) return err(`unknown team ${team || "(none)"}`, 400);
       const ph = brands.map(() => "?").join(",");
@@ -2948,12 +2956,12 @@ export default {
     }
 
     if (path === "/api/rtn/auto-assign" && method === "GET") {
-      const off = canManage ? (url.searchParams.get("off") || "").split(",").map((s) => s.trim()).filter(Boolean) : [];
-      const team = canManage ? (TEAM_BRANDS[reqTeam] ? reqTeam : (user.team || "B")) : user.team;
+      const off = can("assign.manage") ? (url.searchParams.get("off") || "").split(",").map((s) => s.trim()).filter(Boolean) : [];
+      const team = can("teams.all") ? (TEAM_BRANDS[reqTeam] ? reqTeam : (user.team || "B")) : user.team;
       const batch = url.searchParams.get("batch");
       try {
         const res = await computeAutoAssign(env, { off, team, batch });
-        if (canManage || res.skipped) return ok(res);
+        if (can("assign.manage") || res.skipped) return ok(res);
         const self = user.username;
         return ok({ ...res, pics: (res.pics || []).includes(self) ? [self] : [],
           assignments: { [self]: (res.assignments && res.assignments[self]) || [] },
@@ -2965,7 +2973,7 @@ export default {
     // ?dry=1 computes and reports the counts without writing a single row. This is the
     // same function the daily cron calls, so a dry run here proves the real job.
     if (path === "/api/rtn/auto-assign/run" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("assign.manage")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       if (!dryRun && !AUTO_ASSIGN_ENABLED) return err("Auto-assign is OFF — flip AUTO_ASSIGN_ENABLED and redeploy, or use ?dry=1", 400);
       const off = (url.searchParams.get("off") || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -2980,7 +2988,7 @@ export default {
     // ?base=<app_token> → look at another Base (read-only). Without ?table it then lists table ids/names only.
     // &raw=1 with ?table&n → return the first n records' fields as-is (any table shape).
     if (path === "/api/rtn/lark-debug" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       try {
         const token = await larkToken(env);
         const baseQ = url.searchParams.get("base");
@@ -3093,7 +3101,7 @@ export default {
     // ── POST /api/rtn/campaign/event — create + shuffle + assign (managers) ──
     // Body: { event_date, brand, tier_segment, bands:[{label, code, amount}] }
     if (path === "/api/rtn/campaign/event" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       const day = String(b.event_date || "").trim();
       const brand = String(b.brand || "").trim();
@@ -3119,7 +3127,7 @@ export default {
     // ── POST /api/rtn/campaign/auto-create — run the 00:00 job now (managers) ──
     // Same code path the cron uses, so testing it proves the real thing works.
     if (path === "/api/rtn/campaign/auto-create" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const dry = url.searchParams.get("dry") === "1";
       const r = await autoCreateEvents(env, { dry });
       if (!dry) log(user, "campaign", `Ran auto-create manually · ${JSON.stringify(r)}`);
@@ -3128,7 +3136,7 @@ export default {
 
     // ── POST /api/rtn/campaign/bands — set/replace the 2 codes (managers, draft only) ──
     if (path === "/api/rtn/campaign/bands" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(b.event_id).first();
       if (!ev) return err("Event not found", 404);
@@ -3148,7 +3156,7 @@ export default {
     // managers exporting at once cannot both believe they locked it. Re-downloads
     // are always allowed (a lost file is not a reason to reshuffle).
     if (path === "/api/rtn/campaign/export" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const eventId = Number(url.searchParams.get("event_id"));
       const label = String(url.searchParams.get("label") || "").toUpperCase();
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(eventId).first();
@@ -3193,7 +3201,7 @@ export default {
     // the event, so it can be pulled any number of times during the day as the
     // list shrinks. Same BO upload shape (one column, user_id).
     if (path === "/api/rtn/campaign/unclaimed" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const eventId = Number(url.searchParams.get("event_id"));
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(eventId).first();
       if (!ev) return err("Event not found", 404);
@@ -3285,7 +3293,7 @@ export default {
 
     // ── GET /api/rtn/campaign/assignments?event_id=&view= — the tables (managers) ──
     if (path === "/api/rtn/campaign/assignments" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const eventId = Number(url.searchParams.get("event_id"));
       const view = String(url.searchParams.get("view") || "all");
       const where = view === "claimed" ? " AND a.claimed = 1"
@@ -3302,7 +3310,7 @@ export default {
 
     // ── GET /api/rtn/campaign/report?date= — per-brand + per-code result (managers) ──
     if (path === "/api/rtn/campaign/report" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const d = url.searchParams.get("date");
       const day = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : snapshotDateMYT();
       // Scope every section to one team. by_brand used to be filtered in the
@@ -3346,7 +3354,7 @@ export default {
     // read-then-write, so an export landing mid-request cannot slip through:
     // if it flipped to 'exported', all three statements no-op together.
     if (path === "/api/rtn/campaign/delete" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       const id = Number(b.event_id);
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(id).first();
@@ -3379,7 +3387,7 @@ export default {
 
     // ── POST /api/rtn/campaign/close — end the event (managers) ──
     if (path === "/api/rtn/campaign/close" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       await env.DB.prepare(
         "UPDATE code_events SET status = 'closed', closed_by = ?, closed_at = datetime('now') WHERE id = ? AND status = 'exported'"
@@ -3606,7 +3614,7 @@ export default {
 
     // POST /api/rtn/mistakes — add a mistake { month, agent, category, points, note, brand } (admin only)
     if (path === "/api/rtn/mistakes" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("mistakes.log")) return err("Managers only", 403);
       const b = await request.json();
       if (!b.month || !/^\d{4}-\d{2}$/.test(b.month) || !b.agent || !b.category) return err("Missing month / agent / category");
       const pts = (b.points === "" || b.points == null || isNaN(b.points)) ? 1 : Number(b.points);
@@ -3620,7 +3628,7 @@ export default {
 
     // DELETE /api/rtn/mistakes/:id (admin only)
     if (path.startsWith("/api/rtn/mistakes/") && method === "DELETE") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("mistakes.log")) return err("Managers only", 403);
       const id = path.split("/").pop();
       if (!id) return err("Missing id");
       await env.DB.prepare("DELETE FROM mistakes WHERE id = ?").bind(id).run();
@@ -3672,7 +3680,7 @@ export default {
 
     // ── POST /api/upload — save daily data batch ───────────────────────────────
     if (path === "/api/upload" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);   // legacy v1 write — restrict to managers
+      if (!can("data.sync")) return err("Managers only", 403);   // legacy v1 write — restrict to managers
       const { date, brand, players: rows, filename } = await request.json();
       if (!date || !brand || !rows || !filename) return err("Missing fields");
 
@@ -3743,9 +3751,16 @@ export default {
     // ── GET /api/users (admin only — enforced) ─────────────────────────────────
     if (path === "/api/users" && method === "GET") {
       if (!canManage) return err("Managers only", 403);
-      const users = await env.DB.prepare(
-        "SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
-      ).all();
+      let users;
+      try {
+        users = await env.DB.prepare(
+          "SELECT id, username, role, role_key, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+        ).all();
+      } catch (e) {   // schema_v27 not run yet: no role_key column
+        users = await env.DB.prepare(
+          "SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+        ).all();
+      }
       return ok(users.results);
     }
 
@@ -3759,6 +3774,19 @@ export default {
       const f = (v) => (v ? 1 : 0);
       const newTeam = ["A", "B", "C"].includes(b.team) ? b.team : null;
       try {
+        const roleMap = b.role_key ? await loadRoles(env.DB) : null;
+        const picked = b.role_key && roleMap ? roleMap.get(b.role_key) : null;
+        if (b.role_key && !picked) return err("Unknown role", 400);
+        if (picked) {
+          // a role decides the old columns too, so every query that still reads them agrees
+          const perms = rolePerms(picked), f2 = (k) => (perms.has(k) ? 1 : 0);
+          await env.DB.prepare(
+            "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team, role_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(b.username.trim().toLowerCase(), hash, picked.base === "none" ? "viewer" : picked.base,
+            f2("contact.edit"), f2("contact.delete"), f2("kpi.scored"), f2("users.manage"), newTeam, picked.key).run();
+          log(user, "user", `Created account · ${b.username.trim().toLowerCase()} (${picked.name})`);
+          return ok({ message: "User created" });
+        }
         await env.DB.prepare(
           "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(b.username.trim().toLowerCase(), hash, b.role || "viewer",
@@ -3790,6 +3818,8 @@ export default {
       await env.DB.prepare(
         "UPDATE users SET role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ?, team = ? WHERE id = ?"
       ).bind(b.role || "viewer", f(b.can_edit), f(b.can_delete), f(b.on_leaderboard), mgr, permTeam, b.id).run();
+      // the old editor sets the flags by hand, so this account leaves the role system until a role is picked again
+      try { await env.DB.prepare("UPDATE users SET role_key = NULL WHERE id = ?").bind(b.id).run(); } catch (e) { /* schema_v27 not run: no column */ }
       log(user, "perm", `Set permissions → ${b.role || "viewer"} · user #${b.id}`);
       return ok({ saved: true });
     }

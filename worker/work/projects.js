@@ -48,7 +48,7 @@ async function projectRows(c, { id = null, archived = null } = {}) {
   const where = ["p.deleted_at IS NULL"], binds = [];
   if (id !== null) { where.push("p.id = ?"); binds.push(id); }
   if (archived !== null) { where.push("p.archived = ?"); binds.push(archived); }
-  if (!c.canManage) { where.push("EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.username = ?)"); binds.push(me); }
+  if (!c.can("projects.manage")) { where.push("EXISTS (SELECT 1 FROM project_members m WHERE m.project_id = p.id AND m.username = ?)"); binds.push(me); }
   const { results } = await db.prepare(
     `SELECT p.id, p.name, p.description, p.privacy, p.archived, p.created_by, p.created_at,
             (SELECT COUNT(*) FROM tasks t WHERE t.project_id = p.id AND t.deleted_at IS NULL) AS task_total,
@@ -70,7 +70,7 @@ async function projects(c, m) {
     return c.ok({ projects: await projectRows(c, { archived: a === "1" ? 1 : 0 }) });
   }
   if (path === "/api/work/projects" && method === "POST") {
-    if (!c.canManage) return c.err("Admin only", 403);
+    if (!c.can("projects.manage")) return c.err("Admin only", 403);
     const b = await body(c);
     const name = str(b.name, 120);
     if (!name) return c.err("Project name is required");
@@ -104,8 +104,8 @@ async function projects(c, m) {
     const p = (await projectRows(c, { id: Number(m[1]) }))[0];
     if (!p) return c.err("Project not found", 404);
     // member activity feed, limited to tasks this person may see (admin: all; agent: assignee/owner/observer)
-    const scope = c.canManage ? "" : " AND (t.assignee = ? OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))";
-    const sb = c.canManage ? [] : [c.user.username, c.user.username, c.user.username];
+    const scope = c.can("tasks.view_all") ? "" : " AND (t.assignee = ? OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))";
+    const sb = c.can("tasks.view_all") ? [] : [c.user.username, c.user.username, c.user.username];
     const { results } = await db.prepare(
       `SELECT a.id, a.actor, a.text, a.created_at, t.id AS task_id, t.title FROM task_activity a JOIN tasks t ON t.id = a.task_id
         WHERE t.project_id = ? AND t.deleted_at IS NULL${scope} ORDER BY a.id DESC LIMIT 30`
@@ -118,7 +118,7 @@ async function projects(c, m) {
     return c.ok({ project: p, activity: results || [] });
   }
   if ((m = path.match(/^\/api\/work\/projects\/(\d+)\/archive$/)) && method === "POST") {
-    if (!c.canManage) return c.err("Admin only", 403);
+    if (!c.can("projects.manage")) return c.err("Admin only", 403);
     const b = await body(c), id = Number(m[1]);
     const r = await db.prepare("UPDATE projects SET archived = ? WHERE id = ? AND deleted_at IS NULL").bind(b.archived ? 1 : 0, id).run();
     if (!r.meta.changes) return c.err("Project not found", 404);
@@ -126,7 +126,7 @@ async function projects(c, m) {
     return c.ok({ project: (await projectRows(c, { id }))[0] });
   }
   if ((m = path.match(/^\/api\/work\/projects\/(\d+)\/delete$/)) && method === "POST") {  // soft delete -> Recycle bin
-    if (!c.canManage) return c.err("Admin only", 403);
+    if (!c.can("projects.manage")) return c.err("Admin only", 403);
     const id = Number(m[1]);
     const r = await db.prepare("UPDATE projects SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ? AND deleted_at IS NULL").bind(c.user.username, id).run();
     if (!r.meta.changes) return c.err("Project not found", 404);
@@ -161,7 +161,7 @@ async function flowRows(db, id = null) {
 async function flows(c, m) {
   const { path, method } = c, db = c.env.DB;
   if (!path.startsWith("/api/work/flows")) return null;
-  if (!c.canManage) return c.err("Admin only", 403);
+  if (!c.can("flows.manage")) return c.err("Admin only", 403);
   if (path === "/api/work/flows" && method === "GET") return c.ok({ flows: await flowRows(db) });
   if (path === "/api/work/flows" && method === "POST") {
     const b = await body(c), name = str(b.name, 120);
@@ -206,7 +206,7 @@ async function templates(c, m) {
     const { results } = await db.prepare("SELECT id, name, deadline, assignee, checklist, created_by FROM task_templates WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE").all();
     return c.ok({ templates: (results || []).map(tplOut) });
   }
-  if (!c.canManage) return c.err("Admin only", 403);   // every write below is admin only (agents and viewers get 403)
+  if (!c.can("templates.manage")) return c.err("Admin only", 403);   // every write below is admin only (agents and viewers get 403)
   if (path === "/api/work/templates" && method === "POST") {
     const b = await body(c), name = str(b.name, 120);
     if (!name) return c.err("Template name is required");
@@ -241,7 +241,7 @@ async function templates(c, m) {
 // ───────────────────────────── analytics (admin) ─────────────────────────────
 // compliance = on-time completions / (completions with a deadline + tasks still open and overdue): overdue work counts against the score.
 async function analytics(c) {
-  if (!c.canManage) return c.err("Admin only", 403);
+  if (!c.can("analytics.view")) return c.err("Admin only", 403);
   const db = c.env.DB, today = mytToday();
   const days = Math.min(365, Math.max(1, parseInt(c.url.searchParams.get("days"), 10) || 30));
   const since = mytShift(today, -(days - 1));
@@ -280,7 +280,7 @@ async function efficiency(c) {
   const db = c.env.DB, today = mytToday(), me = c.user.username;
   const q = c.url.searchParams;
   let user = q.get("user") || "";
-  if (!c.canManage) { if (user && user !== me) return c.err("You can only see your own task efficiency", 403); user = me; }
+  if (!c.can("analytics.view")) { if (user && user !== me) return c.err("You can only see your own task efficiency", 403); user = me; }
   const d = parseInt(q.get("days"), 10);
   const days = d > 0 ? Math.min(365, d) : null;                    // optional window for completions; default all time
   const since = days ? mytShift(today, -(days - 1)) : "0000-00-00";
@@ -316,7 +316,7 @@ async function efficiency(c) {
 async function bin(c, m) {
   const { path, method } = c, db = c.env.DB;
   if (!path.startsWith("/api/work/bin")) return null;
-  if (!c.canManage) return c.err("Admin only", 403);
+  if (!c.can("bin.manage")) return c.err("Admin only", 403);
   if (path === "/api/work/bin" && method === "GET") {
     const cut = `datetime('now','-${BIN_DAYS} days')`;
     const parts = Object.entries(BIN_TYPES).map(([k, t]) => `SELECT '${k}' AS type, id, ${BIN_NAME[k]} AS name, deleted_at, deleted_by FROM ${t} WHERE deleted_at IS NOT NULL AND deleted_at >= ${cut}`);

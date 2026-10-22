@@ -31,7 +31,7 @@ const ELAPSED = "MAX(0, COALESCE(CAST(strftime('%s','now') AS INTEGER) - CAST(st
 async function body(c) { try { const b = await c.request.json(); return b && typeof b === "object" && !Array.isArray(b) ? b : {}; } catch { return {}; } }
 
 // ── people / permissions ──────────────────────────────────────────────────────────────────────
-const canEditAny = (c) => !!c.user.can_edit || c.canManage;
+const canEditAny = (c) => c.can("tasks.use");
 const noEdit = (c) => c.err("View-only — your account has no edit permission", 403);
 
 async function existingUsers(db, names) {
@@ -66,8 +66,8 @@ async function loadTask(db, id) {
 }
 
 const isObserver = (t, me) => t.observers.includes(me);
-const canSee = (c, t) => c.canManage || t.assignee === c.user.username || t.owner === c.user.username || isObserver(t, c.user.username);
-const canEditTask = (c, t) => c.canManage || t.assignee === c.user.username || t.owner === c.user.username;
+const canSee = (c, t) => c.can("tasks.view_all") || t.assignee === c.user.username || t.owner === c.user.username || isObserver(t, c.user.username);
+const canEditTask = (c, t) => c.can("tasks.edit_any") || t.assignee === c.user.username || t.owner === c.user.username;
 
 // Loads a task and applies visibility. Returns { t } or { res } (a ready error response).
 async function getVisible(c, id) {
@@ -83,7 +83,7 @@ const act = (db, taskId, actor, text) => db.prepare("INSERT INTO task_activity (
 async function projectCheck(c, projectId) {
   const p = await c.env.DB.prepare("SELECT id, privacy FROM projects WHERE id = ? AND deleted_at IS NULL").bind(projectId).first();
   if (!p) return c.err("Project not found", 404);
-  if (c.canManage || p.privacy === "team") return null;
+  if (c.can("projects.manage") || p.privacy === "team") return null;
   const m = await c.env.DB.prepare("SELECT 1 AS x FROM project_members WHERE project_id = ? AND username = ?").bind(projectId, c.user.username).first();
   return m ? null : c.err("You are not a member of that project", 403);
 }
@@ -131,7 +131,7 @@ async function list(c) {
   const where = ["t.deleted_at IS NULL"], binds = [];
   const assignee = q.get("assignee");
   if (assignee) {
-    if (!c.canManage && assignee !== me) return c.err("You can only filter by your own username", 403);
+    if (!c.can("tasks.view_all") && assignee !== me) return c.err("You can only filter by your own username", 403);
     where.push("t.assignee = ?"); binds.push(assignee);
   }
   const status = q.get("status");
@@ -149,7 +149,7 @@ async function list(c) {
     where.push("(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\' OR t.tags LIKE ? ESCAPE '\\' OR t.linked_player LIKE ? ESCAPE '\\')");
     binds.push(like, like, like, like);
   }
-  if (!c.canManage) {
+  if (!c.can("tasks.view_all")) {
     where.push("(t.assignee = ? OR t.owner = ? OR EXISTS (SELECT 1 FROM task_observers o WHERE o.task_id = t.id AND o.username = ?))");
     binds.push(me, me, me);
   }
@@ -192,7 +192,7 @@ async function create(c) {
 
   // agents can only create for themselves; admin may pick anyone (or the template's assignee)
   let assignee = me;
-  if (c.canManage) {
+  if (c.can("tasks.assign_others")) {
     const want = !blank(b.assignee) ? b.assignee : tpl && tpl.assignee ? tpl.assignee : me;
     if (!(await existingUsers(db, [want])).length) return c.err("Assignee is not a known user");
     assignee = String(want).trim();
@@ -244,7 +244,7 @@ async function update(c, id) {
   const sets = [], binds = [], changed = [], extra = [];
 
   if (has(b, "assignee") && !blank(b.assignee) && String(b.assignee).trim() !== t.assignee) {
-    if (!c.canManage) return c.err("Only an admin can reassign a task", 403);
+    if (!c.can("tasks.assign_others")) return c.err("Only an admin can reassign a task", 403);
     if (t.status === "progress") return c.err("Pause the task before reassigning it", 400);
     const who = String(b.assignee).trim();
     if (!(await existingUsers(db, [who])).length) return c.err("Assignee is not a known user");
@@ -400,7 +400,7 @@ async function remove(c, id) {
   const v = await getVisible(c, id);
   if (v.res) return v.res;
   const t = v.t;
-  if (!c.canManage && t.owner !== me) return c.err("Only the owner or an admin can delete this task", 403);
+  if (!c.can("tasks.delete_any") && t.owner !== me) return c.err("Only the owner or an admin can delete this task", 403);
   // an ongoing task goes back to 'pending' (elapsed kept) so a later restore can never clash with uq_one_ongoing_per_person
   await db.batch([
     db.prepare(
@@ -416,11 +416,11 @@ async function remove(c, id) {
 }
 
 // ── GET /workload (admin) ─────────────────────────────────────────────────────────────────────
+// Admin: everyone (each row carries `team`; the page filters). Anyone else: only their own team (just themselves when they have no team).
 async function workload(c) {
-  if (!c.canManage) return c.err("Admin only", 403);
   const db = c.env.DB, today = mytToday();
   const [users, agg, ong] = await Promise.all([
-    db.prepare("SELECT username FROM users WHERE can_edit = 1 OR manage_users = 1").all(),
+    db.prepare("SELECT username, team, (can_edit = 1 OR manage_users = 1) AS listed FROM users").all(),     // everyone's team is known; only those who can act get a card
     db.prepare(
       `SELECT assignee AS username,
               SUM(status != 'done') AS assigned,
@@ -435,14 +435,17 @@ async function workload(c) {
          FROM tasks t WHERE t.status = 'progress' AND t.deleted_at IS NULL`).all(),
   ]);
   const by = new Map();
-  const get = (u) => { if (!by.has(u)) by.set(u, { username: u, assigned: 0, overdue: 0, done: 0, waiting: 0, ongoing: null }); return by.get(u); };
-  for (const u of users.results || []) get(u.username);
+  const teamOf = new Map((users.results || []).map((u) => [u.username, u.team || null]));
+  const get = (u) => { if (!by.has(u)) by.set(u, { username: u, team: teamOf.get(u) || null, assigned: 0, overdue: 0, done: 0, waiting: 0, ongoing: null }); return by.get(u); };
+  for (const u of users.results || []) if (u.listed) get(u.username);
   for (const r of agg.results || []) Object.assign(get(r.username), { assigned: r.assigned || 0, overdue: r.overdue || 0, done: r.done || 0, waiting: r.waiting || 0 });
   for (const r of ong.results || []) {
     const { username, ...o } = r;
     get(username).ongoing = o;
   }
-  return c.ok({ people: [...by.values()].sort((a, b) => a.username.localeCompare(b.username)) });
+  const mine = c.user.team || null;
+  const rows = [...by.values()].filter((p) => c.can("workload.all") || p.username === c.user.username || (mine && p.team === mine));
+  return c.ok({ people: rows.sort((a, b) => a.username.localeCompare(b.username)), my_team: mine });
 }
 
 // ── router ────────────────────────────────────────────────────────────────────────────────────

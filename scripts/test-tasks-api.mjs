@@ -31,6 +31,8 @@ const myt = (n = 0) => new Date(Date.now() + 8 * 3600e3 + n * 86400e3).toISOStri
 await call(null, "POST", "/api/users/init", { username: "aldo", password: PW });
 const A = await login("aldo");
 for (const [u, role, edit] of [["sara", "agent", 1], ["daniel", "agent", 1], ["zed", "agent", 1], ["vic", "viewer", 0]]) await call(A, "POST", "/api/users", { username: u, password: PW, role, can_edit: edit, team: "B" });
+await call(A, "POST", "/api/users", { username: "otto", password: PW, role: "agent", can_edit: 1, team: "C" });   // other team: only an admin should see him in the workload
+sql("UPDATE users SET team = 'B' WHERE username IN ('sara','daniel','zed','vic'); UPDATE users SET team = 'C' WHERE username = 'otto'");   // another suite may have created them without a team
 const S = await login("sara"), D = await login("daniel"), Z = await login("zed"), V = await login("vic");
 sql("DELETE FROM tasks WHERE title LIKE '[t]%'");   // re-runs on the same throwaway DB
 
@@ -180,9 +182,14 @@ check("empty comment (400)", (await call(S, "POST", `/api/work/tasks/${T1}/comme
 check("comment_count in list", (await call(S, "GET", "/api/work/tasks?include=done")).data.tasks.find((t) => t.id === T1).comment_count === 2);
 
 // ---- workload (admin) ----
-check("agent workload -> 403", (await call(S, "GET", "/api/work/workload")).status === 403);
-check("viewer workload -> 403", (await call(V, "GET", "/api/work/workload")).status === 403);
-check("agent token on admin route (workload) is 403 and unauthenticated is 401", (await call(D, "GET", "/api/work/workload")).status === 403 && (await call(null, "GET", "/api/work/workload")).status === 401);
+// an agent sees only their own team; an admin sees every team (each row says which)
+r = await call(S, "GET", "/api/work/workload");
+check("agent workload: 200, own team only (team B, no otto), my_team set", r.status === 200 && r.data.my_team === "B" && r.data.people.length > 0 && r.data.people.every((p) => p.team === "B") && r.data.people.some((p) => p.username === "sara") && !r.data.people.some((p) => p.username === "otto"), JSON.stringify(r.data));
+r = await call(V, "GET", "/api/work/workload");
+check("viewer workload: 200, sees their team (team B), not otto", r.status === 200 && r.data.my_team === "B" && r.data.people.length > 1 && r.data.people.every((p) => p.team === "B") && !r.data.people.some((p) => p.username === "otto"), JSON.stringify(r.data));
+check("unauthenticated workload is 401", (await call(null, "GET", "/api/work/workload")).status === 401);
+r = await call(A, "GET", "/api/work/workload");
+check("admin workload: every team, rows carry team", r.status === 200 && r.data.people.some((p) => p.username === "otto" && p.team === "C") && r.data.people.some((p) => p.username === "sara" && p.team === "B"), JSON.stringify(r.data));
 const T4 = (await call(S, "POST", "/api/work/tasks", { title: "[t] sara quick" })).data.task.id;
 await call(S, "POST", `/api/work/tasks/${T4}/status`, { action: "start" });
 await call(S, "POST", `/api/work/tasks/${T4}/status`, { action: "complete" });

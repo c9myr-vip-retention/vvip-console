@@ -8,8 +8,8 @@ import { handleTasks } from "./tasks.js";
 import { handleSchedule } from "./schedule.js";
 import { handleProjects } from "./projects.js";
 
-// c = { path, method, url, request, env, user, canManage, ok, err, log, ctx }
-//   user.username identifies the person; canManage === admin (users.manage_users).
+// c = { path, method, url, request, env, user, canManage, can, perms, ok, err, log, ctx }
+//   user.username identifies the person; c.can('some.permission') decides what they may do (worker/perms.js).
 //   ok(data, status) / err(msg, status) are the Worker's JSON helpers; log(actor, action, detail) writes activity_log.
 export async function handleWork(c) {
   if (!c.path.startsWith("/api/work/")) return null;

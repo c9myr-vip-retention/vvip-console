@@ -1,0 +1,161 @@
+// Local checks for roles and permissions (worker/perms.js, worker/roles.js) and how the routes enforce them.
+// LOCAL ONLY: talks to `wrangler dev --local` and seeds a THROWAWAY local D1 with `wrangler d1 execute --local`. Never --remote.
+//   1) apply schema.sql, schema_v2..v27 with: npx wrangler d1 execute groupb-tracker-db --local --persist-to <dir> --file=...
+//   2) npx wrangler dev --local --persist-to <dir> --port 8797 --var SESSION_SECRET:x --var PASSWORD_SALT:y --var INGEST_TOKEN:x
+//   3) PERSIST=<dir> BASE=http://127.0.0.1:8797 node scripts/test-roles-api.mjs
+import { execFileSync } from "node:child_process";
+
+const BASE = process.env.BASE || "http://127.0.0.1:8787";
+const PERSIST = process.env.PERSIST;
+if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(BASE)) { console.error("Refusing: BASE must be a local Worker"); process.exit(2); }
+if (!PERSIST) { console.error("Set PERSIST=<the --persist-to dir of the local D1>"); process.exit(2); }
+
+let fails = 0, passes = 0;
+const check = (name, ok, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"}  ${name}${ok ? "" : "  " + extra}`); if (ok) passes++; else fails++; };
+const sql = (q) => execFileSync("npx", ["wrangler", "d1", "execute", "groupb-tracker-db", "--local", "--persist-to", PERSIST, "--json", "--command", q], { stdio: "pipe" }).toString();
+const rows = (q) => JSON.parse(sql(q).match(/\[[\s\S]*\]/)[0]).flatMap((x) => x.results || []);
+
+async function call(tok, method, path, body) {
+  for (let i = 0; ; i++) {
+    try {
+      const r = await fetch(BASE + path, { method, headers: { "Content-Type": "application/json", ...(tok ? { Authorization: `Bearer ${tok}` } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+      return { status: r.status, data: await r.json().catch(() => ({})) };
+    } catch (e) { if (i >= 2) throw e; await new Promise((r) => setTimeout(r, 300)); }
+  }
+}
+const PW = "test-password-1";
+async function login(u) { const r = await call(null, "POST", "/api/login", { username: u, password: PW }); if (!r.data.token) throw new Error(`login ${u}: ${JSON.stringify(r)}`); return r.data.token; }
+const me = async (tok) => (await call(tok, "GET", "/api/me")).data;
+const has = (m, p) => (m.perms || []).includes(p);
+
+// aldo = a legacy admin (no role_key). sara = a legacy agent. Everything else is made through the role routes.
+await call(null, "POST", "/api/users/init", { username: "aldo", password: PW });
+const A = await login("aldo");
+await call(A, "POST", "/api/users", { username: "sara", password: PW, role: "agent", can_edit: 1, can_delete: 1, on_leaderboard: 1, team: "B" });
+const S = await login("sara");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL; UPDATE roles SET name = 'Admin' WHERE key = 'admin'; UPDATE roles SET name = 'Agent' WHERE key = 'agent'; UPDATE roles SET name = 'Viewer' WHERE key = 'viewer'; DELETE FROM users WHERE username NOT IN ('aldo','sara'); UPDATE users SET role_key = NULL; UPDATE users SET role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0, team = 'B' WHERE username = 'sara'");
+const day = (n) => new Date(Date.UTC(2026, 10, 2 + n)).toISOString().slice(0, 10);
+
+// ---- legacy accounts behave exactly as before ----
+let r = await me(A);
+check("legacy admin: role_key null, has every admin permission", r.role_key === null && ["users.manage", "teams.all", "schedule.manage", "tasks.assign_others", "contact.edit"].every((p) => has(r, p)) && r.manage_users === true, JSON.stringify(r));
+r = await me(S);
+check("legacy agent: edit + delete + scored + own tasks + swap request, nothing admin", r.role_key === null && ["contact.edit", "contact.delete", "kpi.scored", "tasks.use", "schedule.swap_request"].every((p) => has(r, p)) && !has(r, "users.manage") && !has(r, "schedule.manage") && !has(r, "teams.all") && r.manage_users === false, JSON.stringify(r));
+
+// ---- reading roles ----
+r = await call(S, "GET", "/api/roles");
+check("an agent cannot read roles (403)", r.status === 403);
+check("unauthenticated is 401", (await call(null, "GET", "/api/roles")).status === 401);
+r = await call(A, "GET", "/api/roles");
+const keys = (r.data.perms || []).map((p) => p.key);
+check("admin reads the catalogue (24 permissions, 4 groups) and 3 built-in roles", r.status === 200 && keys.length === 24 && new Set(keys).size === 24 && r.data.groups.length === 4 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
+check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
+check("built-in Agent role starts with the agent defaults", ["contact.edit", "tasks.use", "kpi.scored"].every((p) => r.data.roles.find((x) => x.key === "agent").perms.includes(p)) && !r.data.roles.find((x) => x.key === "agent").perms.includes("schedule.manage"));
+
+// ---- create a role ----
+r = await call(A, "POST", "/api/roles", { name: "Supervisor", base: "agent" });
+check("create a role (201), starts like an agent", r.status === 201 && r.data.role.key === "supervisor" && r.data.role.perms.includes("tasks.use") && !r.data.role.perms.includes("schedule.manage"), JSON.stringify(r));
+check("duplicate name is 409", (await call(A, "POST", "/api/roles", { name: "supervisor", base: "none" })).status === 409);
+check("blank name is 400", (await call(A, "POST", "/api/roles", { name: "  ", base: "none" })).status === 400);
+check("agent cannot create a role (403)", (await call(S, "POST", "/api/roles", { name: "X", base: "none" })).status === 403);
+
+// ---- switch permissions on and off ----
+r = await call(A, "POST", "/api/roles/supervisor/update", { overrides: { "tasks.assign_others": true, "schedule.manage": true, "kpi.scored": false } });
+check("switch two on and one off", r.status === 200 && r.data.role.perms.includes("tasks.assign_others") && r.data.role.perms.includes("schedule.manage") && !r.data.role.perms.includes("kpi.scored") && r.data.role.perms.includes("contact.edit"), JSON.stringify(r.data));
+check("unknown permission is 400", (await call(A, "POST", "/api/roles/supervisor/update", { overrides: { "nope.nope": true } })).status === 400);
+check("unknown role is 404", (await call(A, "POST", "/api/roles/nope/update", { name: "Z" })).status === 404);
+
+// ---- an account on that role ----
+r = await call(A, "POST", "/api/users", { username: "terry", password: PW, role_key: "supervisor", team: "B" });
+check("create an account straight onto the role", r.status === 200, JSON.stringify(r));
+const T = await login("terry");
+let mt = await me(T);
+check("/api/me: role_key, permissions, and the old fields match the role", mt.role_key === "supervisor" && has(mt, "tasks.assign_others") && has(mt, "schedule.manage") && !has(mt, "users.manage") && !has(mt, "kpi.scored") && mt.manage_users === false && mt.can_edit === true && mt.on_leaderboard === false && mt.role === "agent", JSON.stringify(mt));
+const dbT = rows("SELECT role, role_key, can_edit, can_delete, on_leaderboard, manage_users FROM users WHERE username = 'terry'")[0];
+check("the old columns were synced from the role", dbT.role === "agent" && dbT.role_key === "supervisor" && dbT.can_edit === 1 && dbT.can_delete === 1 && dbT.on_leaderboard === 0 && dbT.manage_users === 0, JSON.stringify(dbT));
+
+// ---- enforcement: what the role gets, and only that ----
+r = await call(T, "POST", "/api/work/schedule/items", { items: [{ type_key: "reload", date: day(0), title: "[r] reload" }] });
+check("supervisor edits the schedule (schedule.manage)", r.status === 201, JSON.stringify(r));
+check("supervisor cannot decide swaps (no schedule.swaps) -> 403", (await call(T, "GET", "/api/work/schedule/swaps")).status === 403);
+r = await call(T, "POST", "/api/work/tasks", { title: "[r] for sara", assignee: "sara" });
+check("supervisor assigns a task to someone else (tasks.assign_others)", r.status === 201 && r.data.task.assignee === "sara", JSON.stringify(r));
+const sara1 = await call(S, "POST", "/api/work/tasks", { title: "[r] sara self", assignee: "terry" });
+check("a plain agent still cannot assign to others (lands on themself)", sara1.status === 201 && sara1.data.task.assignee === "sara", JSON.stringify(sara1.data));
+check("supervisor cannot read roles (no users.manage) -> 403", (await call(T, "GET", "/api/roles")).status === 403);
+check("supervisor cannot read the activity log -> 403", (await call(T, "GET", "/api/activity")).status === 403);
+check("supervisor cannot list accounts -> 403", (await call(T, "GET", "/api/users")).status === 403);
+check("supervisor cannot manage projects -> 403", (await call(T, "POST", "/api/work/projects", { name: "[r] p" })).status === 403);
+check("supervisor does not see every team's workload", (await call(T, "GET", "/api/work/workload")).data.people.every((p) => p.team === "B"));
+
+// ---- switch one back to the base default ----
+await call(A, "POST", "/api/roles/supervisor/update", { overrides: { "tasks.assign_others": null } });
+r = await call(T, "POST", "/api/work/tasks", { title: "[r] for sara again", assignee: "sara" });
+check("clearing an override returns to the default (cannot assign others now)", r.status === 201 && r.data.task.assignee === "terry", JSON.stringify(r.data));
+mt = await me(T);
+check("the role change shows on /api/me at once", !has(mt, "tasks.assign_others") && has(mt, "schedule.manage"));
+
+// ---- a role that starts from nothing ----
+await call(A, "POST", "/api/roles", { name: "Reader", base: "none" });
+await call(A, "POST", "/api/users", { username: "rita", password: PW, role_key: "reader", team: "B" });
+const R = await login("rita");
+mt = await me(R);
+check("a role that starts from nothing has no permissions; the old role column reads viewer", mt.perms.length === 0 && mt.role === "viewer" && mt.can_edit === false, JSON.stringify(mt));
+check("it is view-only for tasks (403)", (await call(R, "POST", "/api/work/tasks", { title: "[r] nope" })).status === 403);
+await call(A, "POST", "/api/roles/reader/update", { overrides: { "tasks.use": true } });
+check("switch one function on and it works", (await call(R, "POST", "/api/work/tasks", { title: "[r] mine" })).status === 201);
+
+// ---- rename; built-in roles ----
+r = await call(A, "POST", "/api/roles/agent/update", { name: "CS Agent" });
+check("rename a built-in role", r.status === 200 && r.data.role.name === "CS Agent" && r.data.role.key === "agent");
+check("rename onto another name is 409", (await call(A, "POST", "/api/roles/agent/update", { name: "supervisor" })).status === 409);
+r = await call(A, "POST", "/api/roles/agent/update", { base: "viewer" });
+check("a built-in role can change its starting point too", r.status === 200 && r.data.role.base === "viewer" && !r.data.role.perms.includes("contact.edit"), JSON.stringify(r.data));
+await call(A, "POST", "/api/roles/agent/update", { base: "agent" });
+check("a built-in role cannot be deleted (400)", (await call(A, "POST", "/api/roles/agent/delete", {})).status === 400);
+r = await call(A, "POST", "/api/roles/supervisor/update", { base: "admin" });
+check("a custom role can change its starting point", r.status === 200 && r.data.role.perms.includes("projects.manage") && !r.data.role.perms.includes("kpi.scored"), JSON.stringify(r.data));
+await call(A, "POST", "/api/roles/supervisor/update", { base: "agent", reset: true });
+
+// ---- moving accounts ----
+r = await call(A, "POST", "/api/users/role", { id: rows("SELECT id FROM users WHERE username = 'sara'")[0].id, role_key: "supervisor" });
+check("give an existing legacy account a role", r.status === 200, JSON.stringify(r));
+mt = await me(S);
+check("that account now follows the role (agent defaults after the reset above)", mt.role_key === "supervisor" && has(mt, "kpi.scored") && has(mt, "tasks.use") && !has(mt, "schedule.manage"), JSON.stringify(mt));
+r = await call(A, "POST", "/api/roles/supervisor/delete", {});
+check("deleting a role with accounts needs a move_to (409)", r.status === 409, JSON.stringify(r));
+r = await call(A, "POST", "/api/roles/supervisor/delete", { move_to: "reader" });
+check("delete with move_to moves them", r.status === 200 && r.data.moved === 2, JSON.stringify(r));
+check("the accounts follow the new role", (await me(T)).role_key === "reader" && (await me(S)).role_key === "reader");
+check("the deleted role is gone from the list", !(await call(A, "GET", "/api/roles")).data.roles.some((x) => x.key === "supervisor"));
+
+// ---- the old account editor leaves the role system ----
+const idT = rows("SELECT id FROM users WHERE username = 'terry'")[0].id;
+await call(A, "POST", "/api/users/perm", { id: idT, role: "agent", can_edit: 1, can_delete: 0, on_leaderboard: 0, manage_users: 0, team: "B" });
+mt = await me(T);
+check("saving through the old editor clears the role and keeps those exact flags", mt.role_key === null && mt.can_edit === true && mt.can_delete === false && has(mt, "contact.edit") && !has(mt, "contact.delete"), JSON.stringify(mt));
+check("GET /api/users shows role_key", (await call(A, "GET", "/api/users")).data.some((u) => u.username === "rita" && u.role_key === "reader"));
+
+// ---- nobody may remove the last account that can manage accounts ----
+const idAldo = rows("SELECT id FROM users WHERE username = 'aldo'")[0].id;
+r = await call(A, "POST", "/api/users/role", { id: idAldo, role_key: "viewer" });
+check("the only manager cannot be moved to a role without users.manage (400)", r.status === 400, JSON.stringify(r));
+r = await call(A, "POST", "/api/users/role", { id: idAldo, role_key: "admin" });
+check("moving the manager to the Admin role is fine", r.status === 200);
+r = await call(A, "POST", "/api/roles/admin/update", { overrides: { "users.manage": false } });
+check("cannot switch users.manage off the last manager's role (400)", r.status === 400, JSON.stringify(r));
+await call(A, "POST", "/api/roles", { name: "Boss", base: "admin" });
+await call(A, "POST", "/api/users", { username: "boss1", password: PW, role_key: "boss", team: "B" });
+r = await call(A, "POST", "/api/roles/admin/update", { overrides: { "users.manage": false } });
+check("with a second manager the switch is allowed", r.status === 200, JSON.stringify(r));
+// aldo lost users.manage on the Admin role: the boss account carries on, and is now the last manager
+const B1 = await login("boss1");
+check("aldo (Admin role without users.manage) is locked out of roles now (403)", (await call(A, "GET", "/api/roles")).status === 403);
+check("the Boss role cannot lose it either: the last manager (400)", (await call(B1, "POST", "/api/roles/boss/update", { overrides: { "users.manage": false } })).status === 400);
+check("the remaining manager can restore it", (await call(B1, "POST", "/api/roles/admin/update", { reset: true })).status === 200 && has(await me(A), "users.manage"));
+
+// ---- leave the throwaway database the way the other suites expect it ----
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1'); UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+
+console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
+process.exit(fails ? 1 : 0);
