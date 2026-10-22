@@ -7,9 +7,7 @@ Welcome. This is the shared copy of the VVIP Tracker console. It's **live**: age
 | Person | Role | Can do | Never does |
 |---|---|---|---|
 | Aldo | Owner (1st PIC) | Approves and merges changes, deploys, runs database commands | |
-| Mexha | Developer (2nd PIC) | Reads the code, runs it locally, builds features and fixes on a branch, opens pull requests, writes docs, logs bugs | Deploys, runs anything against the live database, pushes straight to `main`, handles secrets |
-
-Only Aldo puts changes live. If a task seems to need a deploy or a database change, write it in the pull request and Aldo takes it from there.
+| Mexha | Developer (2nd PIC) | Reads the code, runs it locally, builds features and fixes on a branch, opens pull requests, writes docs, logs bugs | Pushes straight to `main`, handles secrets |
 
 ## One-time setup
 
@@ -43,8 +41,6 @@ Your login only shows the brands your account is scoped to. That's expected.
 
 ## Never
 
-- Never run `npm run deploy:worker`, `npm run deploy:pages`, `wrangler deploy` or `wrangler pages deploy`.
-- Never run `wrangler d1 ... --remote` (that's the live database).
 - Never push to `main` directly.
 - Never put passwords, tokens or keys in the code. Secrets live in Cloudflare only.
 - Never weaken the `player_days` unique key `(player_key, snapshot_date, brand, tier_segment)`.

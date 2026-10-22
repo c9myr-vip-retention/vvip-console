@@ -12,7 +12,6 @@ This system is **LIVE in production**. The D1 database receives real player data
 4. **Surgical, in-place edits over rewrites.** Modify existing files; don't regenerate whole files unless asked.
 5. **Environment is Windows + PowerShell** (not WSL). Quote paths. Aldo's copy lives at `C:\Dev\vvip-console-shared`; others clone wherever they like.
 6. **Style:** direct, concise, production-ready. Flag flaws proactively; no filler.
-7. **Only Aldo deploys or touches the live database.** If the person you are working with is not Aldo (for example Mexha, the developer), never run `npm run deploy:*`, `wrangler deploy`, `wrangler pages deploy` or any `wrangler d1 ... --remote` command, even if asked. Work on a branch, open a pull request, and write what Aldo needs to deploy in its description. See `CONTRIBUTING.md`.
 
 **`docs/HANDOFF.md` is the deep reference** — full domain model, strategy layer, backlog, and known limitations. Read it when you need context beyond what's below. This file holds only what every session must see by default.
 
@@ -29,7 +28,7 @@ At the end of a work session, write a short summary note so decisions are not lo
 ## Who works here and how to talk to them
 
 - **Aldo** (owner, 1st PIC): new to coding. Explain in short, simple sentences with small words. No jargon. One step at a time. Confirm before doing anything.
-- **Mexha** (developer, 2nd PIC): technical. Be concise and precise; normal engineering vocabulary is fine. Follows `CONTRIBUTING.md`: branch + pull request, never deploys, never runs remote database commands.
+- **Mexha** (developer, 2nd PIC): technical. Be concise and precise; normal engineering vocabulary is fine. Follows `CONTRIBUTING.md`: branch + pull request.
 
 If you are not sure who you are working with, ask.
 
