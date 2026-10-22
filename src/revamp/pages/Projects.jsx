@@ -1,10 +1,8 @@
-// Projects. Admin: tabs Projects | Flows | Templates and full control. Agent: only the projects they are a member of.
+// Projects. Admin: full control (Flows and Templates are their own sidebar pages). Agent: only the projects they are a member of.
 // A project opens into a detail view with its tasks, members and activity.
 import React, { useMemo, useState } from "react";
 import { Avatar, Modal, MultiSelect, Select, Seg, toast } from "../ui";
 import { api, isAdmin, canEdit, useLoad, person, Notice, newTask, openTask, fmtWhen, fmtDay } from "../setup/common.jsx";
-import Flows from "./Flows.jsx";
-import Templates from "./Templates.jsx";
 
 const STATUS = { pending: ["Pending", "#8B94A7"], progress: ["In progress", "#4C8DF6"], done: ["Completed", "#4CC38A"], deferred: ["Deferred", "#A78BFA"] };
 const todayMyt = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
@@ -33,7 +31,7 @@ function ProjectForm({ project, people, onClose, onSaved }) {
         <label>Description<textarea className="input" rows={3} value={f.description} onChange={(e) => set("description")(e.target.value)} /></label>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label>Privacy<Select value={f.privacy} onChange={set("privacy")} options={[{ value: "members", label: "Members only" }, { value: "team", label: "Team" }]} /></label>
-          <div>Members<div><MultiSelect label="Members" value={f.members} onChange={set("members")} options={people.map((u) => ({ value: u, label: u }))} /></div></div>
+          <div>Members<div><MultiSelect label="Choose members" style={{ width: "100%", minHeight: 34, justifyContent: "space-between" }} value={f.members} onChange={set("members")} options={people.map((u) => ({ value: u, label: u }))} /></div></div>
         </div>
         {err && <div className="neg">{err}</div>}
       </div>
@@ -146,16 +144,9 @@ function ProjectList({ ctx, onOpen, reloadKey, onChanged }) {
 }
 
 export default function Projects({ ctx }) {
-  const admin = isAdmin(ctx);
-  const [tab, setTab] = useState("projects"), [open, setOpen] = useState(null), [rk, setRk] = useState(0);
+  const [open, setOpen] = useState(null), [rk, setRk] = useState(0);
   const bump = () => setRk((n) => n + 1);
-  return (
-    <>
-      {admin && !open && <div style={{ marginBottom: 14 }}><Seg value={tab} onChange={setTab} options={[{ value: "projects", label: "Projects" }, { value: "flows", label: "Flows" }, { value: "templates", label: "Templates" }]} /></div>}
-      {open ? <ProjectDetail ctx={ctx} id={open} onBack={() => setOpen(null)} onChanged={bump} />
-        : tab === "flows" && admin ? <Flows ctx={ctx} embedded />
-        : tab === "templates" && admin ? <Templates ctx={ctx} embedded />
-        : <ProjectList ctx={ctx} onOpen={setOpen} reloadKey={rk} onChanged={bump} />}
-    </>
-  );
+  return open
+    ? <ProjectDetail ctx={ctx} id={open} onBack={() => setOpen(null)} onChanged={bump} />
+    : <ProjectList ctx={ctx} onOpen={setOpen} reloadKey={rk} onChanged={bump} />;
 }
