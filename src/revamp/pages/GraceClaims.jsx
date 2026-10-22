@@ -172,8 +172,8 @@ export default function GraceClaims({ ctx }) {
       )}
 
       {dr && dr.list[dr.index] && (
-        <Drawer list={dr.list} index={dr.index} setIndex={(i) => setDr((o) => ({ ...o, index: i }))} snap={snap} me={me} team={team} readOnly={readOnly}
-          contact={contactMap[ckey(dr.list[dr.index])]} onSave={ctx.saveContact} onClear={ctx.clearContact} onClose={() => setDr(null)} />
+        <div className="rv-live"><Drawer list={dr.list} index={dr.index} setIndex={(i) => setDr((o) => ({ ...o, index: i }))} snap={snap} me={me} team={team} readOnly={readOnly}
+          contact={contactMap[ckey(dr.list[dr.index])]} onSave={ctx.saveContact} onClear={ctx.clearContact} onClose={() => setDr(null)} /></div>
       )}
     </>
   );

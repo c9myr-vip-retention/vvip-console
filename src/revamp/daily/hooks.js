@@ -38,7 +38,7 @@ export function useDailyBase(ctx) {
 
   const saveContact = (p) => ctx.saveContact(p);
   const clearContact = (p) => ctx.clearContact(p);
-  return { ctx, snap, data, contacts, health, team, me, isAdmin, readOnly, brandOrder, contactMap, cooldownSet, staleBrands, lagBrands, saveContact, clearContact };
+  return { ctx, snap, data, contacts, health, team, me, isAdmin, readOnly, isPast: !!ctx.isPast, brandOrder, contactMap, cooldownSet, staleBrands, lagBrands, saveContact, clearContact };
 }
 
 /** Filter state + the Grace activation lookup (loaded only when a view needs it, same endpoint as the live Queue). */

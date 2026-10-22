@@ -35,7 +35,7 @@ export default function NewTaskModal({ me, people = [], projects = [], initial =
     const days = deadlineDays(t.deadline);
     setF((x) => ({
       ...x, title: t.name, checklist: (t.checklist || []).join("\n"),
-      due_date: days === null ? "" : addDaysIso(todayMY(), days), due_time: days === null ? "" : x.due_time || "19:00",
+      due_date: days === null ? "" : addDaysIso(todayMY(), days), due_time: t.due_time || "",   // a template has no time unless it sets one
       assignee: admin && t.assignee ? t.assignee : x.assignee,
     }));
   };

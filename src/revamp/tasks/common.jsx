@@ -45,7 +45,6 @@ export function useTaskActions(onDone) {
       if (e.status === 409) {
         const msg = e.message || `${task.assignee} already has an ongoing task`;
         setConflict({ message: msg, ongoing: e.data?.ongoing || null });
-        toast(msg);
       } else toast(e.message || "Could not save");
       return null;
     } finally { setBusy(false); }

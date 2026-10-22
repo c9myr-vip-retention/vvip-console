@@ -332,7 +332,7 @@ export function Avatar({ name }) {
   return <span className="avatar" title={name || ""}>{s}</span>;
 }
 
-/** Small coloured brand tag. color comes from BRAND_COLORS in ../tokens.js. */
+/** Small coloured brand tag. color comes from brandColor() in ../tokens.js. */
 export function BrandBadge({ brand, color }) {
   return <span className="bb" style={{ "--b": color }}>{brand}</span>;
 }

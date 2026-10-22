@@ -416,6 +416,7 @@
 .rv .sc.off:not(.rv-live *){opacity:.55;padding:7px 10px}
 .rv .col.today .ch:not(.rv-live *){background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
 @media (max-width:900px){
+  .rv .side .sidenav{display:contents}
   .rv .side:not(.rv-live *){flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:8px}
   .rv .side .nav-h:not(.rv-live *),
 .rv .side .me:not(.rv-live *),
@@ -449,8 +450,9 @@
 /* ---- shell, dialogs and dropdowns (hand written; after the port so they win ties) ---- */
 /* shell layout */
 .rv .app{display:grid;grid-template-columns:216px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100vh;height:100dvh;background:var(--bg)}
-.rv .side{overflow-x:hidden;padding-bottom:0}
-.rv .side .me{position:sticky;bottom:0;background:var(--panel);margin-top:auto}
+.rv .side{overflow:hidden;padding-bottom:0}
+.rv .side .sidenav{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:3px;scrollbar-width:thin}
+.rv .side .me{flex:none;background:var(--panel);margin-top:0}
 .rv .rv-live input[type=file]::file-selector-button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 10px;margin-right:8px;cursor:pointer}
 .rv .main{min-width:0}
 .rv .topbar{position:relative}
@@ -510,3 +512,9 @@
 .rv .cdy.on.hasdot::after{background:var(--on-accent)}
 
 @media (max-width:900px){.rv .app{grid-template-columns:1fr;height:auto;min-height:100vh}.rv .main{overflow:visible}}
+/* read-only player drawer (live component): inputs look and act disabled; the date picker ignores readonly, so block pointer events */
+.rv .rv-live textarea[readonly],.rv .rv-live input[type=date][readonly]{opacity:.5;cursor:not-allowed}
+.rv .rv-live input[type=date][readonly]{pointer-events:none}
+.rv .side .nav{padding:6px 10px}
+.rv .side .nav-h{padding:9px 10px 3px}
+.rv .side .sidenav{gap:2px}

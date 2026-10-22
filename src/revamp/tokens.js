@@ -1,9 +1,7 @@
 // Shared constants for the revamp UI. Colours are the LIVE console's, unchanged (see :root in src/App.jsx <Style>).
-// Brand colours are identity: keep them everywhere a brand appears.
-export const BRAND_COLORS = {
-  LPK777: "#2563EB", ACE33: "#E11D48", BM69: "#16A34A", HOT321: "#F97316",
-  RM68: "#A855F7", SK69: "#0EA5E9", JK32: "#EAB308", ZAS36: "#14B8A6",
-};
+// Brand colours are identity: brandColor() reads BRANDS from src/App.jsx (the single source). Call it inside render only (circular import).
+import { BRANDS } from "../App.jsx";
+export const brandColor = (b) => BRANDS[b]?.p || "#8B94A7";
 export const BRAND_ORDER = ["LPK777", "ACE33", "BM69", "HOT321", "RM68", "SK69", "JK32", "ZAS36"];
 
 // Daily class chips (key -> [label, colour]); classifyAll() in src/App.jsx stays the source of truth for the rules.

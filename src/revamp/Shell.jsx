@@ -140,6 +140,7 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
       <div className="app">
         <aside className="side">
           <div className="brandmark"><i>♠</i><div>C9MYR<small>VIP Retention Console</small></div></div>
+          <div className="sidenav">
           {nav.map(([h, items]) => (
             <React.Fragment key={h}>
               <div className="nav-h">{h}</div>
@@ -150,6 +151,7 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
               ))}
             </React.Fragment>
           ))}
+          </div>
           <div className="me"><Avatar name={me.username} /><div><div>{me.username}</div><span className={"role-tag " + (isAdmin ? "admin" : "")}>{me.role || (isAdmin ? "admin" : "agent")}</span></div></div>
         </aside>
         <div className="colmain">

@@ -1,12 +1,10 @@
 // Team workload (admin): one card per person with the ongoing task, a live timer, checklist progress and counts.
-// Click a number to see that person's tasks. The Assignments panel (daily-b) is embedded below when it exists.
+// Click a number to see that person's tasks. Assignments is its own page.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, Modal, Seg } from "../ui/index.jsx";
-import * as AssignMod from "./Assignments.jsx";
 import useTaskOverlays from "../tasks/useTaskOverlays.jsx";
 import { tapi, meOf, isAdmin, todayMY, useNow, StatusPill, DueBadge, CheckProg, dueInfo, fmtElapsed, byDue } from "../tasks/common.jsx";
 
-const PANEL_EXPORT = "AssignmentsPanel";
 const parseUtc =(s) => Date.parse(String(s).replace(" ", "T") + "Z");
 const liveSec = (o) => (o.spent_seconds || 0) + (o.started_at ? Math.max(0, (Date.now() - parseUtc(o.started_at)) / 1000) : 0);
 const KINDS = [["assigned", "Assigned"], ["over", "Overdue"], ["done", "Done"], ["wait", "Waiting"]];
@@ -53,10 +51,11 @@ export default function TeamWorkload({ ctx }) {
     tapi.projects({ archived: 0 }).then((r) => setProjects(r.projects || [])).catch(() => {});
   }, []);
   const { overlays, openTask, newTask } = useTaskOverlays({ me, people, projects, tasks: [], onChange: load });
+  const viewers = useMemo(() => new Set(people.filter((p) => p.role === "viewer").map((p) => p.username)), [people]);   // view-only accounts are not agents
+  const shown = useMemo(() => (rows || []).filter((p) => !viewers.has(p.username)), [rows, viewers]);
   useNow(!!rows && rows.some((r) => r.ongoing));
 
   if (!isAdmin(me)) return <div className="card"><div className="body dim">Team workload is for admins only.</div></div>;
-  const Assign = AssignMod[PANEL_EXPORT];       // dynamic key: no build warning while daily-b's export is not merged yet
 
   return (
     <div>
@@ -70,7 +69,7 @@ export default function TeamWorkload({ ctx }) {
       {err && <div className="banner crit">{err}</div>}
       {rows === null && <div className="pageload">Loading…</div>}
       <div className="wl">
-        {(rows || []).map((p) => {
+        {shown.map((p) => {
           const on = p.ongoing;
           return (
             <div key={p.username} className="card">
@@ -100,8 +99,7 @@ export default function TeamWorkload({ ctx }) {
           );
         })}
       </div>
-      {rows && rows.length === 0 && !err && <div className="card"><div className="body dim">No agents yet.</div></div>}
-      {Assign && <div style={{ marginTop: 20 }}><Assign ctx={ctx} /></div>}
+      {rows && shown.length === 0 && !err && <div className="card"><div className="body dim">No agents yet.</div></div>}
       {see && <PersonTasks user={see.user} kind={see.kind} onClose={() => setSee(null)} onOpen={openTask} />}
       {overlays}
     </div>

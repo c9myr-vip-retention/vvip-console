@@ -127,7 +127,7 @@ function ProjectList({ ctx, onOpen, reloadKey, onChanged }) {
                 <tr key={p.id} onClick={() => onOpen(p.id)} style={{ cursor: "pointer" }} tabIndex={0} onKeyDown={(e) => e.key === "Enter" && onOpen(p.id)}>
                   <td><b>{p.name}</b><br /><span className="dim">{p.description}</span></td>
                   <td className="dim">{fmtWhen(p.last_active)}</td>
-                  <td style={{ minWidth: 150 }}><div className="prog"><i style={{ width: `${pc}%` }} /></div><span className="dim mono">{p.task_done}/{p.task_total} done</span></td>
+                  <td style={{ minWidth: 150 }}><div className="prog"><i style={{ width: `${pc}%` }} /></div><span className="dim mono">{pc}% · {p.task_done}/{p.task_total} done</span></td>
                   <td><Faces members={p.members} /></td>
                   <td>{mine ? (mine.role === "owner" ? "Owner" : "Member") : <span className="dim">—</span>}</td>
                   <td><span className="tag">{p.privacy}</span></td>

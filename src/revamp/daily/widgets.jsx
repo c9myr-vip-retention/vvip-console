@@ -1,6 +1,6 @@
 // Shared widgets for the Contact + Players pages: searchable menus, brand cards, player row, table pieces.
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BRAND_COLORS } from "../tokens.js";
+import { brandColor } from "../tokens.js";
 import { Select, BrandBadge } from "../ui";
 import "./daily.css";
 // Used only inside render functions (circular import with App.jsx).
@@ -8,7 +8,7 @@ import { BRANDS, CLASSES, CLASS_ORDER, ST_COLOR, ckey, dispName, looksNumeric, t
 import { buildInstruction } from "../../messageLibrary";
 import { nActive, isActioned } from "./logic.js";
 
-export const bcolor = (b) => BRAND_COLORS[b] || BRANDS[b]?.p || "#8B94A7";
+export const bcolor = brandColor;
 
 /** Button + floating panel, closes on outside click / Escape. children(q) gets the panel's search text. */
 export function Menu({ label, count, wide, placeholder, children, footer }) {
@@ -110,7 +110,7 @@ export function FilterMenu({ f, setF, setTog, clearAll, classCount, showMine }) 
 export function AgentSelect({ value, onChange, team, show }) {
   if (!show) return null;
   const opts = [{ value: "all", label: "All agents" }, ...team.map((t) => ({ value: t.username, label: t.username })), { value: "none", label: "Unassigned" }];
-  return <Select value={value} options={opts} onChange={onChange} style={{ width: 150 }} />;
+  return <Select value={value} options={opts} onChange={onChange} className="sm" style={{ width: 150 }} />;
 }
 
 export const SearchBox = ({ value, onChange }) => (
@@ -192,13 +192,12 @@ export function BrandCards({ brandOrder, rows, selected, onToggle, staleBrands, 
 }
 
 export function Banners({ base }) {
-  const { readOnly, snap, staleBrands, lagBrands } = base;
+  const { isPast, staleBrands, lagBrands } = base;   // past-day and view-only notices live in the shell (SnapBar / viewer banner)
   return (
     <>
-      {readOnly && <div className="banner warn">Viewing {snap}: read-only. Switch to Today to take action.</div>}
-      {!readOnly && staleBrands.length > 0 && (
+      {!isPast && staleBrands.length > 0 && (
         <div className="dl-note">Stale data, not fed today: {staleBrands.map((s) => `${s.brand} (last ${s.last_fed})`).join(" · ")}. Run that sheet's feeder before working its queue.</div>)}
-      {!readOnly && lagBrands.length > 0 && (
+      {!isPast && lagBrands.length > 0 && (
         <div className="dl-note">Data lagging, deposits behind other brands: {lagBrands.map((s) => `${s.brand} (through ${s.newest_dep})`).join(" · ")}. Others are current through {lagBrands[0].lead}.</div>)}
     </>
   );

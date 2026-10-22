@@ -1,6 +1,9 @@
 // My day (agent home): my ongoing task with a live timer, what is due today, what is overdue, and the rest of my list.
-import React, { useMemo, useState } from "react";
-import { Seg } from "../ui/index.jsx";
+import React, { useEffect, useMemo, useState } from "react";
+import { Seg, BrandBadge } from "../ui/index.jsx";
+import { api, TEAMS, BRAND_ORDER, dispName, dispId, keyMetric, ckey, fmt } from "../../App.jsx";
+import { brandColor } from "../tokens.js";
+import { contactTodo } from "../shellHelpers.js";
 import useTaskOverlays from "../tasks/useTaskOverlays.jsx";
 import {
   useTasksData, meOf, canEdit, todayMY, useNow, useTaskActions, ConflictBanner, DueBadge, CheckProg,
@@ -10,6 +13,69 @@ import {
 const HT = [["active", "Active"], ["over", "Overdue"], ["today", "Due today"], ["done", "Done"]];
 const BUCKET_ORDER = ["over", "today", "week", "next", "later", "none", "done"];
 const greet = () => { const h = new Date(Date.now() + 8 * 3600e3).getUTCHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; };
+
+/** Right-column summary card: title + count, a few rows, "Open" goes to the full page. */
+function Side({ title, extra, go, ctx, children }) {
+  return (
+    <div className="card">
+      <h3>{title}{extra ? <> <span className="dim" style={{ textTransform: "none", letterSpacing: 0 }}>{extra}</span></> : null}<span className="grow" /><button className="btn sm" onClick={() => ctx.goto && ctx.goto(go)}>Open →</button></h3>
+      <div className="body" style={{ paddingTop: 4 }}>{children}</div>
+    </div>
+  );
+}
+const SideRow = ({ onClick, name, brand, sub, right }) => (
+  <div className="lrow" onClick={onClick}>
+    <div style={{ minWidth: 0, flex: 1 }}><b>{name}</b><div style={{ marginTop: 2, display: "flex", gap: 6, alignItems: "center" }}><BrandBadge brand={brand} color={brandColor(brand)} />{sub && <span className="dim" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</span>}</div></div>
+    {right}
+  </div>
+);
+
+/** Contact next / Check-in / Grace to claim: the agent's daily-work summary, from the board in ctx plus the two read-only endpoints those pages use. */
+function DailyCards({ ctx }) {
+  const me = ctx.me || {};
+  const snap = ctx.board?.snapshot_date;
+  const todo = useMemo(() => contactTodo(ctx.teamData, ctx.contacts, snap, me.username), [ctx.teamData, ctx.contacts, snap, me.username]);
+  const next = todo.slice(0, 3);
+  const brands = ctx.teamBrands || TEAMS[ctx.viewTeam] || BRAND_ORDER;
+  const brand = brands.includes("SK69") ? "SK69" : brands[0];
+  const [chk, setChk] = useState(null);       // login-check payload, { error } or null while loading
+  const [gr, setGr] = useState(null);         // grace-tasks payload, { error } or null
+  useEffect(() => {
+    if (!snap || !me.username || !brand) return;
+    let off = false;
+    api(`/api/rtn/login-check?${new URLSearchParams({ brand, tier: "V", agent: me.username })}`).then((d) => !off && setChk(d)).catch((e) => !off && setChk({ error: e.message || "Not available" }));
+    api("/api/rtn/grace-tasks").then((d) => !off && setGr(d)).catch((e) => !off && setGr({ error: e.message || "Not available" }));
+    return () => { off = true; };
+  }, [snap, me.username, brand]);
+  const byKey = useMemo(() => { const m = {}; (ctx.teamData || []).forEach((r) => (m[ckey(r)] = r)); return m; }, [ctx.teamData]);
+  if (!snap) return null;
+  const crows = chk && chk.rows ? chk.rows : [];
+  const unchecked = crows.filter((r) => !r.login), checked = crows.length - unchecked.length;
+  const claims = (gr && gr.rows ? gr.rows : []).filter((r) => r.status === "reloaded" && byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`]);
+  const empty = (t) => <div className="dim" style={{ padding: "14px 0" }}>{t}</div>;
+  return (
+    <>
+      <Side title="Contact next" extra={next.length ? `top ${next.length} of ${todo.length}` : "all done"} go="queue" ctx={ctx}>
+        {next.map((r) => <SideRow key={ckey(r)} onClick={() => ctx.goto("queue")} name={dispName(r)} brand={r.brand} sub={`Tier ${r.tier_segment}`} right={<span className="mono" style={{ fontWeight: 600 }}>{keyMetric(r)}</span>} />)}
+        {!next.length && empty("Nobody left to contact. Nice work.")}
+      </Side>
+      <Side title="Check-in" extra={chk && !chk.error ? `${checked} of ${crows.length} logged in` : ""} go="checkin" ctx={ctx}>
+        {chk === null && empty("Loading…")}
+        {chk && chk.error && empty("Not available right now.")}
+        {chk && !chk.error && unchecked.slice(0, 3).map((r) => <SideRow key={r.player_key} onClick={() => ctx.goto("checkin")} name={dispId({ brand, uid: r.uid, username: r.username }) || r.player_key} brand={brand} sub="not logged in yet" />)}
+        {chk && !chk.error && !unchecked.length && empty(crows.length ? "Everyone is checked." : "Nobody assigned to you for check-in.")}
+      </Side>
+      <Side title="Grace to claim" extra={gr && !gr.error ? `${claims.length} ready` : ""} go="grace" ctx={ctx}>
+        {gr === null && empty("Loading…")}
+        {gr && gr.error && empty("Not available right now.")}
+        {gr && !gr.error && claims.slice(0, 3).map((r) => (
+          <SideRow key={`${r.player_key}|${r.brand}`} onClick={() => ctx.goto("grace")} name={dispName(byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`])} brand={r.brand}
+            sub={r.req != null ? `needs ${fmt(r.req)} in a day` : ""} right={<span className="pill np" style={{ "--c": "#4CC38A" }}>Ready</span>} />))}
+        {gr && !gr.error && !claims.length && empty("Nothing ready to claim.")}
+      </Side>
+    </>
+  );
+}
 
 export default function MyDay({ ctx }) {
   const me = useMemo(() => meOf(ctx), [ctx.me]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -24,7 +90,6 @@ export default function MyDay({ ctx }) {
   const ongoing = mine.find((t) => t.status === "progress");
   const over = active.filter((t) => t.due_date && t.due_date < today).sort(byDue);
   const dueToday = active.filter((t) => t.due_date === today).sort(byDue);
-  const notOn = (l) => l.filter((t) => t.status !== "progress");     // the ongoing task already has its own card
   const next = active.filter((t) => t.status === "pending").sort(byDue)[0];
   useNow(!!ongoing);
 
@@ -107,8 +172,9 @@ export default function MyDay({ ctx }) {
             ))}
           </div>
           <div style={{ display: "grid", gap: 14 }}>
-            {mini("Due today", notOn(dueToday), "Nothing due today.")}
-            {mini("Overdue", notOn(over), "Nothing overdue.")}
+            <DailyCards ctx={ctx} />
+            {mini("Due today", dueToday, "Nothing due today.")}
+            {mini("Overdue", over, "Nothing overdue.")}
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@
 // (KPIs, trends, brand health, lists, daily report) re-housed unchanged. Owned by agent "shell-ui".
 import React, { useMemo } from "react";
 import { Dashboard as LiveDashboard, BRANDS, fmtK } from "../../App.jsx";
-import { BRAND_COLORS } from "../tokens.js";
+import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
 
 function BrandCards({ ctx }) {
@@ -12,7 +12,7 @@ function BrandCards({ ctx }) {
   const rows = teamBrands.map((b) => {
     const mine = teamData.filter((r) => r.brand === b);
     return {
-      b, color: BRANDS[b]?.p || BRAND_COLORS[b] || "#94A3B8", players: mine.length,
+      b, color: brandColor(b), players: mine.length,
       dep: mine.reduce((s, r) => s + (Number(r.daily_deposit) || 0), 0), todo: todo.filter((r) => r.brand === b).length,
     };
   });

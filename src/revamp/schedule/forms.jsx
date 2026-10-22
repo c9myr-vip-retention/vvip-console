@@ -1,7 +1,7 @@
 // Schedule dialogs: add / edit (many dates x many entries), view + swap request, new type, swap requests (admin).
 import React, { useEffect, useMemo, useState } from "react";
 import { Avatar, BrandBadge, Modal, MultiSelect, Select, toast } from "../ui";
-import { BRAND_COLORS, BRAND_ORDER } from "../tokens.js";
+import { brandColor, BRAND_ORDER } from "../tokens.js";
 import { api } from "./api.js";
 import {
   DAYS, SHIFT_PRESETS, REPEAT_OPTIONS, addDays, addMonths, dayNum, fmtD, fmtDow, monthGrid, monthLabel, monthStart,
@@ -10,13 +10,13 @@ import {
 
 const MAX_PER_CALL = 500;
 const FULL = { width: "100%", justifyContent: "space-between", padding: "8px 11px", fontSize: 13 };
-const BRAND_OPTS = BRAND_ORDER.map((b) => ({ value: b, label: b, dot: BRAND_COLORS[b] }));
+const brandOpts = () => BRAND_ORDER.map((b) => ({ value: b, label: b, dot: brandColor(b) }));
 export const typeOf = (types, key) => types.find((t) => t.key === key) || { key, name: key, color: "#8B94A7" };
 export const Who = ({ names, max = 4 }) => (
   <span className="who">{names.slice(0, max).map((u) => <Avatar key={u} name={u} />)}{names.length > max && <span className="dim">+{names.length - max}</span>}</span>
 );
 export const Brands = ({ list, max = 3 }) => (
-  <span className="sch-brands">{list.slice(0, max).map((b) => <BrandBadge key={b} brand={b} color={BRAND_COLORS[b]} />)}{list.length > max && <span className="dim">+{list.length - max}</span>}</span>
+  <span className="sch-brands">{list.slice(0, max).map((b) => <BrandBadge key={b} brand={b} color={brandColor(b)} />)}{list.length > max && <span className="dim">+{list.length - max}</span>}</span>
 );
 
 /* ---------- multi-date month calendar (the kit's DatePick picks one date; here several are needed) ---------- */
@@ -69,7 +69,7 @@ function EntryForm({ e, i, n, types, people, edit, onChange, onRemove }) {
         <label>End<Select value={e.end_time} onChange={set("end_time")} options={T} /></label>
       </div>
       <div className="row2">
-        <label>Brands<MultiSelect label={e.brands.length ? "Brands" : "Any brand"} value={e.brands} onChange={set("brands")} options={BRAND_OPTS} style={FULL} /></label>
+        <label>Brands<MultiSelect label={e.brands.length ? "Brands" : "Any brand"} value={e.brands} onChange={set("brands")} options={brandOpts()} style={FULL} /></label>
         <label>People{e.type_key === "shift" && <span className="warn"> · required</span>}
           <MultiSelect label={e.who.length ? "People" : "Anyone"} value={e.who} onChange={set("who")} options={people.map((p) => ({ value: p.username, label: p.username }))} style={FULL} /></label>
       </div>

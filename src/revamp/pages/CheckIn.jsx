@@ -12,18 +12,18 @@ export default function CheckIn({ ctx }) {
   const viewTeam = ctx.viewTeam || "B";
   const date = ctx.viewDate || "";
   const readOnly = !me.can_edit || !!ctx.isPast;
-  const teamBrands = TEAMS[viewTeam] || BRAND_ORDER;
-  const defaultBrand = (t) => (t === "B" ? "SK69" : (TEAMS[t] || BRAND_ORDER)[0]);   // the live pilot brand for Team B
+  const teamBrands = ctx.teamBrands || TEAMS[viewTeam] || BRAND_ORDER;
+  const defaultBrand = () => (teamBrands.includes("SK69") ? "SK69" : teamBrands[0]);   // live pilot brand when the team has it, else the first brand the user may open
 
   const [d, setD] = useState(null);
   const [agent, setAgent] = useState(manager ? "" : (me.username || ""));   // "" = all agents
-  const [brand, setBrand] = useState(() => defaultBrand(viewTeam));
+  const [brand, setBrand] = useState(() => defaultBrand());
   const [tier, setTier] = useState("V");
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  useEffect(() => { setBrand(defaultBrand(viewTeam)); /* eslint-disable-next-line */ }, [viewTeam]);
+  useEffect(() => { setBrand(defaultBrand()); /* eslint-disable-next-line */ }, [viewTeam]);
 
   const load = async () => {
     setBusy(true); setErr("");

@@ -177,8 +177,8 @@ export default function Page({ ctx }) {
           </table>
         </div>
         <div className="dl-pg">
-          <label>Show per page <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
-            {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}<option value={100000}>All</option></select></label>
+          <span className="pgsel">Show per page <Select className="sm" value={pageSize} onChange={(v) => setPageSize(Number(v))} style={{ width: "auto", minWidth: 72 }}
+            options={[...[20, 50, 100, 200].map((n) => ({ value: n, label: String(n) })), { value: 100000, label: "All" }]} /></span>
           <span>Showing {rows.length ? start + 1 : 0}–{Math.min(start + pageSize, rows.length)} of {fmt(rows.length)}</span>
           <span className="dim">Lifetime PNL, Telegram and withdrawals are in the player panel.</span>
           <span style={{ flex: 1 }} />
