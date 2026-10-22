@@ -1,0 +1,25 @@
+/* daily-b pages. Page-specific rules only, prefixed d2-. Shared look comes from revamp.css and daily/daily.css. */
+.d2-sub{margin-top:3px;display:flex;gap:6px;align-items:center;font-size:11.5px}
+.d2-tbl tr.br td:first-child{box-shadow:inset 4px 0 0 var(--b,transparent)}
+.d2-tbl td,.d2-tbl th{white-space:nowrap}
+.d2-prog{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden;margin-bottom:12px}
+.d2-prog i{display:block;height:100%;background:var(--pos);transition:width .3s}
+.d2-live{min-width:0}
+.d2-gcell{display:inline-block;min-width:46px;text-align:center;padding:3px 6px;margin-right:4px;border-radius:6px;border:1px solid var(--line);font-size:11px;font-family:'IBM Plex Mono',monospace;color:var(--dim)}
+.d2-gcell.hit{color:var(--pos);border-color:var(--pos)}
+.d2-gcell.dash{border-style:dashed;color:#E8C547;border-color:#E8C547}
+.d2-gcell.na{opacity:.5}
+.d2-gsd{font-size:11px;color:#E8C547}
+.d2-note{font-size:12.5px;line-height:1.6;color:var(--dim)}
+.d2-note b{color:var(--txt)}
+.d2-load{min-width:150px}
+.d2-load .d2-prog{margin:0}
+.d2-load .d2-prog i{background:var(--accent)}
+.d2-load .d2-prog.over i{background:var(--neg)}
+.d2-err{color:var(--neg);font-size:12.5px;margin-bottom:10px}
+.d2-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+@media (max-width:1100px){.d2-kpis{grid-template-columns:repeat(2,1fr)}}
+.d2-two{display:grid;grid-template-columns:2fr 1fr;gap:14px;align-items:start}
+@media (max-width:1100px){.d2-two{grid-template-columns:1fr}}
+.d2-rec{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
+.d2-rec:last-child{border-bottom:0}
