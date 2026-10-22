@@ -1,14 +1,14 @@
 // Recycle bin (admin). Soft-deleted tasks, projects, flows and templates are kept 30 days. Restore, or delete forever (confirmed).
 import React, { useMemo, useState } from "react";
 import { Select, toast } from "../ui";
-import { api, isAdmin, useLoad, person, Notice, AdminOnly, Confirm, fmtWhen } from "../setup/common.jsx";
+import { api, allowed, useLoad, person, Notice, AdminOnly, Confirm, fmtWhen } from "../setup/common.jsx";
 
 const TYPE = { task: "Task", project: "Project", flow: "Flow", template: "Template" };
 const RANGES = [{ value: "30", label: "Last 30 days" }, { value: "7", label: "Last 7 days" }, { value: "1", label: "Today" }];
 const ago = (ts) => (Date.now() - new Date(String(ts).replace(" ", "T") + "Z").getTime()) / 864e5;
 
 export default function RecycleBin({ ctx }) {
-  const admin = isAdmin(ctx);
+  const admin = allowed(ctx, "bin.manage");
   const { data, loading, error, reload } = useLoad(() => (admin ? api.bin() : Promise.resolve(null)), [admin]);
   const [range, setRange] = useState("30"), [type, setType] = useState(""), [q, setQ] = useState(""), [del, setDel] = useState(null), [busy, setBusy] = useState(false);
   const rows = useMemo(() => (data?.items || []).filter((i) => ago(i.deleted_at) <= Number(range) && (!type || i.type === type) && (!q || `${i.name} ${i.id}`.toLowerCase().includes(q.toLowerCase()))), [data, range, type, q]);

@@ -1,9 +1,11 @@
-// Team workload (admin): one card per person with the ongoing task, a live timer, checklist progress and counts.
-// Click a number to see that person's tasks. Assignments is its own page.
+// Team workload: one card per person with the ongoing task, a live timer, checklist progress and counts.
+// An agent sees their own team. An admin sees every team through a team filter that starts on their own team (the Worker scopes the rows).
+// Admin: click a number to see that person's tasks. Assignments is its own page.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Avatar, Modal, Seg } from "../ui/index.jsx";
+import { Avatar, Modal, Seg, Select } from "../ui/index.jsx";
 import useTaskOverlays from "../tasks/useTaskOverlays.jsx";
-import { tapi, meOf, isAdmin, todayMY, useNow, StatusPill, DueBadge, CheckProg, dueInfo, fmtElapsed, byDue } from "../tasks/common.jsx";
+import { can } from "../perms.js";
+import { tapi, meOf, todayMY, useNow, StatusPill, DueBadge, CheckProg, dueInfo, fmtElapsed, byDue } from "../tasks/common.jsx";
 
 const parseUtc =(s) => Date.parse(String(s).replace(" ", "T") + "Z");
 const liveSec = (o) => (o.spent_seconds || 0) + (o.started_at ? Math.max(0, (Date.now() - parseUtc(o.started_at)) / 1000) : 0);
@@ -41,9 +43,11 @@ export default function TeamWorkload({ ctx }) {
   const [projects, setProjects] = useState([]);
   const [err, setErr] = useState("");
   const [see, setSee] = useState(null);                 // { user, kind }
+  const [team, setTeam] = useState(null);               // admin filter: a team key or "all"; null = not chosen yet (default: the admin's own team)
+  const [myTeam, setMyTeam] = useState(null);
 
   const load = useCallback(async () => {
-    try { const r = await tapi.workload(); setRows(r.people || []); setErr(""); } catch (e) { setErr(e.message || "Could not load the workload"); setRows((x) => x || []); }
+    try { const r = await tapi.workload(); setRows(r.people || []); setMyTeam(r.my_team || null); setErr(""); } catch (e) { setErr(e.message || "Could not load the workload"); setRows((x) => x || []); }
   }, []);
   useEffect(() => { load(); const id = setInterval(load, 60000); return () => clearInterval(id); }, [load]);
   useEffect(() => {
@@ -52,20 +56,24 @@ export default function TeamWorkload({ ctx }) {
   }, []);
   const { overlays, openTask, newTask } = useTaskOverlays({ me, people, projects, tasks: [], onChange: load });
   const viewers = useMemo(() => new Set(people.filter((p) => p.role === "viewer").map((p) => p.username)), [people]);   // view-only accounts are not agents
-  const shown = useMemo(() => (rows || []).filter((p) => !viewers.has(p.username)), [rows, viewers]);
+  const admin = can(me, "workload.all"), canAssign = can(me, "tasks.assign_others"), canSee = can(me, "tasks.view_all");
+  const teams = useMemo(() => [...new Set((rows || []).map((p) => p.team).filter(Boolean))].sort(), [rows]);
+  const pickedTeam = team || (myTeam && teams.includes(myTeam) ? myTeam : teams.includes("A") ? "A" : "all");   // own team first, Team A when they have none
+  const shown = useMemo(() => (rows || []).filter((p) => !viewers.has(p.username) && (!admin || pickedTeam === "all" || p.team === pickedTeam)), [rows, viewers, admin, pickedTeam]);
   useNow(!!rows && rows.some((r) => r.ongoing));
-
-  if (!isAdmin(me)) return <div className="card"><div className="body dim">Team workload is for admins only.</div></div>;
 
   return (
     <div>
       <div className="top">
         <h1>Team workload</h1>
-        <span className="badge admin">Admin only</span>
+        {admin
+          ? <Select className="sm" value={pickedTeam} onChange={setTeam} style={{ width: "auto", minWidth: 130 }}
+              options={[...teams.map((t) => ({ value: t, label: `Team ${t}${t === myTeam ? " (mine)" : ""}` })), { value: "all", label: "All teams" }]} />
+          : <span className="dim">{myTeam ? `Team ${myTeam}` : "You"}</span>}
         <span className="grow" />
-        <button className="btn pri" onClick={() => newTask({})}>+ Assign task</button>
+        {canAssign && <button className="btn pri" onClick={() => newTask({})}>+ Assign task</button>}
       </div>
-      <p className="dim" style={{ marginBottom: 12 }}>Assign as many tasks as you like. Each person can only have one ongoing at a time.</p>
+      <p className="dim" style={{ marginBottom: 12 }}>{canAssign ? "Assign as many tasks as you like. Each person can only have one ongoing at a time." : "Your team at a glance. Each person can only have one ongoing task at a time."}</p>
       {err && <div className="banner crit">{err}</div>}
       {rows === null && <div className="pageload">Loading…</div>}
       <div className="wl">
@@ -77,7 +85,7 @@ export default function TeamWorkload({ ctx }) {
                 <div className="who"><Avatar name={p.username} /><b>{p.username}</b><span className="grow" /><span className="pill" style={{ "--c": on ? "#5F9AD6" : "#8B94A7" }}>{on ? "Working" : "Idle"}</span></div>
                 <div style={{ display: "flex", gap: 6, margin: "0 -10px" }}>
                   {[["assigned", p.assigned, "", "assigned"], ["over", p.overdue, p.overdue ? "neg" : "", "overdue"], ["done", p.done, "pos", "done"], ["wait", p.waiting, "", "waiting"]].map(([k, n, c, l]) => (
-                    <button key={k} className="stat" title={`See ${p.username}’s ${l} tasks`} onClick={() => setSee({ user: p.username, kind: k })}>
+                    <button key={k} className="stat" title={canSee ? `See ${p.username}’s ${l} tasks` : l} disabled={!canSee} onClick={() => canSee && setSee({ user: p.username, kind: k })}>
                       <div className={"mono " + c} style={{ fontSize: 22 }}>{n}</div><div className="dim">{l}</div>
                     </button>
                   ))}
@@ -86,7 +94,7 @@ export default function TeamWorkload({ ctx }) {
                   <div className="ongbox">
                     <div className="dim" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".6px" }}>Ongoing now</div>
                     <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "4px 0 8px" }}>
-                      <b className="grow" style={{ cursor: "pointer" }} onClick={() => openTask(on.id)}>{on.title}</b>
+                      <b className="grow" style={{ cursor: canSee ? "pointer" : "default" }} onClick={() => canSee && openTask(on.id)}>{on.title}</b>
                       <span className="timer mono" style={{ fontSize: 18 }}>{fmtElapsed(liveSec(on))}</span>
                     </div>
                     <CheckProg t={on} />
@@ -99,7 +107,7 @@ export default function TeamWorkload({ ctx }) {
           );
         })}
       </div>
-      {rows && shown.length === 0 && !err && <div className="card"><div className="body dim">No agents yet.</div></div>}
+      {rows && shown.length === 0 && !err && <div className="card"><div className="body dim">{admin && pickedTeam !== "all" ? `Nobody in Team ${pickedTeam} yet.` : "No agents yet."}</div></div>}
       {see && <PersonTasks user={see.user} kind={see.kind} onClose={() => setSee(null)} onOpen={openTask} />}
       {overlays}
     </div>

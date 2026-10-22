@@ -1,7 +1,7 @@
 // Flows (admin): a pipeline for one type of recurring work. Rows show live counts from the tasks table.
 import React, { useState } from "react";
 import { Modal, Select, toast } from "../ui";
-import { api, isAdmin, useLoad, person, Notice, AdminOnly, Confirm, newTask, fmtWhen, pctText } from "../setup/common.jsx";
+import { api, allowed, useLoad, person, Notice, AdminOnly, Confirm, newTask, fmtWhen, pctText } from "../setup/common.jsx";
 
 const RATING_COLOR = { Excellent: "#4CC38A", Good: "#E8C547", "Needs attention": "#F2727F", "No data": "#8B94A7" };
 
@@ -35,7 +35,7 @@ function FlowForm({ flow, people, projects, onClose, onSaved }) {
 }
 
 export default function Flows({ ctx, embedded }) {
-  const admin = isAdmin(ctx);
+  const admin = allowed(ctx, "flows.manage");
   const { data, loading, error, reload } = useLoad(() => (admin ? api.flows() : Promise.resolve(null)), [admin]);
   const ref = useLoad(() => (admin ? Promise.all([api.people(), api.projects({ archived: 0 })]) : Promise.resolve(null)), [admin]);
   const [edit, setEdit] = useState(null), [del, setDel] = useState(null), [busy, setBusy] = useState(false);

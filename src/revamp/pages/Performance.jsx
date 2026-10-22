@@ -1,5 +1,6 @@
 // Performance, shared. Admin (key "perf"): the live Performance (KPI scorecard, mistake log, save rate by CS / class / brand) and Task efficiency.
 // Agent (key "mine"): their own save rate from the same endpoint (GET /api/rtn/performance) plus their own task efficiency.
+import { can } from "../perms.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { Seg, Select, BrandBadge } from "../ui";
 import { api, Performance as LivePerformance, BRANDS, CLASSES, ckey, dispName, fmt } from "../../App.jsx";
@@ -131,7 +132,7 @@ function MyRetention({ ctx }) {
 
 export default function Performance({ ctx }) {
   const me = ctx.me || {};
-  const admin = !!me.manage_users;
+  const admin = can(me, "teams.all");
   const [tab, setTab] = useState("ret");
   const tabs = [{ value: "ret", label: admin ? "Retention & save rate" : "My save rate" }, { value: "tasks", label: admin ? "Task efficiency" : "My task efficiency" }];
   return (

@@ -3,7 +3,7 @@
 // one ongoing task per person (the Worker answers 409, shown here with a link to the blocking task); a viewer can only read.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DrawerPanel, MultiSelect, Avatar, toast } from "../ui/index.jsx";
-import { tapi, isAdmin, canEdit, useNow, useTaskActions, ConflictBanner, StatusPill, DueBadge, CheckProg, dueInfo, elapsedSec, fmtElapsed } from "./common.jsx";
+import { tapi, canEditAnyTask, canDeleteAnyTask, canEdit, useNow, useTaskActions, ConflictBanner, StatusPill, DueBadge, CheckProg, dueInfo, elapsedSec, fmtElapsed } from "./common.jsx";
 
 const when = (ts) => {
   if (!ts) return "";
@@ -47,7 +47,7 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
   }
   if (!t) return <DrawerPanel onClose={onClose}><div className="dh"><h2 className="dim">Loading…</h2><button className="btn sm" onClick={onClose}>Close ✕</button></div></DrawerPanel>;
 
-  const admin = isAdmin(me), editable = canEdit(me);
+  const admin = canEditAnyTask(me), delAny = canDeleteAnyTask(me), editable = canEdit(me);
   const mine = t.assignee === me.username, mineOrOwner = mine || t.owner === me.username;
   const mayEdit = editable && (admin || mineOrOwner);
   const other = tasks.find((x) => x.assignee === t.assignee && x.status === "progress" && x.id !== t.id);
@@ -182,7 +182,7 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
         {buttons}
         {!mine && editable && t.status !== "done" && <span className="dim" style={{ fontSize: 12 }}>Only {t.assignee} can start, pause or complete this task.</span>}
         <span className="grow" />
-        {editable && (admin || t.owner === me.username) && (confirmDel
+        {editable && (delAny || t.owner === me.username) && (confirmDel
           ? <><span className="dim">Delete this task?</span><button className="btn danger" onClick={del}>Yes, delete</button><button className="btn" onClick={() => setConfirmDel(false)}>No</button></>
           : <button className="btn danger" onClick={() => setConfirmDel(true)}>Delete</button>)}
       </div>

@@ -22,6 +22,7 @@ export default function GraceClaims({ ctx }) {
   /* ---------- claims (grace-tasks) ---------- */
   const [res, setRes] = useState(null);                // null = loading, { rows, notes } or { error }
   const [filter, setFilter] = useState("reloaded");
+  const [loadAll, setLoadAll] = useState(false);       // also list Grace rows for players that are not in the board (other teams / not in this snapshot)
   const loadClaims = () => { setRes(null); api("/api/rtn/grace-tasks").then(setRes).catch((e) => setRes({ error: e.message || "Could not read the Grace table" })); };
   useEffect(loadClaims, [snap]);
   const byKey = useMemo(() => { const m = {}; data.forEach((r) => (m[ckey(r)] = r)); return m; }, [data]);
@@ -30,10 +31,13 @@ export default function GraceClaims({ ctx }) {
   const counts = { reloaded: 0, same_day: 0, in_progress: 0, not_reloaded: 0, unknown: 0, all: 0 };
   allRows.forEach((r) => { counts[r.status]++; counts.all++; });
   const needle = q.trim().toLowerCase();
-  const matches = (p) => !needle || `${dispName(p)} ${p.username || ""} ${p.uid || ""} ${p.addressing || ""}`.toLowerCase().includes(needle);
-  const shown = allRows.filter((r) => inBoard(r) && (filter === "all" || r.status === filter) && (!brands.length || brands.includes(r.brand)) && matches(byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`]));
-  const players = shown.map((r) => byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`]);
-  const brandCount = (b) => allRows.filter((r) => r.brand === b && inBoard(r) && (filter === "all" || r.status === filter)).length;
+  const matches = (p, key) => !needle || (p ? `${dispName(p)} ${p.username || ""} ${p.uid || ""} ${p.addressing || ""}` : String(key || "")).toLowerCase().includes(needle);
+  const inGroup = (r) => filter === "all" || r.status === filter;
+  const hiddenCount = allRows.filter((r) => !inBoard(r) && inGroup(r)).length;
+  const shown = allRows.filter((r) => (loadAll || inBoard(r)) && inGroup(r) && (!brands.length || brands.includes(r.brand)) && matches(byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`], r.player_key));
+  const players = shown.map((r) => byKey[`${r.player_key}|${r.brand}|${r.tier_segment}`]);     // undefined for rows that are not in the board
+  const panelList = players.filter(Boolean);
+  const brandCount = (b) => allRows.filter((r) => r.brand === b && (loadAll || inBoard(r)) && inGroup(r)).length;
 
   /* ---------- Grace players (grace-status: activated / not activated) ---------- */
   const [act, setAct] = useState("all");               // all | act | not
@@ -103,6 +107,8 @@ export default function GraceClaims({ ctx }) {
             <BrandMenu brandOrder={brandOrder} value={brands} onChange={setBrands} countOf={brandCount} />
             <span className="grow" />
             <span className="dim">Showing {shown.length} of {counts[filter]}</span>
+            {hiddenCount > 0 && !loadAll && <button className="btn sm" onClick={() => setLoadAll(true)} title="Also list Grace players that are not in the current board">Load all ({hiddenCount} more)</button>}
+            {loadAll && <button className="btn sm" onClick={() => setLoadAll(false)}>Board players only</button>}
           </div>
           {res === null && <Empty>Reading the Lark Grace table…</Empty>}
           {res && res.error && <div className="dl-note">{res.error}</div>}
@@ -114,9 +120,10 @@ export default function GraceClaims({ ctx }) {
                   {shown.map((t, i) => {
                     const p = players[i], st = GT_STATUS[t.status];
                     return (
-                      <tr key={`${t.player_key}|${t.brand}|${t.end}`} className="br" style={{ "--b": bcolor(t.brand) }} {...tap(() => setDr({ list: players, index: i }), null)}>
-                        <td><PCell id={dispName(p)} brand={t.brand} tier={t.tier_segment} name={!looksNumeric(p.addressing) ? p.addressing : ""}
-                          extra={p._tg ? <span className="tgf"> ✈</span> : null} /></td>
+                      <tr key={`${t.player_key}|${t.brand}|${t.end}`} className="br" style={{ "--b": bcolor(t.brand) }} {...(p ? tap(() => setDr({ list: panelList, index: players.slice(0, i).filter(Boolean).length }), null) : {})}>
+                        <td>{p
+                          ? <PCell id={dispName(p)} brand={t.brand} tier={t.tier_segment} name={!looksNumeric(p.addressing) ? p.addressing : ""} extra={p._tg ? <span className="tgf"> ✈</span> : null} />
+                          : <span title="Not in the current board, so there is no player panel"><PCell id={t.player_key} brand={t.brand} tier={t.tier_segment} name="" /></span>}</td>
                         <td className="mono" title={t.late ? "Activated after the expiry date" : "Activated date → expiry date, from Lark"}>{t.start.slice(5)} → {t.end.slice(5)}{t.late ? " ⚠" : ""}</td>
                         <td>{t.days.map((d) => cell(d, t))}</td>
                         <td className="r mono" title="Highest single day after activation">{t.status === "unknown" ? "—" : fmt(t.best)}{t.sameDay > 0 && <div className="d2-gsd" title="Deposited on the activation day itself; time of day unknown">{fmt(t.sameDay)} same day</div>}</td>

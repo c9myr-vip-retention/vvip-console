@@ -1,5 +1,6 @@
 // Check-in: tick who logged in and who deposited, per brand and tier. Re-houses the live LoginCheck
 // (same endpoints: GET/POST /api/rtn/login-check, /assign, /auto-assign), laid out like the mockup.
+import { can } from "../perms.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { Select, Seg, BrandBadge } from "../ui";
 import { api, TEAMS, BRAND_ORDER, dispId, days, fmtDate, fmtRM, lcStatusColor } from "../../App.jsx";
@@ -8,7 +9,7 @@ import { Head, Empty, downloadCsv } from "../daily2/common.jsx";
 
 export default function CheckIn({ ctx }) {
   const me = ctx.me || {};
-  const manager = !!me.manage_users;
+  const manager = can(me, "assign.manage");
   const viewTeam = ctx.viewTeam || "B";
   const date = ctx.viewDate || "";
   const readOnly = !me.can_edit || !!ctx.isPast;

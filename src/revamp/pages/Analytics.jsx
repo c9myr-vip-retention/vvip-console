@@ -1,7 +1,7 @@
 // Analytics (admin). Four cards read from the tasks table through GET /api/work/analytics: plain SVG / CSS charts, no library.
 import React, { useState } from "react";
 import { Select } from "../ui";
-import { api, isAdmin, useLoad, Notice, AdminOnly, LineChart, BarRows, rateColor, fmtDay, pctText } from "../setup/common.jsx";
+import { api, allowed, useLoad, Notice, AdminOnly, LineChart, BarRows, rateColor, fmtDay, pctText } from "../setup/common.jsx";
 
 const RANGES = [{ value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "90", label: "Last 90 days" }, { value: "365", label: "Last 12 months" }];
 
@@ -10,7 +10,7 @@ const Card = ({ title, sub, children }) => (
 );
 
 export default function Analytics({ ctx }) {
-  const admin = isAdmin(ctx);
+  const admin = allowed(ctx, "analytics.view");
   const [days, setDays] = useState("30");
   const { data, loading, error } = useLoad(() => (admin ? api.analytics(Number(days)) : Promise.resolve(null)), [admin, days]);
   if (!admin) return <AdminOnly what="Analytics" />;

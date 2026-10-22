@@ -1,7 +1,7 @@
 // Task templates. Everyone can read and "Use" one; only admins create, edit and delete (the Worker enforces it too).
 import React, { useMemo, useState } from "react";
 import { Modal, Select, toast } from "../ui";
-import { api, isAdmin, useLoad, person, Notice, Confirm, newTask } from "../setup/common.jsx";
+import { api, allowed, useLoad, person, Notice, Confirm, newTask } from "../setup/common.jsx";
 
 const DEADLINES = ["Same day", "1 day", "2 days", "3 days", "7 days", "No deadline"];
 
@@ -38,7 +38,7 @@ function TemplateForm({ tpl, people, onClose, onSaved }) {
 }
 
 export default function Templates({ ctx, embedded }) {
-  const admin = isAdmin(ctx);
+  const admin = allowed(ctx, "templates.manage");
   const { data, loading, error, reload } = useLoad(() => api.templates(), []);
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);
   const [q, setQ] = useState(""), [edit, setEdit] = useState(null), [del, setDel] = useState(null), [busy, setBusy] = useState(false);

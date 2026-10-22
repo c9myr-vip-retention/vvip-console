@@ -1,5 +1,6 @@
 // Shared state for the Contact + Players pages: board plumbing, contact map, 48h cooldown, Grace status, filters, drill.
 // Reads exactly what the live Queue reads (ctx = the values App.jsx hands Queue today).
+import { can } from "../perms.js";
 import { useEffect, useMemo, useState } from "react";
 import { api, ckey, BRAND_ORDER } from "../../App.jsx";
 import { emptyFilters, filterRows } from "./logic.js";
@@ -11,7 +12,7 @@ export function useDailyBase(ctx) {
   const health = ctx.board?.health || [];
   const team = ctx.board?.team || [];
   const me = ctx.me || {};
-  const isAdmin = !!me.manage_users;
+  const isAdmin = can(me, "assign.manage") || can(me, "teams.all");   // sees every agent's queue and may assign
   const readOnly = !!(ctx.readOnly || ctx.isPast);
   const brandOrder = ctx.teamBrands || BRAND_ORDER;
 

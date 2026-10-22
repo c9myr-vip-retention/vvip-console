@@ -1,9 +1,10 @@
-// Dashboard (admin). Brand cards on top (tap one to open Contact filtered to that brand), then the live Dashboard
-// (KPIs, trends, brand health, lists, daily report) re-housed unchanged. Owned by agent "shell-ui".
+// Dashboard (admin). Live staff board on top (who is on shift now), then the live Dashboard (KPIs, trends, brand health, lists,
+// daily report) re-housed unchanged, then the brand cards at the bottom (tap one to open Contact filtered to that brand). Owned by agent "shell-ui".
 import React, { useMemo } from "react";
 import { Dashboard as LiveDashboard, BRANDS, fmtK } from "../../App.jsx";
 import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
+import DashStaff from "./DashStaff.jsx";
 
 function BrandCards({ ctx }) {
   const { teamBrands, teamData, contacts, snap, health, goto } = ctx;
@@ -39,11 +40,12 @@ export default function Dashboard({ ctx }) {
     <>
       <div className="top"><h1>Dashboard</h1><span className="badge admin">Admin only</span></div>
       {staleList.length > 0 && <div className="banner warn">⚠ {staleList.length} brand{staleList.length > 1 ? "s" : ""} not fed today: {staleList.join(", ")}. Report will be incomplete.</div>}
-      <BrandCards ctx={ctx} />
+      <DashStaff viewTeam={viewTeam} />
       <div className="rv-live">
         <LiveDashboard data={teamData} brandOrder={teamBrands} viewTeam={viewTeam} snap={board.snapshot_date} isPast={isPast}
           contacts={contacts} me={me} team={board.team || []} dates={dates} onSaveContact={saveContact} onClearContact={clearContact} readOnly={readOnly} />
       </div>
+      <div style={{ marginTop: 18 }}><BrandCards ctx={ctx} /></div>
     </>
   );
 }

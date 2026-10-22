@@ -3,6 +3,7 @@ import { buildMessage, buildInstruction, buildHooks, buildAngles, buildHistoryHo
 import { phrase, newPatterns } from "./reportPhrases";
 import RevampShell from "./revamp/Shell.jsx";
 import { scopeLiveCss } from "./revamp/scopeCss.js";
+import { NativeSelect } from "./revamp/ui/index.jsx";
 
 /* ════════════════════════════════════════════════════════════════════
    GROUP B · VIP RTN CONSOLE  v2.1
@@ -857,10 +858,10 @@ export function Drawer({ list, index, setIndex, snap, me, team, contact, onSave,
         {/* WORKFLOW */}
         <div className="dsec">Action log{readOnly ? " — read-only" : ""}</div>
         <div className="wf-row">
-          <select value={assign} disabled={readOnly} onChange={(e) => { setAssign(e.target.value); save({ assigned_to: e.target.value, status: status || "ASSIGNED" }); if (!status) setStatus("ASSIGNED"); }}>
+          <NativeSelect value={assign} disabled={readOnly} onChange={(e) => { setAssign(e.target.value); save({ assigned_to: e.target.value, status: status || "ASSIGNED" }); if (!status) setStatus("ASSIGNED"); }}>
             <option value="">Assign to…</option>
             {team.map((t) => <option key={t.username} value={t.username}>{t.username}</option>)}
-          </select>
+          </NativeSelect>
         </div>
         <div className="wf-status">
           {[["set", ["ASSIGNED", "CONTACTED", "RESPONDED"]], ["auto", ["RECOVERED", "NO_RESPONSE", "SKIPPED"]]].map(([grp, list]) => (
@@ -1325,10 +1326,10 @@ export function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam
   const pager = (
     <div className="pager">
       <label className="pager-size">Show per page
-        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+        <NativeSelect value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
           {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
           <option value={100000}>All</option>
-        </select>
+        </NativeSelect>
       </label>
       <span className="pager-info">Showing {pagedSource.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, pagedSource.length)} of {fmt(pagedSource.length)}</span>
       <div className="pager-nav">
@@ -1713,10 +1714,10 @@ export function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam
             <span className="neg"><b className="mono">{pulse.no_response}</b> no response</span>
             <span><b className="mono">{pulse.pending}</b> pending</span>
           </div>
-          <select className="ct-agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
+          <NativeSelect className="ct-agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
             <option value="">All agents</option>
             {contactAgents.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
+          </NativeSelect>
         </div>
         <table>
           <thead><tr>
@@ -2576,10 +2577,10 @@ export function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = 
 
       <div className="set-card">
         <h3 className="dash-trend-head">Retention trend{tierF !== "ALL" && <span className="dim" style={{ fontSize: 11, fontWeight: 400, marginLeft: 8 }}>· all tiers (not filtered)</span>}
-          <select className="trend-brand" value={trendBrand} onChange={(e) => setTrendBrand(e.target.value)}>
+          <NativeSelect className="trend-brand" value={trendBrand} onChange={(e) => setTrendBrand(e.target.value)}>
             <option value="ALL">All brands</option>
             {brandOrder.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
+          </NativeSelect>
           <span className="range-toggle">{[7, 14, 30].map((d) => (
             <button key={d} className={range === d ? "on" : ""} onClick={() => setRange(d)}>{d}d</button>))}</span>
         </h3>
@@ -2870,13 +2871,13 @@ export function MistakeLog({ data, me, team, onMutate }) {
       </h3>
       {isAdmin && (
         <div className="mk-form">
-          <select value={agent} onChange={(e) => setAgent(e.target.value)}>
+          <NativeSelect value={agent} onChange={(e) => setAgent(e.target.value)}>
             <option value="">Agent…</option>
             {(team || []).filter((t) => t.on_leaderboard).map((t) => <option key={t.username} value={t.username}>{t.username}</option>)}
-          </select>
-          <select value={cat} onChange={(e) => setCat(e.target.value)}>
+          </NativeSelect>
+          <NativeSelect value={cat} onChange={(e) => setCat(e.target.value)}>
             {MISTAKE_CATS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </NativeSelect>
           <input className="mk-pts" type="number" step="1" min="0" value={points} title="Points / weight"
             onChange={(e) => setPoints(e.target.value)} onWheel={(e) => e.currentTarget.blur()} />
           <input className="mk-note" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
@@ -3239,10 +3240,10 @@ export function KpiScorecard({ onDrill, data, team, children, mistakeList, viewT
                 <InfoTip>
                   BaseKPI = Tier 3 + Tier V + Growth + FRT + Discipline (max 100). {kpiFor === "TEAM" ? "Team view." : `Showing ${kpiFor} — FRT and Discipline are their own; Tier/Growth are team-shared.`}
                 </InfoTip>
-                <select className="kpi-for" value={kpiFor} onChange={(e) => setKpiFor(e.target.value)}>
+                <NativeSelect className="kpi-for" value={kpiFor} onChange={(e) => setKpiFor(e.target.value)}>
                   <option value="TEAM">Team</option>
                   {agents.map((t) => <option key={t.username} value={t.username}>{t.username}</option>)}
-                </select>
+                </NativeSelect>
                 {savedTeam && <span className="kpi-saved"> Saved ✓</span>}
               </div>
               <div className="kpi-team-inputs two">
@@ -3609,9 +3610,9 @@ export function Performance({ onDrill, data, team, me, viewTeam = "B", contacts,
         {!err && logs && (
           <div className="perf-bar">
             <span className="perf-month">Save rate ·
-              <select className="perf-mth-sel" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+              <NativeSelect className="perf-mth-sel" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
                 {monthOptions.map((m, i) => <option key={m} value={m}>{m}{i === 0 ? " (this month)" : ""}</option>)}
-              </select>
+              </NativeSelect>
             </span>
             {logs.length > 0 && <button className="btn-ghost" onClick={exportPerf}>↓ Export contacts CSV</button>}
           </div>
@@ -3670,7 +3671,7 @@ export function ActivityLog({ viewTeam = "B" }) {
       </h3>
       <div className="act-filters">
         <input placeholder="username" value={fu} onChange={(e) => setFu(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
-        <select value={fa} onChange={(e) => setFa(e.target.value)}>{ACT_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        <NativeSelect value={fa} onChange={(e) => setFa(e.target.value)}>{ACT_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</NativeSelect>
         <input type="date" value={fd} onChange={(e) => setFd(e.target.value)} />
         <button className="btn-gold" onClick={load} disabled={busy}>{busy ? "…" : "Filter"}</button>
       </div>
@@ -3757,7 +3758,7 @@ export function TelegramImport({ viewTeam = "B" }) {
   );
 }
 
-export function Settings({ me, viewTeam = "B", hideLog = false }) {
+export function Settings({ me, viewTeam = "B", hideLog = false, hideAccounts = false }) {
   const [users, setUsers] = useState([]);
   const [drafts, setDrafts] = useState({});   // id -> { role, can_edit, can_delete, on_leaderboard, manage_users }
   const [nu, setNu] = useState(""); const [np, setNp] = useState("");
@@ -3792,7 +3793,7 @@ export function Settings({ me, viewTeam = "B", hideLog = false }) {
       setCp(""); setCn(""); setMsg("Password updated."); } catch (e) { setMsg(e.message); } }
   return (
     <div className="settings">
-      {canManage && (
+      {canManage && !hideAccounts && (
         <div className="set-card set-accounts">
           <h3>Team accounts
             <InfoTip>Pick a role to auto-set the boxes, then tick/untick any. <b>Edit</b> = write the queue · <b>Delete</b> = clear a contact/note · <b>Leaderboard</b> = scored CS agent · <b>Manage</b> = this account panel. The last Manage account can't be removed.</InfoTip>
@@ -3814,14 +3815,14 @@ export function Settings({ me, viewTeam = "B", hideLog = false }) {
                   {open && (
                     <div className="perm-editor">
                       <label className="perm-field">Role
-                        <select className="perm-role" value={d.role || "viewer"} onChange={(e) => pickRole(u.id, e.target.value)}>
-                          <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></select>
+                        <NativeSelect className="perm-role" value={d.role || "viewer"} onChange={(e) => pickRole(u.id, e.target.value)}>
+                          <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></NativeSelect>
                       </label>
                       <label className="perm-field">Team
-                        <select className="perm-role" value={d.team || ""} onChange={(e) => setDraft(u.id, { team: e.target.value || null })}>
+                        <NativeSelect className="perm-role" value={d.team || ""} onChange={(e) => setDraft(u.id, { team: e.target.value || null })}>
                           <option value="">— none —</option>
                           {TEAM_KEYS.map((t) => <option key={t} value={t}>Team {t}</option>)}
-                        </select>
+                        </NativeSelect>
                       </label>
                       <div className="perm-boxes">
                         {PERM_KEYS.map(([k, l]) => (
@@ -3838,11 +3839,11 @@ export function Settings({ me, viewTeam = "B", hideLog = false }) {
           <div className="form-row perm-new">
             <input placeholder="New username" value={nu} onChange={(e) => setNu(e.target.value)} />
             <input placeholder="Password" type="password" value={np} onChange={(e) => setNp(e.target.value)} />
-            <select value={nrole} onChange={(e) => pickNewRole(e.target.value)}>
-              <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></select>
-            <select value={nteam} onChange={(e) => setNteam(e.target.value)} title="Which team this account sees">
+            <NativeSelect value={nrole} onChange={(e) => pickNewRole(e.target.value)}>
+              <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></NativeSelect>
+            <NativeSelect value={nteam} onChange={(e) => setNteam(e.target.value)} title="Which team this account sees">
               {TEAM_KEYS.map((t) => <option key={t} value={t}>Team {t}</option>)}
-            </select>
+            </NativeSelect>
             <button className="btn-gold" disabled={!nu || !np} onClick={addUser}>Add user</button>
           </div>
           <div className="hint">New accounts start as <b>Viewer</b> (lowest access). Pick a role to set defaults, then fine-tune the boxes. CS reps log in with their own account — "My queue" and the action log track them by name.</div>
@@ -5678,10 +5679,10 @@ export function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
                   <td className="mono">{pid(u)}</td>
                   <td style={{ color: lcStatusColor(u.group_name) }}>{u.group_name || "—"}</td>
                   <td className="r mono">{u.ingest_deposit != null ? fmtRM(u.ingest_deposit) : "—"}</td>
-                  <td><select className="team-pick" defaultValue="" onChange={(e) => assign(u.player_key, e.target.value)}>
+                  <td><NativeSelect className="team-pick" defaultValue="" onChange={(e) => assign(u.player_key, e.target.value)}>
                     <option value="" disabled>Pick agent…</option>
                     {agentNames.map((ag) => <option key={ag} value={ag}>{ag}</option>)}
-                  </select></td>
+                  </NativeSelect></td>
                 </tr>))}
             </tbody>
           </table></div>
@@ -5713,7 +5714,8 @@ export default function App() {
   const [loadErr, setLoadErr] = useState("");
   const [dates, setDates] = useState([]);         // available snapshot dates, newest first
   const [viewDate, setViewDate] = useState(null); // null = latest/today (the only actionable day)
-  const [viewTeam, setViewTeam] = useState("B");  // manager logo switcher; non-managers are pinned to their own team
+  const [viewTeam, setViewTeam] = useState(rv ? "A" : "B");  // revamp: everyone starts on their own team (Team A when they have none); managers can switch with the logo switcher, others are pinned
+  const teamStart = useRef(null);
 
   useEffect(() => {
     const t = localStorage.getItem("session_token");
@@ -5729,7 +5731,13 @@ export default function App() {
   useEffect(() => { if (me) api("/api/rtn/dates").then(setDates).catch(() => setDates([])); }, [me]);
   useEffect(() => { if (me) loadBoard(viewDate); }, [me, viewDate]);
   // Non-managers are pinned to their own team; managers may switch and default to B.
-  useEffect(() => { if (me && !me.manage_users && me.team) setViewTeam(me.team); }, [me]);
+  useEffect(() => {
+    if (!me) return;
+    if (!rv) { if (!me.manage_users && me.team) setViewTeam(me.team); return; }          // flag off: unchanged behaviour
+    const mine = TEAM_KEYS.includes(me.team) ? me.team : "A";
+    if (!me.manage_users) setViewTeam(mine);                                           // pinned to their own team
+    else if (teamStart.current !== me.username) { teamStart.current = me.username; setViewTeam(mine); }   // a manager starts there once, then may switch
+  }, [me]);
 
   async function saveContact(payload) {
     await api("/api/rtn/contact", { method: "POST", body: JSON.stringify(payload) });
@@ -5817,7 +5825,7 @@ export default function App() {
         <header className="top">
           <div className="top-brand"><span className="mark">♠</span>
             <div><div className="t1">{me?.manage_users
-              ? <>TEAM <select className="team-pick" value={viewTeam} onChange={(e) => setViewTeam(e.target.value)} title="Switch team view">{TEAM_KEYS.map((t) => <option key={t} value={t}>{t}</option>)}</select> · VIP RTN</>
+              ? <>TEAM <NativeSelect className="team-pick" value={viewTeam} onChange={(e) => setViewTeam(e.target.value)} title="Switch team view">{TEAM_KEYS.map((t) => <option key={t} value={t}>{t}</option>)}</NativeSelect> · VIP RTN</>
               : `TEAM ${me?.team || "B"} · VIP RTN`}</div><div className="t2">Daily action console</div></div></div>
           <nav className="tabs">
             <button className={tab === "dash" ? "on" : ""} onClick={() => setTab("dash")}>Dashboard</button>
@@ -5974,10 +5982,10 @@ export function CampPager({ total, page, setPage, label, perPage, onSize }) {
   return (
     <div className="pager">
       <label className="pager-size">Show per page
-        <select value={perPage} onChange={(e) => onSize(Number(e.target.value))}>
+        <NativeSelect value={perPage} onChange={(e) => onSize(Number(e.target.value))}>
           {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
           <option value={100000}>All</option>
-        </select>
+        </NativeSelect>
       </label>
       <span className="pager-info">Showing {total ? start + 1 : 0}–{Math.min(start + perPage, total)} of {fmt(total)} {label}</span>
       <div className="pager-nav">
@@ -6432,8 +6440,8 @@ export function Campaigns({ me, viewTeam }) {
           <div className="camp-card">
             <div className="dsec" style={{ marginTop: 0 }}>New event</div>
             <div className="camp-new">
-              <select value={newEv.brand} onChange={(e) => setNewEv({ ...newEv, brand: e.target.value })}>
-                {eligibleBrands.map((b) => <option key={b}>{b}</option>)}</select>
+              <NativeSelect value={newEv.brand} onChange={(e) => setNewEv({ ...newEv, brand: e.target.value })}>
+                {eligibleBrands.map((b) => <option key={b}>{b}</option>)}</NativeSelect>
               <span className="camp-tierlock" title="Set by the rotation calendar for this date">
                 Tier {newEv.tier} <span className="dim">🔒</span></span>
               {CODE_BANDS.map((cfg) => (
@@ -6636,6 +6644,10 @@ body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',system-ui
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .mono{font-family:'IBM Plex Mono',monospace}.dim{color:var(--dim)}
 button{cursor:pointer;font-family:inherit}input,select,textarea{font-family:inherit}
+/* Custom dropdown trigger (NativeSelect replaces every native <select>); the menu is styled by revamp.css in #rv-portal */
+.live-csb{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;max-width:100%;font:inherit;font-size:13px;line-height:1.3;text-align:left;color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+.live-csb:hover{border-color:var(--dim)}.live-csb:disabled{opacity:.6;cursor:not-allowed}
+.live-csb .csl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live-csb .csa{color:var(--dim);font-size:11px;flex:none}
 .shell{min-height:100vh;display:flex;flex-direction:column}
 .top{display:flex;align-items:center;flex-wrap:wrap;gap:24px;row-gap:10px;padding:14px 22px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--top-hi),var(--bg))}
 .top-brand{display:flex;align-items:center;gap:12px}.mark{font-size:26px;color:var(--gold)}
@@ -6676,7 +6688,7 @@ button{cursor:pointer;font-family:inherit}input,select,textarea{font-family:inhe
 .cal-range{font-size:10.5px;color:var(--dim)}
 .cal-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;font-weight:600}
 .ro-banner{background:var(--blue-bg);border:1px solid var(--blue-line);color:var(--blue-soft);padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:14px}
-.wf-row select:disabled,.wf-note[readonly]{opacity:.65;cursor:default}
+.wf-row select:disabled,.wf-note[readonly],.wf-row .live-csb:disabled{opacity:.65;cursor:default}
 .st-btn:disabled{opacity:.4;cursor:default}
 .btn-ghost{background:none;border:1px solid var(--line);color:var(--dim);padding:7px 12px;border-radius:8px;font-size:12px}
 .btn-ghost:hover{color:var(--txt);border-color:var(--line-strong)}
@@ -6750,7 +6762,7 @@ td{padding:9px 8px;vertical-align:middle}
 .more{padding:12px;text-align:center}
 .pager{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font-size:13px}
 .pager-size{display:flex;align-items:center;gap:8px;color:var(--dim)}
-.pager-size select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:5px 8px;border-radius:7px;font-size:13px;cursor:pointer}
+.pager-size select,.pager-size .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:5px 8px;border-radius:7px;font-size:13px;cursor:pointer}
 .pager-info{color:var(--dim)}
 .pager-nav{margin-left:auto;display:flex;align-items:center;gap:4px}
 .pager-nav button{min-width:30px;height:30px;padding:0 8px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;font-size:13px;cursor:pointer}
@@ -6957,7 +6969,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .ch-who{font-size:11px;color:var(--dim)}
 .ch-note{font-size:12px;color:var(--txt);line-height:1.45;margin-top:4px;white-space:pre-wrap;word-break:break-word}
 .tmpl{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px;font-size:13px;line-height:1.6;white-space:pre-wrap}
-.wf-row select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
+.wf-row select,.wf-row .live-csb{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
 .wf-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:10px}
 .seg-st{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel2)}
 .seg-st .st-btn{border:none;border-radius:0;border-right:1px solid var(--line);padding:9px 14px;font-size:11.5px}
@@ -7249,7 +7261,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .perm-box input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
 .perm-new{margin-top:12px}
 .act-filters{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
-.act-filters input,.act-filters select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
+.act-filters input,.act-filters select,.act-filters .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
 .act-filters input[type=date]{color-scheme:dark}
 .act-wrap{flex:1;min-height:260px;max-height:72vh;overflow:auto}
 .act-tbl{font-size:12.5px}
@@ -7352,7 +7364,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .lb-add .btn-ghost{flex-shrink:0;font-size:12px;padding:7px 12px}
 /* Mistake log */
 .mk-form{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-.mk-form select,.mk-form input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
+.mk-form select,.mk-form input,.mk-form .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
 .mk-pts{width:64px;text-align:right}
 .mk-note{flex:1;min-width:160px}
 .mk-tally{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
@@ -7369,7 +7381,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .urow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:14px}
 .urow em{color:var(--dim);font-size:11px;margin-left:8px}
 .form-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.form-row input,.form-row select{flex:1;min-width:110px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
+.form-row input,.form-row select,.form-row .live-csb{flex:1;min-width:110px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
 .hint{margin-top:10px;color:var(--dim);font-size:11px}
 .set-msg{grid-column:1/-1;color:var(--accent);font-size:13px}
 .bigmsg{padding:60px 20px;text-align:center;color:var(--dim);font-size:14px}.bigmsg.err{color:var(--neg-soft)}
@@ -7454,7 +7466,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .camp-ev-r .btn-ghost{padding:5px 10px}
 .btn-ghost.danger:hover{color:var(--neg);border-color:var(--neg-line)}
 .camp-new{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.camp-new select,.camp-new input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+.camp-new select,.camp-new input,.camp-new .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
   border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:inherit}
 .camp-newband{display:flex;align-items:center;gap:6px}
 .camp-note{font-size:11.5px;color:var(--dim);margin-top:9px;line-height:1.6}

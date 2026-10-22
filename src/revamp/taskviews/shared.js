@@ -1,4 +1,5 @@
 // Shared helpers for the four task views (dates are Malaysia time, GMT+8; "day numbers" are whole days since 1970-01-01).
+import { can } from "../perms.js";
 import { work } from "../api/work.js";
 import { toast } from "../ui/index.jsx";
 import { mockEnabled, mockUpdate } from "./fixtures.js";
@@ -14,12 +15,12 @@ export const fmtTime = (hhmm) => { if (!hhmm) return ""; const [h, m] = hhmm.spl
 const parseUtc = (s) => Date.parse(String(s).replace(" ", "T") + "Z");
 
 // ---- permissions (contract section 2) ----
-export const isAdmin = (me) => !!me?.manage_users;
-export const canEdit = (me) => me?.can_edit !== false;
+export const isAdmin = (me) => can(me, "tasks.view_all");
+export const canEdit = (me) => (me && me.perms ? can(me, "tasks.use") : me?.can_edit !== false);
 /** May this person change the task's date? Admin: any. Agent: their own (assignee or owner). Viewer: never. */
-export const canMoveDate = (t, me) => canEdit(me) && t.status !== "done" && (isAdmin(me) || t.assignee === me?.username || t.owner === me?.username);
+export const canMoveDate = (t, me) => canEdit(me) && t.status !== "done" && (can(me, "tasks.edit_any") || t.assignee === me?.username || t.owner === me?.username);
 /** Reassigning is admin only. */
-export const canReassign = (t, me) => canEdit(me) && isAdmin(me) && t.status !== "done";
+export const canReassign = (t, me) => canEdit(me) && can(me, "tasks.assign_others") && t.status !== "done";
 
 // ---- deadline buckets (calendar weeks, Monday to Sunday) ----
 export const BUCKETS = [

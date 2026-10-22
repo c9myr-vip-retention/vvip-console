@@ -1,12 +1,12 @@
 // Task efficiency. Admin: everyone or one person. Agent: "My task efficiency" (the Worker returns only their own row).
 import React, { useState } from "react";
 import { Select } from "../ui";
-import { api, isAdmin, useLoad, person, Notice, Donut, LineChart, rateColor, fmtDay, fmtMin, pctText, openTask } from "../setup/common.jsx";
+import { api, allowed, useLoad, person, Notice, Donut, LineChart, rateColor, fmtDay, fmtMin, pctText, openTask } from "../setup/common.jsx";
 
 const RANGES = [{ value: "", label: "All time" }, { value: "7", label: "Last 7 days" }, { value: "30", label: "Last 30 days" }, { value: "90", label: "Last 90 days" }];
 
 export default function TaskEfficiency({ ctx }) {
-  const admin = isAdmin(ctx);
+  const admin = allowed(ctx, "analytics.view");
   const [user, setUser] = useState(""), [days, setDays] = useState("30");
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);
   const { data, loading, error } = useLoad(() => api.efficiency(admin ? user : "", days), [admin, user, days]);

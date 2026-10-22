@@ -1,4 +1,5 @@
 // Shared bits for the tasks pages: API wrapper (mock-aware), live clock, status actions, permission helpers.
+import { can } from "../perms.js";
 import React, { useEffect, useRef, useState } from "react";
 import { work } from "../api/work.js";
 import { toast } from "../ui/index.jsx";
@@ -14,10 +15,14 @@ export const addDaysIso = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + 
 /** Whole person object used by the task views: { username, role, manage_users, can_edit }. */
 export const meOf = (ctx) => {
   const m = ctx?.me || {};
-  return { username: m.username, role: m.role, manage_users: m.manage_users ? 1 : 0, can_edit: m.can_edit !== false, team: m.team };
+  return { username: m.username, role: m.role, manage_users: m.manage_users ? 1 : 0, can_edit: m.can_edit !== false, team: m.team, perms: m.perms };
 };
-export const isAdmin = (me) => !!me?.manage_users;
-export const canEdit = (me) => me?.can_edit !== false;
+// "Admin" in the task views means one of these permissions (src/revamp/perms.js); isAdmin = sees everyone's tasks
+export const isAdmin = (me) => can(me, "tasks.view_all");
+export const canAssign = (me) => can(me, "tasks.assign_others");
+export const canEditAnyTask = (me) => can(me, "tasks.edit_any");
+export const canDeleteAnyTask = (me) => can(me, "tasks.delete_any");
+export const canEdit = (me) => (me && me.perms ? can(me, "tasks.use") : me?.can_edit !== false);
 export const isMine = (t, me) => t.assignee === me?.username;
 
 /** Re-render every second while `on` (live timers). */

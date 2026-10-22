@@ -3,10 +3,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./revamp.css";
 import { PAGES } from "./registry.js";
-import { NAV, NAV_ICONS } from "./tokens.js";
+import { NAV_ICONS } from "./tokens.js";
+import { can, navFor } from "./perms.js";
 import { Select, DatePick, ToastHost, Avatar, Seg } from "./ui/index.jsx";
 import { work } from "./api/work.js";
 import { contactTodo } from "./shellHelpers.js";
+
+/** Ingest timestamps are UTC 'YYYY-MM-DD HH:MM:SS'; show the clock in Malaysia time (GMT+8). */
+const mytHm = (ts) => {
+  const d = new Date(String(ts).replace(" ", "T") + "Z");
+  return isNaN(d) ? "" : new Date(d.getTime() + 8 * 3600e3).toISOString().slice(11, 16);
+};
 
 // Pages that need the loaded board; they are rendered only once a snapshot exists.
 const BOARD_PAGES = new Set(["dash", "delta", "queue", "checkin", "grace", "players", "assign"]);
@@ -87,7 +94,7 @@ function SnapBar({ ctx }) {
         {list.length > 1 && <Seg value={v} onChange={(x) => (x === "t" ? setViewDate(newest) : pick(x === "y" ? y : w))}
           options={[{ value: "t", label: "Today" }, { value: "y", label: "Yesterday" }, { value: "w", label: "−7d" }]} />}
         <DatePick value={cur} onChange={(d) => d && pick(d)} avail={list} onlyAvail min={oldest} max={newest} clearable={false} />
-        {board?.synced_at && <span className="dim">synced {String(board.synced_at).slice(11, 16)} UTC</span>}
+        {board?.synced_at && mytHm(board.synced_at) && <span className="dim">synced {mytHm(board.synced_at)} GMT+8</span>}
       </div>
       {isPast && <div className="banner warn">Viewing a past snapshot: read-only. Switch to Today to take action.</div>}
     </>
@@ -96,8 +103,8 @@ function SnapBar({ ctx }) {
 
 export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }) {
   const { me, viewTeam, board } = ctx;
-  const isAdmin = !!me.manage_users;
-  const nav = NAV[isAdmin ? "admin" : "agent"];
+  const isAdmin = can(me, "teams.all");                       // admin-style views: every team, the team switcher
+  const nav = useMemo(() => navFor(me), [me]);                // the pages this role may open
   const keys = useMemo(() => nav.flatMap(([, items]) => items.map(([k]) => k)), [nav]);
   const key = keys.includes(tab) ? tab : keys[0];
   const Page = PAGES[key];
@@ -114,7 +121,7 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
     let dead = false;
     const run = () => {
       if (localStorage.getItem("revamp_mock") === "1") return;
-      work.tasks({ assignee: isAdmin ? me.username : undefined }).then((r) => {
+      work.tasks({ assignee: can(me, "tasks.view_all") ? me.username : undefined }).then((r) => {
         if (dead) return;
         const mine = (r.tasks || []).filter((t) => t.status !== "done" && t.assignee === me.username);
         const today = todayMY();
@@ -152,7 +159,7 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
             </React.Fragment>
           ))}
           </div>
-          <div className="me"><Avatar name={me.username} /><div><div>{me.username}</div><span className={"role-tag " + (isAdmin ? "admin" : "")}>{me.role || (isAdmin ? "admin" : "agent")}</span></div></div>
+          <div className="me"><Avatar name={me.username} /><div><div>{me.username}</div><span className={"role-tag " + (isAdmin ? "admin" : "")}>{me.role_name || me.role || (isAdmin ? "admin" : "agent")}</span></div></div>
         </aside>
         <div className="colmain">
           <header className="topbar">

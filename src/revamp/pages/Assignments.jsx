@@ -1,6 +1,7 @@
 // Assignments (admin): hand players to agents and keep the contact target on track.
 // Re-houses the live Assigned view: contact parity + double-contact guard (ParityBar, DupeCard), the daily deal (auto-assign, next batch,
 // dry run) and the live per-agent lists. Manual / even assignment writes contact_log rows through ctx.saveContact, like the live Queue.
+import { can } from "../perms.js";
 import React, { useEffect, useMemo, useState } from "react";
 import { Seg, Select, toast } from "../ui";
 import { api, AssignedView, AAStyle, ParityBar, DupeCard, DryRunCard, ckey, fmt, fmtK, tap } from "../../App.jsx";
@@ -181,7 +182,7 @@ export function AssignmentsPanel({ ctx }) {
 export default function Assignments({ ctx }) {
   const base = useDailyBase(ctx);
   const [view, setView] = useState("overview");
-  if (!base.isAdmin) return <Empty>Assignments is for managers.</Empty>;
+  if (!can(base.me, "assign.manage")) return <Empty>Assignments needs the “Assign players to agents” permission.</Empty>;
   return (
     <>
       <Head title="Assignments" sub="Hand players to agents and keep the contact target on track.">

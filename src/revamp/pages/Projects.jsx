@@ -2,7 +2,7 @@
 // A project opens into a detail view with its tasks, members and activity.
 import React, { useMemo, useState } from "react";
 import { Avatar, Modal, MultiSelect, Select, Seg, toast } from "../ui";
-import { api, isAdmin, canEdit, useLoad, person, Notice, newTask, openTask, fmtWhen, fmtDay } from "../setup/common.jsx";
+import { api, allowed, canEdit, useLoad, person, Notice, newTask, openTask, fmtWhen, fmtDay } from "../setup/common.jsx";
 
 const STATUS = { pending: ["Pending", "#8B94A7"], progress: ["In progress", "#4C8DF6"], done: ["Completed", "#4CC38A"], deferred: ["Deferred", "#A78BFA"] };
 const todayMyt = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
@@ -40,7 +40,7 @@ function ProjectForm({ project, people, onClose, onSaved }) {
 }
 
 function ProjectDetail({ ctx, id, onBack, onChanged }) {
-  const admin = isAdmin(ctx), me = ctx?.me?.username;
+  const admin = allowed(ctx, "projects.manage"), me = ctx?.me?.username;
   const [tab, setTab] = useState("tasks"), [edit, setEdit] = useState(false);
   const proj = useLoad(() => api.project(id), [id]);
   const tasks = useLoad(() => api.tasks({ project_id: id, include: "done" }), [id]);
@@ -101,7 +101,7 @@ function ProjectDetail({ ctx, id, onBack, onChanged }) {
 }
 
 function ProjectList({ ctx, onOpen, reloadKey, onChanged }) {
-  const admin = isAdmin(ctx), me = ctx?.me?.username;
+  const admin = allowed(ctx, "projects.manage"), me = ctx?.me?.username;
   const [scope, setScope] = useState("0"), [q, setQ] = useState(""), [create, setCreate] = useState(false);
   const { data, loading, error, reload } = useLoad(() => api.projects({ archived: scope }), [scope, reloadKey]);
   const ppl = useLoad(() => (admin ? api.people() : Promise.resolve({ people: [] })), [admin]);

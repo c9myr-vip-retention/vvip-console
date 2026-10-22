@@ -105,13 +105,12 @@ export const api = {
   comment: (id, body) => { const d = det(id); d.comments.push({ id: Date.now(), author: meNow().username, body, created_at: nowTs() }); return sync(id).then(() => wait({ comments: d.comments })); },
   deleteTask: (id) => { gone.add(Number(id)); return wait({ ok: true }); },
   workload: () => {
-    if (!isAdm()) return fail("Admin only", 403);
-    const today = myt(), list = all();
-    return wait({ people: MOCK_PEOPLE.filter((p) => p.role === "agent").map((p) => {
+    const today = myt(), list = all(), who = meNow(), myTeam = (MOCK_PEOPLE.find((p) => p.username === who.username) || {}).team || null;
+    return wait({ my_team: myTeam, people: MOCK_PEOPLE.filter((p) => p.role === "agent" && (isAdm() || p.username === who.username || (myTeam && p.team === myTeam))).map((p) => {
       const mine = list.filter((t) => t.assignee === p.username), open = mine.filter((t) => t.status !== "done");
       const on = open.find((t) => t.status === "progress");
       return {
-        username: p.username, assigned: open.length, overdue: open.filter((t) => t.due_date && t.due_date < today).length,
+        username: p.username, team: p.team || null, assigned: open.length, overdue: open.filter((t) => t.due_date && t.due_date < today).length,
         done: mine.length - open.length, waiting: open.filter((t) => t.status === "pending").length,
         ongoing: on ? { id: on.id, title: on.title, started_at: on.started_at, spent_seconds: on.spent_seconds, est_minutes: on.est_minutes, checklist_done: on.checklist_done, checklist_total: on.checklist_total } : null,
       };

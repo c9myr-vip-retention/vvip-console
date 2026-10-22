@@ -1,4 +1,5 @@
 // Shared helpers for the work-setup pages (projects, flows, templates, analytics, efficiency, bin).
+import { can } from "../perms.js";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { work, http } from "../api/work.js";
 import { Modal, Avatar } from "../ui";
@@ -10,8 +11,9 @@ export const isMock = () => { try { return localStorage.getItem("revamp_mock") =
 const efficiency = (user, days) => (isMock() ? mock.api.efficiency(user, days) : http(`/api/work/efficiency?${new URLSearchParams({ ...(user ? { user } : {}), ...(days ? { days } : {}) })}`));
 export const api = new Proxy({}, { get: (_, k) => (...a) => (k === "efficiency" ? efficiency(...a) : isMock() && mock.api[k] ? mock.api[k](...a) : work[k](...a)) });
 
-export const isAdmin = (ctx) => !!(ctx && ctx.me && ctx.me.manage_users);
-export const canEdit = (ctx) => !!(ctx && ctx.me && (ctx.me.manage_users || ctx.me.can_edit));
+export const isAdmin = (ctx) => !!(ctx && ctx.me && ctx.me.manage_users);       // legacy; each page now asks for its own permission
+export const canEdit = (ctx) => !!(ctx && can(ctx.me, "tasks.use"));
+export const allowed = (ctx, perm) => !!(ctx && can(ctx.me, perm));
 
 /** Load once and on reload(). Returns { data, loading, error, reload }. Ignores out-of-date responses. */
 export function useLoad(fn, deps = []) {
