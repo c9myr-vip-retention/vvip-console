@@ -35,8 +35,8 @@ export const PERMS = [
   { key: "page.workload", group: "pages", label: "Team workload page", desc: "Show the Team workload page in the sidebar.", d: [1, 1, 1] },
   { key: "page.myday", group: "pages", label: "My day page", desc: "Show the My day page in the sidebar.", d: [0, 1, 1] },
   { key: "page.myperf", group: "pages", label: "My performance page", desc: "Show the My performance page in the sidebar.", d: [0, 1, 1] },
-  { key: "page.account", group: "pages", label: "Account page", desc: "Show the Account page in the sidebar.", d: [0, 1, 1] },
-  { key: "page.settings", group: "pages", label: "Settings page", desc: "Show the Settings page in the sidebar. What is inside it still needs the matching function permission.", d: [1, 0, 0] },
+  { key: "page.account", group: "pages", label: "My account (tab in Settings)", desc: "Show the My account tab in Settings: change your password and see your details.", d: [1, 1, 1] },
+  { key: "page.settings", group: "pages", label: "Settings page", desc: "Show the Settings page in the sidebar. Open to everyone by default; which tabs appear inside depends on the other permissions (My account has its own switch).", d: [1, 1, 1] },
 
   { key: "dashboard.view", group: "daily", label: "See the admin Dashboard", desc: "Open the Dashboard page: the live staff board, KPIs, trends, brand health and top lists. It hides the page; numbers stay limited to the team(s) the role may see.", d: [1, 0, 0] },
   { key: "contact.edit", group: "daily", label: "Log contacts", desc: "Assign players, set status, write notes, CRM and Telegram. Without it the account is view-only.", d: [1, 1, 0] },

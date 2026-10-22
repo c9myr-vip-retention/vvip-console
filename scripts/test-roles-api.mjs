@@ -52,10 +52,10 @@ check("admin reads the catalogue (41 permissions, 5 groups) and 3 built-in roles
 check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
 check("every page has its own permission", ["page.changes", "page.performance", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.myday", "page.myperf", "page.account", "page.settings"].every((k) => keys.includes(k)));
 const agentRole = r.data.roles.find((x) => x.key === "agent"), adminRole = r.data.roles.find((x) => x.key === "admin");
-check("Agent starts with the agent pages, not Settings or Performance", ["page.contact", "page.tasks", "page.myday"].every((k) => agentRole.perms.includes(k)) && !agentRole.perms.includes("page.settings") && !agentRole.perms.includes("page.performance"), JSON.stringify(agentRole.perms));
+check("Agent starts with the agent pages, Settings (My account tab inside), not Performance", ["page.contact", "page.tasks", "page.myday", "page.settings", "page.account"].every((k) => agentRole.perms.includes(k)) && !agentRole.perms.includes("page.performance"), JSON.stringify(agentRole.perms));
 check("Admin starts with Settings and Performance, not the agent-only pages", adminRole.perms.includes("page.settings") && adminRole.perms.includes("page.performance") && !adminRole.perms.includes("page.myday"));
 const meLegacyAgent = await me(S), meLegacyAdmin = await me(A);
-check("old-settings accounts keep exactly their pages (agent sees agent pages, admin sees admin pages)", has(meLegacyAgent, "page.contact") && has(meLegacyAgent, "page.myday") && !has(meLegacyAgent, "page.settings") && has(meLegacyAdmin, "page.settings") && !has(meLegacyAdmin, "page.myday"));
+check("old-settings accounts keep exactly their pages (agent sees agent pages, admin sees admin pages)", has(meLegacyAgent, "page.contact") && has(meLegacyAgent, "page.myday") && has(meLegacyAgent, "page.settings") && has(meLegacyAgent, "page.account") && !has(meLegacyAgent, "page.performance") && has(meLegacyAdmin, "page.settings") && !has(meLegacyAdmin, "page.myday"));
 check("built-in Agent role starts with the agent defaults", ["contact.edit", "tasks.use", "kpi.scored"].every((p) => r.data.roles.find((x) => x.key === "agent").perms.includes(p)) && !r.data.roles.find((x) => x.key === "agent").perms.includes("schedule.manage"));
 
 // ---- create a role ----
