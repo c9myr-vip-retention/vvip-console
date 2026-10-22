@@ -1,0 +1,63 @@
+/* Schedule page. Page-specific rules only, all prefixed sch-. Shared look (.btn .seg .input .card .top .pill .board .col .sc .lanes .ent .sa-grid .fields .swatch)
+   comes from revamp.css. */
+.rv .sch-range{min-width:150px;text-align:center}
+.rv .sch-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.rv .sch-hint{flex:1;min-width:240px}
+.rv .sch-duty{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+.rv .sch-sub{padding:6px 10px 0;min-height:26px;font-size:11.5px}
+.rv .sch-sc-top{display:flex;gap:6px;align-items:center}
+.rv .sch-note{font-size:11.5px;overflow-wrap:anywhere}
+.rv .sch-brands{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.rv .sc{text-align:left;cursor:pointer}
+.rv .sc b{overflow-wrap:anywhere}
+.rv .sc:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.rv .lanes .lc{min-height:46px}
+.rv .lanes .lc.drop{outline:2px dashed var(--brand);outline-offset:-4px}
+.rv .board.sched{overflow-x:visible}
+
+/* month grid */
+.rv .sch-month{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.rv .sch-mh{background:var(--panel);padding:8px 10px;color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px;font-weight:500}
+.rv .sch-mc{background:var(--panel);min-height:112px;padding:6px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.rv .sch-mc.out{background:var(--bg)}
+.rv .sch-mc.out .sch-mn{color:var(--dim);opacity:.6}
+.rv .sch-mc.today{background:color-mix(in srgb,var(--accent) 8%,var(--panel))}
+.rv .sch-mn{align-self:flex-start;font-weight:600;padding:1px 6px;border-radius:6px}
+.rv .sch-mn:hover{background:var(--panel2)}
+.rv .sch-mc.today .sch-mn{color:var(--accent)}
+.rv .sch-ml{display:flex;align-items:center;gap:6px;padding:2px 6px;border-radius:5px;text-align:left;font-size:12px;min-width:0;width:100%}
+.rv .sch-ml:hover{background:var(--panel2)}
+.rv .sch-ml.mine{background:color-mix(in srgb,var(--accent) 10%,var(--panel2))}
+.rv .sch-ml.off{opacity:.55}
+.rv .sch-ml-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.rv .sch-ml-w{font-size:11px;flex:none}
+.rv .sch-more{align-self:flex-start;color:var(--dim);font-size:11.5px;padding:1px 6px}
+.rv .sch-more:hover{color:var(--txt)}
+
+/* add / edit dialog */
+.rv .sch-modal-body{max-height:68vh;overflow:auto;padding-right:4px}
+.rv .sch-h{font-size:10.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--dim);margin-bottom:8px}
+.rv .sch-cal-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.rv .sch-cal-g{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.rv .sch-cal-dow{text-align:center;color:var(--dim);font-size:11px;padding:2px 0}
+.rv .sch-cd{aspect-ratio:1;border-radius:8px;border:1px solid transparent;display:grid;place-items:center;font-size:12.5px}
+.rv .sch-cd:hover{background:var(--panel2)}
+.rv .sch-cd.out{color:var(--dim);opacity:.55}
+.rv .sch-cd.today{border-color:var(--line)}
+.rv .sch-cd.on{background:var(--brand);color:var(--on-accent);font-weight:600;opacity:1}
+.rv .sch-cal-tip{font-size:11.5px;margin-top:8px}
+.rv .sch-picked{margin-top:10px;line-height:1.7}
+.rv .ent-h .csb{min-width:0}
+
+/* swap requests */
+.rv .sch-swaps{display:grid;gap:8px}
+.rv .sch-swap{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.rv .sch-swap .grow{min-width:0}
+.rv .sch-swap-note{margin-top:4px;overflow-wrap:anywhere}
+.rv .sch-swap-act{display:flex;gap:6px}
+
+@media (max-width:900px){
+  .rv .board.sched{overflow-x:auto}
+  .rv .sch-mc{min-height:84px}
+  .rv .sch-ml-w{display:none}
+}
