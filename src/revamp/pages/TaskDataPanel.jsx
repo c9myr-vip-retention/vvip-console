@@ -19,7 +19,7 @@ export default function TaskDataPanel() {
     setBusy(false);
   };
 
-  const rows = counts ? [["Tasks", counts.tasks], ["Checklist items", counts.checklist], ["Observers", counts.observers], ["Comments", counts.comments], ["History entries", counts.history]] : [];
+  const rows = counts ? [["Tasks", counts.tasks], ["Checklist items", counts.checklist], ["Observers", counts.observers], ["Comments", counts.comments], ["Pictures and files", counts.attachments || 0], ["History entries", counts.history]] : [];
   const empty = counts && counts.tasks === 0 && counts.history === 0;
   return (
     <div style={{ display: "grid", gap: 12, maxWidth: 640 }}>

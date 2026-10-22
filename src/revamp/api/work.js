@@ -13,6 +13,13 @@ export async function http(path, options = {}) {
   if (!res.ok) { const e = new Error(data.error || "API error"); e.status = res.status; e.data = data; throw e; }
   return data;
 }
+/** A file from the Worker (it needs the person's sign-in, so a plain link will not do). Returns a Blob. */
+export async function fetchBlob(path) {
+  const token = localStorage.getItem("session_token");
+  const res = await fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) { let m = "Could not open the file"; try { m = (await res.json()).error || m; } catch { /* not JSON */ } throw new Error(m); }
+  return res.blob();
+}
 const get = (p) => http(p);
 const post = (p, body) => http(p, { method: "POST", body: JSON.stringify(body || {}) });
 const qs = (o = {}) => { const s = new URLSearchParams(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== "")).toString(); return s ? `?${s}` : ""; };
@@ -27,7 +34,8 @@ export const work = {
   updateTask: (id, b) => post(`/api/work/tasks/${id}/update`, b),
   setStatus: (id, action) => post(`/api/work/tasks/${id}/status`, { action }),   // start | pause | complete | defer | reopen
   checklist: (id, b) => post(`/api/work/tasks/${id}/checklist`, b),    // { action: add|toggle|remove, text?, item_id? }
-  comment: (id, body) => post(`/api/work/tasks/${id}/comments`, { body }),
+  comment: (id, body, attachments) => post(`/api/work/tasks/${id}/comments`, { body, ...(attachments && attachments.length ? { attachments } : {}) }),   // attachments: [{ name, mime, data (base64) }]
+  attachment: (id) => fetchBlob(`/api/work/attachments/${id}`),
   deleteTask: (id) => post(`/api/work/tasks/${id}/delete`),
   workload: () => get("/api/work/workload"),
   // roles and accounts (Settings). Needs users.manage; see worker/roles.js

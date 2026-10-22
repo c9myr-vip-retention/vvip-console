@@ -14,6 +14,7 @@ const myt = (off = 0) => new Date(Date.now() + 8 * 3600e3 + off * 864e5).toISOSt
 
 let seq = 1000, extra = [];
 const gone = new Set();                                  // tasks created in this session
+const files = {};                                             // attachment id -> { name, mime, data } (mock mode only)
 const detail = {};                                            // id -> { checklist, observers, comments, activity }
 
 const TEMPLATES = [
@@ -102,7 +103,13 @@ export const api = {
     if (b.action === "remove") d.checklist = d.checklist.filter((c) => c.id !== b.item_id);
     return sync(id).then(() => wait({ checklist: d.checklist }));
   },
-  comment: (id, body) => { const d = det(id); d.comments.push({ id: Date.now(), author: meNow().username, body, created_at: nowTs() }); return sync(id).then(() => wait({ comments: d.comments })); },
+  comment: (id, body, atts) => {
+    const d = det(id), cid = Date.now();
+    const attachments = (atts || []).map((a, i) => { const aid = cid + i + 1; files[aid] = a; return { id: aid, name: a.name, mime: a.mime, size: Math.floor((a.data.length * 3) / 4), inline: /^image\/(png|jpeg|gif|webp)$/.test(a.mime) }; });
+    d.comments.push({ id: cid, author: meNow().username, body, created_at: nowTs(), attachments });
+    return sync(id).then(() => wait({ comments: d.comments }));
+  },
+  attachment: (aid) => { const a = files[aid]; if (!a) return fail("File not found", 404); const bin = atob(a.data), u8 = Uint8Array.from(bin, (ch) => ch.charCodeAt(0)); return Promise.resolve(new Blob([u8], { type: a.mime })); },
   deleteTask: (id) => { gone.add(Number(id)); return wait({ ok: true }); },
   workload: () => {
     const today = myt(), list = all(), who = meNow(), myTeam = (MOCK_PEOPLE.find((p) => p.username === who.username) || {}).team || null;

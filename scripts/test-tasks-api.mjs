@@ -223,6 +223,37 @@ check("admin deletes a task he owns", (await call(A, "POST", `/api/work/tasks/${
 check("delete twice -> 404", (await call(A, "POST", `/api/work/tasks/${T2}/delete`)).status === 404);
 check("unknown sub-route is not ours (404)", (await call(A, "POST", `/api/work/tasks/${T1}/explode`)).status === 404);
 
+// ---- pictures and files on comments ----
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+const TA = (await call(S, "POST", "/api/work/tasks", { title: "[t] attach", observers: ["zed"] })).data.task.id;
+r = await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "see this", attachments: [{ name: "shot.png", mime: "image/png", data: PNG }] });
+const att = r.data.comments && r.data.comments[0] && r.data.comments[0].attachments && r.data.comments[0].attachments[0];
+check("a comment can carry a picture", r.status === 200 && att && att.name === "shot.png" && att.mime === "image/png" && att.inline === true && att.size === Buffer.from(PNG, "base64").length, JSON.stringify(r.data));
+const raw = async (tok, id) => fetch(BASE + `/api/work/attachments/${id}`, { headers: tok ? { Authorization: `Bearer ${tok}` } : {} });
+let fr = await raw(S, att.id);
+check("the owner gets the same bytes back with the right type", fr.status === 200 && fr.headers.get("content-type") === "image/png" && Buffer.from(await fr.arrayBuffer()).equals(Buffer.from(PNG, "base64")));
+check("a picture is shown in the page, with the safety headers", /^inline/.test(fr.headers.get("content-disposition") || "") && fr.headers.get("x-content-type-options") === "nosniff");
+check("an observer can open it", (await raw(Z, att.id)).status === 200);
+check("an admin can open it", (await raw(A, att.id)).status === 200);
+check("someone with no access to the task cannot (403)", (await raw(D, att.id)).status === 403);
+check("unauthenticated is 401", (await raw(null, att.id)).status === 401);
+check("an unknown file is 404", (await raw(S, 999999)).status === 404);
+check("the task detail lists the attachments", (await call(S, "GET", `/api/work/tasks/${TA}`)).data.comments[0].attachments[0].id === att.id);
+r = await call(S, "POST", `/api/work/tasks/${TA}/comments`, { attachments: [{ name: "notes.txt", mime: "text/plain", data: Buffer.from("hello").toString("base64") }] });
+check("a comment can be a file with no text", r.status === 200 && r.data.comments.length === 2 && r.data.comments[1].body === "" && r.data.comments[1].attachments[0].inline === false, JSON.stringify(r.data));
+fr = await raw(S, r.data.comments[1].attachments[0].id);
+check("other files are sent as a download", fr.status === 200 && /^attachment/.test(fr.headers.get("content-disposition") || "") && (await fr.text()) === "hello");
+check("a comment with no text and no file is 400", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, {})).status === 400);
+check("a kind of file that is not allowed is 400", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "run.exe", mime: "application/x-msdownload", data: PNG }] })).status === 400);
+check("a script disguised as a picture type is still refused (svg is not allowed)", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "a.svg", mime: "image/svg+xml", data: PNG }] })).status === 400);
+check("a file that is too big is 413", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "big.zip", mime: "application/zip", data: Buffer.alloc(1_300_000).toString("base64") }] })).status === 413);
+check("garbage instead of a file is 400", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "a.png", mime: "image/png", data: "not base64!!" }] })).status === 400);
+check("more than 5 files is 400", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: Array.from({ length: 6 }, (_, i) => ({ name: `f${i}.png`, mime: "image/png", data: PNG })) })).status === 400);
+check("nothing was saved by the refusals", rows(`SELECT COUNT(*) n FROM task_comments WHERE task_id = ${TA}`)[0].n === 2 && rows(`SELECT COUNT(*) n FROM task_attachments WHERE task_id = ${TA}`)[0].n === 2);
+check("a view-only account cannot comment with a file (403)", (await call(V, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "a.png", mime: "image/png", data: PNG }] })).status === 403);
+check("a file name is made safe", (await call(S, "POST", `/api/work/tasks/${TA}/comments`, { body: "x", attachments: [{ name: "..\\..\\evil<script>.png", mime: "image/png", data: PNG }] })).data.comments[2].attachments[0].name === "evil_script_.png");
+check("the reset counts the attachments", (await call(A, "POST", "/api/work/tasks/clear", { preview: true })).data.counts.attachments === 3);
+
 // ---- clear all task data (a reset after testing). Runs last: it empties the task tables. ----
 for (const [who, tok] of [["agent", S], ["viewer", V]]) check(`${who} cannot clear task data (403)`, (await call(tok, "POST", "/api/work/tasks/clear", { preview: true })).status === 403);
 check("unauthenticated is 401", (await call(null, "POST", "/api/work/tasks/clear", { preview: true })).status === 401);
@@ -235,7 +266,7 @@ check("with the wrong word it refuses (400)", (await call(A, "POST", "/api/work/
 check("nothing was deleted by the refusals", n("tasks") === before);
 r = await call(A, "POST", "/api/work/tasks/clear", { confirm: "CLEAR TASKS" });
 check("clear everything", r.status === 200 && r.data.cleared.tasks === before, JSON.stringify(r.data));
-check("every task table is empty", ["tasks", "task_checklist", "task_observers", "task_comments", "task_activity"].every((t) => n(t) === 0));
+check("every task table is empty", ["tasks", "task_checklist", "task_observers", "task_comments", "task_activity", "task_attachments"].every((t) => n(t) === 0));
 check("people and accounts are untouched", n("users") > 0);
 check("the board is empty for everyone", (await call(S, "GET", "/api/work/tasks?include=done")).data.tasks.length === 0 && (await call(A, "GET", "/api/work/tasks?include=done")).data.tasks.length === 0);
 check("a new task can be made after the reset", (await call(S, "POST", "/api/work/tasks", { title: "[t] after reset" })).status === 201);

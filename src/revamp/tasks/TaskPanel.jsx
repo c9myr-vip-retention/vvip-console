@@ -3,6 +3,7 @@
 // one ongoing task per person (the Worker answers 409, shown here with a link to the blocking task); a viewer can only read.
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { DrawerPanel, MultiSelect, Avatar, toast } from "../ui/index.jsx";
+import { AttachButton, AttachmentView, PendingFiles, usePending } from "./Attachments.jsx";
 import { tapi, canEditAnyTask, canDeleteAnyTask, canEdit, useNow, useTaskActions, ConflictBanner, StatusPill, DueBadge, CheckProg, dueInfo, elapsedSec, fmtElapsed } from "./common.jsx";
 
 const when = (ts) => {
@@ -23,6 +24,7 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
   const [editDesc, setEditDesc] = useState(null);
   const [confirmDel, setConfirmDel] = useState(false);
   const chatEnd = useRef(null);
+  const pending = usePending();
 
   const load = useCallback(async () => {
     try { const r = await tapi.task(id); setD(r); setErr(""); } catch (e) { setErr(e.message || "Could not load the task"); }
@@ -62,7 +64,13 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
   const doToggle = (it) => guard(() => tapi.checklist(t.id, { action: "toggle", item_id: it.id }).then(refresh));
   const doAddItem = () => { const text = newItem.trim(); if (!text) return; setNewItem(""); guard(() => tapi.checklist(t.id, { action: "add", text }).then(refresh)); };
   const doRemove = (it) => guard(() => tapi.checklist(t.id, { action: "remove", item_id: it.id }).then(refresh));
-  const send = () => { const body = draft.trim(); if (!body) return; setDraft(""); guard(() => tapi.comment(t.id, body).then(refresh)); };
+  const send = () => {
+    const body = draft.trim(), sending = pending.files.map(({ name, mime, data }) => ({ name, mime, data }));
+    if (!body && !sending.length) return;
+    setDraft(""); pending.clear();
+    guard(() => tapi.comment(t.id, body, sending).then(refresh));
+  };
+  const drop = (e) => { if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); pending.add(e.dataTransfer.files); } };
   const setPrio = () => guard(() => tapi.updateTask(t.id, { high_priority: t.high_priority ? 0 : 1 }).then(refresh));
   const saveDesc = () => { const v = editDesc; setEditDesc(null); if (v !== null && v !== (t.description || "")) guard(() => tapi.updateTask(t.id, { description: v }).then(refresh), "Saved"); };
   const setObservers = (list) => guard(() => tapi.updateTask(t.id, { observers: list }).then(refresh));
@@ -162,7 +170,8 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
             {tab === "comments" && (d.comments.length === 0
               ? <div className="dim" style={{ padding: "24px 0", textAlign: "center" }}>No comments yet.</div>
               : d.comments.map((c) => (
-                <div key={c.id} className="cm"><Avatar name={c.author} /><div className="bub"><small>{c.author} · {when(c.created_at)}</small>{c.body}</div></div>
+                <div key={c.id} className="cm"><Avatar name={c.author} /><div className="bub"><small>{c.author} · {when(c.created_at)}</small>{c.body}
+                  {(c.attachments || []).length > 0 && <div className="att-list">{c.attachments.map((a) => <AttachmentView key={a.id} a={a} />)}</div>}</div></div>
               )))}
             {tab === "activity" && (d.activity.length === 0
               ? <div className="dim" style={{ padding: "24px 0", textAlign: "center" }}>No activity yet.</div>
@@ -171,9 +180,14 @@ export default function TaskPanel({ id, me, people = [], projects = [], tasks = 
               )))}
           </div>
           {tab === "comments" && editable && (
-            <div style={{ display: "flex", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--line)" }}>
-              <input className="input" placeholder="Write a comment…" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-              <button className="btn pri" onClick={send} disabled={!draft.trim()}>Send</button>
+            <div style={{ display: "grid", gap: 8, padding: "10px 16px", borderTop: "1px solid var(--line)" }} onDragOver={(e) => e.dataTransfer && e.dataTransfer.types && [...e.dataTransfer.types].includes("Files") && e.preventDefault()} onDrop={drop}>
+              <PendingFiles files={pending.files} onRemove={pending.remove} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <AttachButton onPick={pending.add} />
+                <input className="input" placeholder="Write a comment… (paste a picture or drop a file here)" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()}
+                  onPaste={(e) => { const fl = e.clipboardData && e.clipboardData.files; if (fl && fl.length) { e.preventDefault(); pending.add(fl); } }} />
+                <button className="btn pri" onClick={send} disabled={!draft.trim() && !pending.files.length}>Send</button>
+              </div>
             </div>
           )}
         </div>

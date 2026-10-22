@@ -30,6 +30,41 @@ const isUnique = (e) => /UNIQUE/i.test(String(e && e.message));
 // seconds elapsed since started_at (SQL fragment, safe when started_at is NULL)
 const ELAPSED = "MAX(0, COALESCE(CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', started_at) AS INTEGER), 0))";
 
+// Attachments on comments. Kept in D1 as base64 (one row per file, see schema_v30), so a file is limited to what one row can hold.
+const MAX_FILE = 1_200_000;                      // bytes of the file itself
+const MAX_FILES = 5;                             // per comment
+const SHOW_INLINE = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);                    // everything else downloads
+const FILE_TYPES = new Set([...SHOW_INLINE, "application/pdf", "text/plain", "text/csv", "application/zip",
+  "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]);
+const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const b64Size = (d) => Math.floor((d.length * 3) / 4) - (d.endsWith("==") ? 2 : d.endsWith("=") ? 1 : 0);
+const cleanName = (n) => (String(n || "file").split(/[\\/]/).pop().replace(/[^\w.\- ()\[\]]+/g, "_").trim().slice(0, 120)) || "file";
+/** Check the attachments of a comment. Returns { error } or { files: [{ name, mime, size, data }] }. */
+function checkFiles(list) {
+  if (list === undefined || list === null) return { files: [] };
+  if (!Array.isArray(list)) return { error: "attachments must be a list" };
+  if (list.length > MAX_FILES) return { error: `At most ${MAX_FILES} files per comment` };
+  const files = [];
+  for (const f of list) {
+    const mime = f && typeof f.mime === "string" ? f.mime.toLowerCase() : "", data = f && typeof f.data === "string" ? f.data : "";
+    if (!FILE_TYPES.has(mime)) return { error: `That kind of file is not allowed${f && f.name ? ` (${cleanName(f.name)})` : ""}. Use a picture, PDF, text, CSV, Word, Excel, PowerPoint or zip.` };
+    if (!data || !B64.test(data)) return { error: "A file could not be read" };
+    const size = b64Size(data);
+    if (size > MAX_FILE) return { error: `${cleanName(f.name)} is too big. The limit is ${(MAX_FILE / 1e6).toFixed(1)} MB per file.`, status: 413 };
+    files.push({ name: cleanName(f.name), mime, size, data });
+  }
+  return { files };
+}
+/** Comments of a task with the (light) details of their attachments. */
+async function commentsOf(db, id) {
+  const { results } = await db.prepare("SELECT id, author, body, created_at FROM task_comments WHERE task_id = ? ORDER BY id").bind(id).all();
+  let att = [];
+  try { att = (await db.prepare("SELECT id, comment_id, name, mime, size FROM task_attachments WHERE task_id = ? ORDER BY id").bind(id).all()).results || []; } catch { /* schema_v30 not run yet */ }
+  return (results || []).map((cm) => ({ ...cm, attachments: att.filter((a) => a.comment_id === cm.id).map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, inline: SHOW_INLINE.has(a.mime) })) }));
+}
+
 async function body(c) { try { const b = await c.request.json(); return b && typeof b === "object" && !Array.isArray(b) ? b : {}; } catch { return {}; } }
 
 // ── people / permissions ──────────────────────────────────────────────────────────────────────
@@ -171,10 +206,10 @@ async function getOne(c, id) {
   if (v.res) return v.res;
   const [cl, cm, ac] = await Promise.all([
     db.prepare("SELECT id, text, done, pos FROM task_checklist WHERE task_id = ? ORDER BY pos, id").bind(id).all(),
-    db.prepare("SELECT id, author, body, created_at FROM task_comments WHERE task_id = ? ORDER BY id").bind(id).all(),
+    commentsOf(db, id),
     db.prepare("SELECT id, actor, text, created_at FROM task_activity WHERE task_id = ? ORDER BY id DESC LIMIT 100").bind(id).all(),
   ]);
-  return c.ok({ task: v.t, checklist: cl.results || [], observers: v.t.observers, comments: cm.results || [], activity: ac.results || [] });
+  return c.ok({ task: v.t, checklist: cl.results || [], observers: v.t.observers, comments: cm, activity: ac.results || [] });
 }
 
 // ── POST /tasks (create) ──────────────────────────────────────────────────────────────────────
@@ -388,13 +423,38 @@ async function comments(c, id) {
   const v = await getVisible(c, id);   // assignee, owner, observer or admin may comment
   if (v.res) return v.res;
   const text = str(b.body, 2000);
-  if (!text) return c.err("body is required");
-  await db.batch([
-    db.prepare("INSERT INTO task_comments (task_id, author, body) VALUES (?, ?, ?)").bind(id, c.user.username, text),
-    db.prepare("UPDATE tasks SET updated_at = datetime('now') WHERE id = ?").bind(id),
-  ]);
-  const { results } = await db.prepare("SELECT id, author, body, created_at FROM task_comments WHERE task_id = ? ORDER BY id").bind(id).all();
-  return c.ok({ comments: results || [] });
+  const f = checkFiles(b.attachments);
+  if (f.error) return c.err(f.error, f.status || 400);
+  if (!text && !f.files.length) return c.err("body is required");
+  const res = await db.prepare("INSERT INTO task_comments (task_id, author, body) VALUES (?, ?, ?)").bind(id, c.user.username, text).run();
+  const cid = res.meta.last_row_id;
+  try {
+    if (f.files.length) await db.batch(f.files.map((x) => db.prepare("INSERT INTO task_attachments (task_id, comment_id, name, mime, size, data, created_by) VALUES (?,?,?,?,?,?,?)").bind(id, cid, x.name, x.mime, x.size, x.data, c.user.username)));
+  } catch (e) {
+    await db.prepare("DELETE FROM task_comments WHERE id = ?").bind(cid).run();              // do not leave a comment that lost its files
+    return c.err("Attachments are not set up yet (schema_v30 has not been run)", 503);
+  }
+  await db.prepare("UPDATE tasks SET updated_at = datetime('now') WHERE id = ?").bind(id).run();
+  return c.ok({ comments: await commentsOf(db, id) });
+}
+
+// ── GET /attachments/:id — one file, for anyone who may see its task ──
+// Pictures come back to be shown in the page; every other kind is sent as a download. The file is never served as anything but its own type.
+async function attachment(c, aid) {
+  const db = c.env.DB;
+  let a;
+  try { a = await db.prepare("SELECT id, task_id, name, mime, data FROM task_attachments WHERE id = ?").bind(aid).first(); } catch { return c.err("Attachments are not set up yet", 503); }
+  if (!a) return c.err("File not found", 404);
+  const v = await getVisible(c, a.task_id);
+  if (v.res) return v.res;
+  const bin = Uint8Array.from(atob(a.data), (ch) => ch.charCodeAt(0));
+  const h = new Headers(c.ok({}).headers);                    // the same CORS headers as every answer
+  h.set("Content-Type", a.mime);
+  h.set("Content-Disposition", `${SHOW_INLINE.has(a.mime) ? "inline" : "attachment"}; filename="${a.name.replace(/"/g, "")}"`);
+  h.set("Cache-Control", "private, max-age=3600");
+  h.set("X-Content-Type-Options", "nosniff");
+  h.set("Content-Security-Policy", "default-src 'none'; sandbox");
+  return new Response(bin, { status: 200, headers: h });
 }
 
 // ── POST /tasks/:id/delete ────────────────────────────────────────────────────────────────────
@@ -465,13 +525,17 @@ async function clearAll(c) {
   if (!c.can("tasks.clear")) return c.err("You do not have permission to clear task data", 403);
   const db = c.env.DB, b = await body(c);
   const count = async (t) => (await db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).first()).n;
-  const counts = { tasks: await count("tasks"), checklist: await count("task_checklist"), observers: await count("task_observers"), comments: await count("task_comments"), history: await count("task_activity") };
+  let attachments = 0;
+  try { attachments = await count("task_attachments"); } catch { /* schema_v30 not run yet */ }
+  const counts = { tasks: await count("tasks"), checklist: await count("task_checklist"), observers: await count("task_observers"), comments: await count("task_comments"), history: await count("task_activity"), attachments };
   if (b.preview) return c.ok({ counts });
   if (b.confirm !== "CLEAR TASKS") return c.err('Type CLEAR TASKS to confirm', 400);
-  await db.batch([
+  const wipe = [
     db.prepare("DELETE FROM task_checklist"), db.prepare("DELETE FROM task_observers"), db.prepare("DELETE FROM task_comments"),
     db.prepare("DELETE FROM task_activity"), db.prepare("DELETE FROM tasks"),
-  ]);
+  ];
+  if (attachments) wipe.unshift(db.prepare("DELETE FROM task_attachments"));
+  await db.batch(wipe);
   c.log(c.user, "work", `Cleared all task data (${counts.tasks} tasks, ${counts.comments} comments, ${counts.history} history rows)`);
   return c.ok({ ok: true, cleared: counts });
 }
@@ -482,6 +546,7 @@ export async function handleTasks(c) {
   if (path === "/api/work/people" && method === "GET") return people(c);
   if (path === "/api/work/workload" && method === "GET") return workload(c);
   if (path === "/api/work/tasks/clear" && method === "POST") return clearAll(c);
+  { const am = path.match(/^\/api\/work\/attachments\/(\d+)$/); if (am && method === "GET") return attachment(c, Number(am[1])); }
   if (path === "/api/work/tasks") {
     if (method === "GET") return list(c);
     if (method === "POST") return create(c);
