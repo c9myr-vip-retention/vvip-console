@@ -4,7 +4,8 @@
 //   POST /api/roles                      { name, base, copy? }                new role at the bottom (most junior). base = "none", a fixed
 //                                                                             "admin"/"agent"/"viewer" set, or any role key (a template); copy = take a
 //                                                                             one-off copy of it instead of following it
-//   POST /api/roles/:key/update          { name?, base?, overrides?, reset? } rename, change the starting point, switch permissions
+//   POST /api/roles/:key/update          { name?, base?, overrides?, reset?, sees? } rename, change the starting point, switch permissions,
+//                                                                             set who they can see: { mode: "all" | "rank" | "list", list? }
 //   POST /api/roles/:key/move            { dir: "up" | "down" }               change its rank
 //   POST /api/roles/:key/delete          { move_to? }                         remove any role (people on it move to move_to; roles that
 //                                                                             started from it keep the permissions they have now)
@@ -12,7 +13,7 @@
 //   POST /api/users/perms                { id, overrides?, reset? }           personal permissions: { perm: true | false | null } on top of the role
 // Changing a role re-syncs the old columns of every account whose permissions could have changed (legacyColumns), and nothing may remove
 // the last account that can manage accounts.
-import { GROUPS, PERMS, PERM_KEYS, loadRoles, rolePerms, startPerms, baseProblem, legacyColumns, managerCount, slugRole, userOverrides, applyOverrides } from "./perms.js";
+import { GROUPS, PERMS, PERM_KEYS, loadRoles, rolePerms, startPerms, baseProblem, legacyColumns, managerCount, slugRole, userOverrides, applyOverrides, parseSees } from "./perms.js";
 
 const NO_TABLES = "Roles are not set up yet (schema_v27 has not been run)";
 const LAST = "Can't remove the last account that can manage accounts and roles. Give someone else that permission first.";
@@ -45,7 +46,7 @@ const countOn = (users, key) => users.filter((u) => (u.role_key ? u.role_key ===
 function roleOut(role, roles, users) {
   return {
     key: role.key, name: role.name, base: role.base, builtin: role.builtin, overrides: role.overrides,
-    perms: [...rolePerms(role, roles)], start: [...startPerms(role, roles)], users: countOn(users, role.key), assigned: users.filter((u) => u.role_key === role.key).length, rank: [...roles.keys()].indexOf(role.key) + 1,
+    sees: role.sees || { mode: "all", list: [] }, perms: [...rolePerms(role, roles)], start: [...startPerms(role, roles)], users: countOn(users, role.key), assigned: users.filter((u) => u.role_key === role.key).length, rank: [...roles.keys()].indexOf(role.key) + 1,
     used_by: [...roles.values()].filter((r) => r.key !== role.key && r.base === role.key).length,         // roles that start from this one
   };
 }
@@ -173,6 +174,12 @@ export async function handleRoles(c) {
         if (bad) return c.err(bad, 400);
         next.base = b.base;
       }
+      if (b.sees !== undefined) {
+        const m = b.sees && b.sees.mode;
+        if (!["all", "rank", "list"].includes(m)) return c.err("sees.mode must be all, rank or list", 400);
+        const list = m === "list" ? [...new Set((Array.isArray(b.sees.list) ? b.sees.list : []).filter((k) => typeof k === "string" && roles.has(k) && k !== role.key))] : [];
+        next.sees = { mode: m, list };
+      }
       if (b.reset) next.overrides = {};
       if (b.overrides && typeof b.overrides === "object") {
         for (const [k, v] of Object.entries(b.overrides)) {
@@ -183,6 +190,10 @@ export async function handleRoles(c) {
       const rolesAfter = new Map(roles); rolesAfter.set(role.key, next);
       if (locksOut(users, users, roles, rolesAfter)) return c.err(LAST, 400);
       await db.prepare("UPDATE roles SET name = ?, base = ? WHERE key = ?").bind(next.name, next.base, role.key).run();
+      if (b.sees !== undefined) {
+        try { await db.prepare("UPDATE roles SET sees = ? WHERE key = ?").bind(next.sees.mode === "all" ? null : JSON.stringify(next.sees), role.key).run(); }
+        catch { return c.err("Who-can-see is not set up yet (schema_v29 has not been run)", 503); }
+      }
       await db.prepare("DELETE FROM role_permissions WHERE role_key = ?").bind(role.key).run();
       const rows = Object.entries(next.overrides);
       if (rows.length) await db.batch(rows.map(([k, v]) => db.prepare("INSERT INTO role_permissions (role_key, perm, allowed) VALUES (?,?,?)").bind(role.key, k, v ? 1 : 0)));

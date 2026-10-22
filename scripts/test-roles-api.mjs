@@ -48,8 +48,14 @@ check("an agent cannot read roles (403)", r.status === 403);
 check("unauthenticated is 401", (await call(null, "GET", "/api/roles")).status === 401);
 r = await call(A, "GET", "/api/roles");
 const keys = (r.data.perms || []).map((p) => p.key);
-check("admin reads the catalogue (26 permissions, 4 groups) and 3 built-in roles", r.status === 200 && keys.length === 26 && new Set(keys).size === 26 && r.data.groups.length === 4 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
+check("admin reads the catalogue (41 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 41 && new Set(keys).size === 41 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
 check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
+check("every page has its own permission", ["page.changes", "page.performance", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.myday", "page.myperf", "page.account", "page.settings"].every((k) => keys.includes(k)));
+const agentRole = r.data.roles.find((x) => x.key === "agent"), adminRole = r.data.roles.find((x) => x.key === "admin");
+check("Agent starts with the agent pages, not Settings or Performance", ["page.contact", "page.tasks", "page.myday"].every((k) => agentRole.perms.includes(k)) && !agentRole.perms.includes("page.settings") && !agentRole.perms.includes("page.performance"), JSON.stringify(agentRole.perms));
+check("Admin starts with Settings and Performance, not the agent-only pages", adminRole.perms.includes("page.settings") && adminRole.perms.includes("page.performance") && !adminRole.perms.includes("page.myday"));
+const meLegacyAgent = await me(S), meLegacyAdmin = await me(A);
+check("old-settings accounts keep exactly their pages (agent sees agent pages, admin sees admin pages)", has(meLegacyAgent, "page.contact") && has(meLegacyAgent, "page.myday") && !has(meLegacyAgent, "page.settings") && has(meLegacyAdmin, "page.settings") && !has(meLegacyAdmin, "page.myday"));
 check("built-in Agent role starts with the agent defaults", ["contact.edit", "tasks.use", "kpi.scored"].every((p) => r.data.roles.find((x) => x.key === "agent").perms.includes(p)) && !r.data.roles.find((x) => x.key === "agent").perms.includes("schedule.manage"));
 
 // ---- create a role ----
@@ -225,7 +231,7 @@ r = await call(A, "POST", "/api/roles/viewer/delete", { move_to: "reader" });
 check("delete the built-in Viewer role and move its accounts", r.status === 200 && r.data.moved === 1, JSON.stringify(r.data));
 check("it is gone from the list and the account moved", !(await call(A, "GET", "/api/roles")).data.roles.some((x) => x.key === "viewer") && rows("SELECT role_key FROM users WHERE username = 'vic2'")[0].role_key === "reader");
 await call(A, "POST", "/api/roles", { name: "Viewer", base: "viewer" });
-check("a new role named Viewer gets a fresh key and starts from the fixed Viewer defaults", (await roleOf("viewer-2")).perms.length === 0);
+check("a new role named Viewer gets a fresh key and starts from the fixed Viewer defaults", (await roleOf("viewer-2")).perms.every((k) => k.startsWith("page.")));
 const aldoRole = (await call(A, "GET", "/api/roles")).data.roles.find((x) => x.key === "admin");
 check("the last manager's role cannot be deleted away from under them (400 when nobody else can manage)", true);   // covered by the lock-out checks above
 
@@ -255,6 +261,9 @@ check("two people on the same role start with the same permissions", JSON.string
 r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true, "contact.edit": false } });
 check("give one person an extra permission and take one away", r.status === 200 && r.data.overrides["dashboard.view"] === true && r.data.overrides["contact.edit"] === false && r.data.perms.includes("dashboard.view") && !r.data.perms.includes("contact.edit"), JSON.stringify(r.data));
 let mp = await me(PIA), mt2 = await me(PAT);
+await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "page.contact": false } });
+check("a personal exception can hide one page for one person", !has(await me(PIA), "page.contact") && has(await me(PAT), "page.contact"));
+await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "page.contact": null } });
 check("it shows on their /api/me", has(mp, "dashboard.view") && !has(mp, "contact.edit") && mp.can_edit === false, JSON.stringify(mp));
 check("the other person on the same role is unchanged", !has(mt2, "dashboard.view") && has(mt2, "contact.edit"));
 check("the old columns follow the exceptions (can_edit is 0)", rows("SELECT can_edit FROM users WHERE username = 'pia'")[0].can_edit === 0);
@@ -294,8 +303,40 @@ r = await call(await login("solo1"), "POST", "/api/users/perms", { id: idSolo, o
 check("the last manager cannot take users.manage away from themselves (400)", r.status === 400, JSON.stringify(r));
 sql("UPDATE users SET manage_users = 1 WHERE username = 'aldo'");
 
+// ---- who each role can see (the hierarchy decides) ----
+const peopleOf = async (tok) => (await call(tok, "GET", "/api/work/people")).data.people.map((x) => x.username).sort();
+check("the 'see people from every team' permission exists and is off for everyone by default", !(await roleOf("admin")).perms.includes("people.all") && !(await roleOf("agent")).perms.includes("people.all") && keys.includes("people.all"));
+for (const n of ["Boss2", "Mid2", "Junior2"]) await call(A, "POST", "/api/roles", { name: n, base: "agent" });
+for (const [u, rk] of [["bo", "boss2"], ["mi", "mid2"], ["ju", "junior2"]]) await call(A, "POST", "/api/users", { username: u, password: PW, role_key: rk, team: "B" });
+const BO = await login("bo"), MI = await login("mi"), JU = await login("ju");
+let pp = await peopleOf(MI);
+check("by default everyone sees everyone", pp.includes("bo") && pp.includes("ju") && pp.includes("mi"), JSON.stringify(pp));
+r = await call(A, "POST", "/api/roles/mid2/update", { sees: { mode: "rank" } });
+check("set a role to see its own rank and below", r.status === 200 && r.data.role.sees.mode === "rank", JSON.stringify(r.data));
+pp = await peopleOf(MI);
+check("Mid2 sees itself and the more junior Junior2, not the more senior Boss2", pp.includes("mi") && pp.includes("ju") && !pp.includes("bo"), JSON.stringify(pp));
+r = await call(A, "POST", "/api/roles/boss2/update", { sees: { mode: "list", list: ["junior2", "nope", "boss2"] } });
+check("or only the roles you pick (unknown ones and itself are dropped)", r.status === 200 && r.data.role.sees.mode === "list" && r.data.role.sees.list.join() === "junior2", JSON.stringify(r.data));
+check("Boss2 sees only itself and Junior2", JSON.stringify(await peopleOf(BO)) === JSON.stringify(["bo", "ju"]), JSON.stringify(await peopleOf(BO)));
+check("Junior2 still sees everyone (its own setting is the default)", (await peopleOf(JU)).includes("bo"));
+check("the admin account still sees everyone", (await peopleOf(A)).length >= 6);
+check("an account on old settings sees everyone", (await peopleOf(await login("leg1"))).includes("bo"));
+check("a bad mode is 400", (await call(A, "POST", "/api/roles/mid2/update", { sees: { mode: "everything" } })).status === 400);
+check("an agent cannot change who a role sees (403)", (await call(S, "POST", "/api/roles/mid2/update", { sees: { mode: "all" } })).status === 403);
+pp = (await call(MI, "GET", "/api/work/workload")).data.people.map((x) => x.username);
+check("the workload list follows it too", !pp.includes("bo"), JSON.stringify(pp));
+sql("INSERT OR REPLACE INTO player_days (snapshot_date, player_key, brand, tier_segment) VALUES (date('now','+8 hours'), 'zz_vis_1', 'SK69', 'V')");
+r = await call(MI, "GET", "/api/rtn/board");
+const names = (r.data.team || []).map((x) => x.username);
+check("the board's agent list follows it too, and now carries team and role", r.status === 200 && names.includes("mi") && names.includes("ju") && !names.includes("bo") && r.data.team.every((x) => "team" in x && "role" in x), JSON.stringify(r.data.team || r.data).slice(0, 200));
+r = await call(A, "GET", "/api/rtn/board");
+check("the admin's board list still has everyone", (r.data.team || []).some((x) => x.username === "bo") && (r.data.team || []).some((x) => x.username === "mi"));
+await call(A, "POST", "/api/roles/boss2/update", { sees: { mode: "all" } });
+check("setting it back to everyone", (await peopleOf(BO)).includes("mi") && (await roleOf("boss2")).sees.mode === "all");
+sql("DELETE FROM player_days WHERE player_key LIKE 'zz_vis%'");
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1'); UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

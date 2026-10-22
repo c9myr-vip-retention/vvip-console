@@ -6,7 +6,7 @@
 
 import { handleWork } from "./work/index.js";
 import { handleRoles } from "./roles.js";
-import { loadRoles, resolvePerms, rolePerms, legacyColumns } from "./perms.js";
+import { loadRoles, resolvePerms, rolePerms, legacyColumns, filterPeople } from "./perms.js";
 
 function corsFor(request) {
   const origin = request.headers.get("Origin") || "";
@@ -2025,7 +2025,7 @@ export default {
     const brandAllowed = (b) => allowedBrands === null || allowedBrands.includes(b);
 
     // Work management (tasks, schedule, projects...). Routes live in worker/work/*.js.
-    { const w = await handleWork({ path, method, url, request, env, user, canManage, can, perms, ok, err, log, ctx }); if (w) return w; }
+    { const w = await handleWork({ path, method, url, request, env, user, canManage, can, perms, roles: roleMap, ok, err, log, ctx }); if (w) return w; }
     { const r = await handleRoles({ path, method, url, request, env, user, can, perms, ok, err, log, ctx }); if (r) return r; }
 
     // Aggregate endpoints (trend/performance/kpi) accept ?team=A|B|C so a MANAGER can narrow
@@ -2129,7 +2129,8 @@ export default {
                WHERE p2.brand = pd.brand AND p2.snapshot_date = (SELECT MAX(p3.snapshot_date) FROM player_days p3 WHERE p3.brand = pd.brand)
             ) AS newest_dep
           FROM player_days pd ${healthWhere} GROUP BY pd.brand`).bind(...healthBinds).all(),
-        env.DB.prepare(`SELECT username, role, on_leaderboard FROM users ORDER BY username`).all(),
+        env.DB.prepare(`SELECT username, role, role_key, team, on_leaderboard FROM users ORDER BY username`).all()
+          .catch(() => env.DB.prepare(`SELECT username, role, team, on_leaderboard FROM users ORDER BY username`).all()),     // schema_v27 not run yet: no role_key
         env.DB.prepare("SELECT MAX(ingested_at) AS t FROM player_days WHERE snapshot_date = ?").bind(target).first(),
         env.DB.prepare("SELECT player_key, brand, url FROM player_telegram").all(),
         showCooling ? env.DB.prepare(`
@@ -2185,7 +2186,7 @@ export default {
       return ok({
         snapshot_date: target, synced_at: sync?.t || null,
         rows: rows.results, contacts: contacts.results,
-        health: health.results, team: team.results,
+        health: health.results, team: filterPeople(team.results || [], user, roleMap),
         telegram: telegram.results, cooling: cooling.results, reactivation: reactivation.results,
       });
     }

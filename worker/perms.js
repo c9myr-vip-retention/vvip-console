@@ -11,6 +11,7 @@
 // on_leaderboard, manage_users) in step so every query that still reads them stays right.
 
 export const GROUPS = [
+  ["pages", "Pages (what shows in the sidebar)"],
   ["daily", "Daily work"],
   ["tasks", "Tasks and work"],
   ["schedule", "Schedule"],
@@ -18,7 +19,25 @@ export const GROUPS = [
 ];
 
 // d = default for [admin, agent, viewer]
+// The "pages" group has one permission per page that had none: it decides whether the page shows in the sidebar. The page's data is still
+// limited by the function permissions below (and by team). A page that already is one function (Dashboard, Assignments, Flows, Templates,
+// Analytics, Recycle bin) keeps using that permission as its page switch.
 export const PERMS = [
+  { key: "page.changes", group: "pages", label: "Changes page", desc: "Show the Changes page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.performance", group: "pages", label: "Performance page", desc: "Show the Performance page in the sidebar.", d: [1, 0, 0] },
+  { key: "page.contact", group: "pages", label: "Contact page", desc: "Show the Contact page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.checkin", group: "pages", label: "Check-in page", desc: "Show the Check-in page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.grace", group: "pages", label: "Grace claims page", desc: "Show the Grace claims page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.players", group: "pages", label: "Players page", desc: "Show the Players page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.tasks", group: "pages", label: "Tasks page", desc: "Show the Tasks page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.schedule", group: "pages", label: "Schedule page", desc: "Show the Schedule page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.projects", group: "pages", label: "Projects page", desc: "Show the Projects page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.workload", group: "pages", label: "Team workload page", desc: "Show the Team workload page in the sidebar.", d: [1, 1, 1] },
+  { key: "page.myday", group: "pages", label: "My day page", desc: "Show the My day page in the sidebar.", d: [0, 1, 1] },
+  { key: "page.myperf", group: "pages", label: "My performance page", desc: "Show the My performance page in the sidebar.", d: [0, 1, 1] },
+  { key: "page.account", group: "pages", label: "Account page", desc: "Show the Account page in the sidebar.", d: [0, 1, 1] },
+  { key: "page.settings", group: "pages", label: "Settings page", desc: "Show the Settings page in the sidebar. What is inside it still needs the matching function permission.", d: [1, 0, 0] },
+
   { key: "dashboard.view", group: "daily", label: "See the admin Dashboard", desc: "Open the Dashboard page: the live staff board, KPIs, trends, brand health and top lists. It hides the page; numbers stay limited to the team(s) the role may see.", d: [1, 0, 0] },
   { key: "contact.edit", group: "daily", label: "Log contacts", desc: "Assign players, set status, write notes, CRM and Telegram. Without it the account is view-only.", d: [1, 1, 0] },
   { key: "contact.delete", group: "daily", label: "Clear a contact or note", desc: "Delete a logged contact or a player note.", d: [1, 1, 0] },
@@ -28,6 +47,7 @@ export const PERMS = [
   { key: "mistakes.log", group: "daily", label: "Log mistakes", desc: "Log a mistake against an agent.", d: [1, 0, 0] },
   { key: "kpi.scored", group: "daily", label: "Counts as a scored CS agent", desc: "Shows on the KPI leaderboard and in agent scoring.", d: [0, 1, 0] },
   { key: "teams.all", group: "daily", label: "See every team", desc: "See all teams' brands and data and switch between teams. Without it the account only sees its own team.", d: [1, 0, 0] },
+  { key: "people.all", group: "daily", label: "See people from every team", desc: "Agent and staff lists show people from every team, not only the team in view. Off for everyone by default.", d: [0, 0, 0] },
   { key: "activity.view", group: "daily", label: "See the activity log", desc: "Read the audit trail of who did what.", d: [1, 0, 0] },
 
   { key: "tasks.use", group: "tasks", label: "Create and work on own tasks", desc: "Make tasks for themselves, start and finish them, comment. Without it tasks are view-only.", d: [1, 1, 0] },
@@ -74,19 +94,50 @@ export function legacyPerms(user) {
   if (edit) { out.add("contact.edit"); out.add("tasks.use"); out.add("schedule.swap_request"); }
   if (del) out.add("contact.delete");
   if (user.on_leaderboard) out.add("kpi.scored");
+  if (!mgr) for (const p of PERMS) if (p.group === "pages" && p.d[1]) out.add(p.key);        // an old non-manager account already sees the pages an agent sees
   return out;
 }
 
 /** Roles from the database, as Map(key -> { key, name, base, builtin, overrides }). null when the tables are not there yet. */
 export async function loadRoles(db) {
   try {
-    const r = await db.prepare("SELECT key, name, base, builtin FROM roles WHERE deleted_at IS NULL ORDER BY sort, rowid").all();
+    let r;
+    try { r = await db.prepare("SELECT key, name, base, builtin, sees FROM roles WHERE deleted_at IS NULL ORDER BY sort, rowid").all(); }
+    catch { r = await db.prepare("SELECT key, name, base, builtin FROM roles WHERE deleted_at IS NULL ORDER BY sort, rowid").all(); }   // schema_v29 not run yet
     const p = await db.prepare("SELECT role_key, perm, allowed FROM role_permissions").all();
     const map = new Map();
-    for (const x of r.results || []) map.set(x.key, { key: x.key, name: x.name, base: String(x.base || "none"), builtin: !!x.builtin, overrides: {} });
+    for (const x of r.results || []) map.set(x.key, { key: x.key, name: x.name, base: String(x.base || "none"), builtin: !!x.builtin, overrides: {}, sees: parseSees(x.sees) });
     for (const x of p.results || []) { const role = map.get(x.role_key); if (role && PERM_KEYS.includes(x.perm)) role.overrides[x.perm] = !!x.allowed; }
     return map;
   } catch { return null; }
+}
+
+/** Which roles a role can see: { mode: "all" | "rank" | "list", list: [role keys] }. Anything unreadable means everyone, as before. */
+export function parseSees(raw) {
+  try {
+    const o = JSON.parse(raw || "null");
+    if (o && ["all", "rank", "list"].includes(o.mode)) return { mode: o.mode, list: Array.isArray(o.list) ? o.list.filter((x) => typeof x === "string") : [] };
+  } catch { /* fall through */ }
+  return { mode: "all", list: [] };
+}
+
+/** The role keys this account may see in people lists, or null for everyone. An account without a role sees everyone, as today.
+ *  "rank" follows the hierarchy: its own rank and every more junior role (later in the ranked list). */
+export function visibleRoles(user, roles) {
+  const rk = user && user.role_key;
+  if (!rk || !roles || !roles.has(rk)) return null;
+  const sees = roles.get(rk).sees || { mode: "all", list: [] };
+  if (sees.mode === "all") return null;
+  const keys = [...roles.keys()];
+  if (sees.mode === "rank") return new Set(keys.filter((_, i) => i >= keys.indexOf(rk)));
+  return new Set([rk, ...sees.list.filter((k) => roles.has(k))]);
+}
+/** The role an account counts as: its own role, or for an old-settings account the built-in role named in its old `role`. */
+export const roleKeyOf = (row) => row.role_key || row.role || "";
+/** People this account may see: everyone, or only those in roles it can see (always including itself). */
+export function filterPeople(rows, user, roles) {
+  const vis = visibleRoles(user, roles);
+  return vis ? rows.filter((r) => r.username === user.username || vis.has(roleKeyOf(r))) : rows;
 }
 
 /** The permissions a role starts from. base is "none", a fixed code default set ("admin", "agent", "viewer"), or the key of another role,

@@ -9,6 +9,8 @@
 //  - one ongoing task per person (DB index uq_one_ongoing_per_person; the API answers 409).
 //  - started_at is set only while status='progress'; spent_seconds accumulates elapsed time.
 //  - delete is soft (deleted_at/deleted_by); an ongoing task becomes 'pending' first so a later restore cannot clash.
+import { filterPeople } from "../perms.js";
+
 
 const STATUSES = ["pending", "progress", "done", "deferred"];
 const DEADLINE_DAYS = { "Same day": 0, "1 day": 1, "2 days": 2, "3 days": 3, "7 days": 7, "No deadline": null };
@@ -121,8 +123,10 @@ const cleanTags = (v) => uniq((Array.isArray(v) ? v : []).map((x) => str(x, 40))
 
 // ── GET /people ───────────────────────────────────────────────────────────────────────────────
 async function people(c) {
-  const { results } = await c.env.DB.prepare("SELECT username, role, team FROM users ORDER BY username COLLATE NOCASE").all();
-  return c.ok({ people: (results || []).map((u) => ({ username: u.username, role: u.role, team: u.team || null })) });
+  let results;
+  try { results = (await c.env.DB.prepare("SELECT username, role, role_key, team FROM users ORDER BY username COLLATE NOCASE").all()).results; }
+  catch { results = (await c.env.DB.prepare("SELECT username, role, team FROM users ORDER BY username COLLATE NOCASE").all()).results; }    // schema_v27 not run yet
+  return c.ok({ people: filterPeople(results || [], c.user, c.roles).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null })) });
 }
 
 // ── GET /tasks ────────────────────────────────────────────────────────────────────────────────
@@ -444,7 +448,13 @@ async function workload(c) {
     get(username).ongoing = o;
   }
   const mine = c.user.team || null;
-  const rows = [...by.values()].filter((p) => c.can("workload.all") || p.username === c.user.username || (mine && p.team === mine));
+  let seen = [...by.values()];
+  try {                                                  // who this account may see by role
+    const meta = new Map(((await db.prepare("SELECT username, role, role_key FROM users").all()).results || []).map((u) => [u.username, u]));
+    const ok = new Set(filterPeople([...meta.values()], c.user, c.roles).map((u) => u.username));
+    seen = seen.filter((p) => ok.has(p.username) || !meta.has(p.username));
+  } catch { /* schema_v27 not run yet: nothing to filter by */ }
+  const rows = seen.filter((p) => c.can("workload.all") || p.username === c.user.username || (mine && p.team === mine));
   return c.ok({ people: rows.sort((a, b) => a.username.localeCompare(b.username)), my_team: mine });
 }
 
