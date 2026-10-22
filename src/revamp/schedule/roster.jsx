@@ -21,7 +21,7 @@ export default function Roster({ days, today, items, people, shifts, admin, me, 
 
   const cells = useMemo(() => shiftCells(items, days[0], days[days.length - 1]), [items, days]);
   const names = useMemo(() => {
-    const s = new Set(people.filter((p) => p.role !== "viewer" || p.on_leaderboard).map((p) => p.username));
+    const s = new Set(people.filter((p) => (p.tasks !== undefined ? p.tasks : (p.role !== "viewer" || p.on_leaderboard))).map((p) => p.username));
     for (const k of cells.keys()) s.add(k.split("|")[0]);
     return [...s].sort((a, b) => a.localeCompare(b));
   }, [people, cells]);

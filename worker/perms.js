@@ -56,7 +56,7 @@ export const PERMS = [
 
   { key: "tasks.use", group: "tasks", label: "Create and work on own tasks", desc: "Make tasks for themselves, start and finish them, comment. Without it tasks are view-only.", d: [1, 1, 0] },
   { key: "tasks.assign_others", group: "tasks", label: "Assign tasks to other people", desc: "Create a task for someone else, reassign a task, bulk-assign.", d: [1, 0, 0] },
-  { key: "tasks.view_all", group: "tasks", label: "See everyone's tasks", desc: "See tasks they do not own, are not assigned and do not observe.", d: [1, 0, 0] },
+  { key: "tasks.view_all", group: "tasks", label: "See everyone's tasks", desc: "For accounts on old settings: see tasks they do not hold. Accounts with a role follow the role hierarchy instead (everyone below them, and same-rank colleagues when they have no team), so this switch does not change what they see.", d: [1, 0, 0] },
   { key: "tasks.edit_any", group: "tasks", label: "Edit any task", desc: "Change tasks they do not own or hold.", d: [1, 0, 0] },
   { key: "tasks.delete_any", group: "tasks", label: "Delete any task", desc: "Delete tasks they did not create.", d: [1, 0, 0] },
   { key: "workload.all", group: "tasks", label: "Team workload: all teams", desc: "See every team's workload. Without it they see their own team only.", d: [1, 0, 0] },
@@ -223,7 +223,15 @@ export function applyOverrides(set, overrides) {
  *  An account without a role keeps exactly what its old flags give it; personal exceptions only apply to accounts that have a role. */
 export function resolvePerms(user, roles) {
   const rk = user && user.role_key;
-  if (rk && roles && roles.has(rk)) return applyOverrides(rolePerms(roles.get(rk), roles), userOverrides(user));
+  if (rk && roles && roles.has(rk)) {
+    const perms = applyOverrides(rolePerms(roles.get(rk), roles), userOverrides(user));
+    // The hierarchy decides whose tasks an account with a role sees (canViewPerson, hiddenPeople): anyone below, same-rank colleagues when it has no team,
+    // and more when an exception is on. So the account is given "see tasks they do not hold" whenever the hierarchy lets it see anybody but itself;
+    // hiddenPeople then trims it to exactly that. Only the most junior role with a team (nobody below, no exceptions) keeps seeing just its own.
+    const rank = [...roles.keys()].indexOf(rk);
+    if (rank < roles.size - 1 || !user.team || perms.has("people.above") || perms.has("people.same_rank")) perms.add("tasks.view_all");
+    return perms;
+  }
   return legacyPerms(user);
 }
 

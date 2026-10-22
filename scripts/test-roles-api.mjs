@@ -497,7 +497,7 @@ check("a note bumps the 'player' counter", ((await pulseOf(A)).player || 0) === 
 sql("DELETE FROM player_notes WHERE player_key LIKE 'zz_lv%'; DELETE FROM contact_log WHERE player_key LIKE 'zz_lv%'");
 
 // ---- the role hierarchy: seniors are hidden from juniors; same role sees each other's tasks only when the viewer has no team ----
-for (const n of ["Hier1", "Hier2", "Hier3"]) { const rr = await call(A, "POST", "/api/roles", { name: n, base: "agent" }); await call(A, "POST", `/api/roles/${rr.data.role.key}/update`, { overrides: { "tasks.view_all": true } }); }
+for (const n of ["Hier1", "Hier2", "Hier3"]) { await call(A, "POST", "/api/roles", { name: n, base: "agent" }); }       // no "see everyone's tasks" switch: the hierarchy alone decides
 const mkp = async (u, rk, tm) => { await call(A, "POST", "/api/users", { username: u, password: PW, role_key: rk, ...(tm ? { team: tm } : {}) }); const tk = await login(u); await call(tk, "POST", "/api/work/tasks", { title: `[h] ${u}` }); return tk; };
 const H1A = await mkp("h1a", "hier1"), H1B = await mkp("h1b", "hier1"), H1T = await mkp("h1t", "hier1", "B"), H1U = await mkp("h1u", "hier1", "B"), H2A = await mkp("h2a", "hier2", "B"), H3A = await mkp("h3a", "hier3", "B");
 const seen = async (tok) => (await call(tok, "GET", "/api/work/tasks")).data.tasks.filter((x) => x.title.startsWith("[h] ")).map((x) => x.assignee).sort();
@@ -537,8 +537,19 @@ const ana = (await call(H2A, "GET", "/api/work/efficiency")).data;
 check("efficiency lists leave out the seniors", Array.isArray(ana.users) && !ana.users.some((u) => u.username.startsWith("h1")), JSON.stringify(ana.users && ana.users.map((u) => u.username)));
 sql("DELETE FROM tasks WHERE title LIKE '[h] %'; DELETE FROM task_activity WHERE task_id NOT IN (SELECT id FROM tasks)");
 
+// ---- "Counts as a scored CS agent" is about the KPI score only: it neither shows nor hides anyone in task views ----
+const TOr = (await call(A, "POST", "/api/roles", { name: "TaskOnly9", base: "none" })).data.role.key;
+await call(A, "POST", `/api/roles/${TOr}/update`, { overrides: { "tasks.use": true } });
+const SCr = (await call(A, "POST", "/api/roles", { name: "ScoreOnly9", base: "none" })).data.role.key;
+await call(A, "POST", `/api/roles/${SCr}/update`, { overrides: { "kpi.scored": true } });
+await call(A, "POST", "/api/users", { username: "to9", password: PW, role_key: TOr, team: "B" });
+await call(A, "POST", "/api/users", { username: "sc9", password: PW, role_key: SCr, team: "B" });
+const ppl = (await call(A, "GET", "/api/work/people")).data.people, wl9 = (await call(A, "GET", "/api/work/workload")).data.people.map((x) => x.username);
+check("someone who works on tasks but is not a scored CS agent still shows in the task views", ppl.find((x) => x.username === "to9").tasks === true && ppl.find((x) => x.username === "to9").on_leaderboard === 0 && wl9.includes("to9"), JSON.stringify(wl9));
+check("a scored CS agent who cannot use tasks is not a task person (the KPI switch does not make one)", ppl.find((x) => x.username === "sc9").tasks === false && ppl.find((x) => x.username === "sc9").on_leaderboard === 1 && !wl9.includes("sc9"), JSON.stringify(wl9));
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9','ow9','ow9a','ob9','own9','h1a','h1b','h1t','h1u','h2a','h3a'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1','bo','mi','ju','jn9','vw9','ow9','ow9a','ob9','own9','h1a','h1b','h1t','h1u','h2a','h3a','to9','sc9'); UPDATE roles SET sees = NULL; UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

@@ -9,7 +9,7 @@
 //  - one ongoing task per person (DB index uq_one_ongoing_per_person; the API answers 409).
 //  - started_at is set only while status='progress'; spent_seconds accumulates elapsed time.
 //  - delete is soft (deleted_at/deleted_by); an ongoing task becomes 'pending' first so a later restore cannot clash.
-import { filterPeople } from "../perms.js";
+import { filterPeople, resolvePerms, loadRoles } from "../perms.js";
 import { REACTIONS, mentionsIn, taggable, notify, reactionsOf } from "./chat.js";
 import { hiddenFor } from "./scope.js";
 
@@ -163,11 +163,21 @@ async function checkFields(c, b, keys) {
 const cleanTags = (v) => uniq((Array.isArray(v) ? v : []).map((x) => str(x, 40)).filter(Boolean)).slice(0, 20);
 
 // ── GET /people ───────────────────────────────────────────────────────────────────────────────
+// Every account with the columns resolvePerms needs (older databases lack the newer ones).
+async function accountsWithPerms(db) {
+  for (const cols of ["username, role, role_key, team, on_leaderboard, can_edit, manage_users, perm_overrides", "username, role, role_key, team, on_leaderboard, can_edit, manage_users", "username, role, team, on_leaderboard, can_edit, manage_users"]) {
+    try { return (await db.prepare(`SELECT ${cols} FROM users ORDER BY username COLLATE NOCASE`).all()).results || []; } catch { /* older schema: fewer columns */ }
+  }
+  return [];
+}
+
+// The roles, even when the person asking is on old settings (the request only loads them for accounts that have a role).
+const allRoles = async (c) => c.roles || c._allRoles || (c._allRoles = await loadRoles(c.env.DB));
+
 async function people(c) {
-  let results;
-  try { results = (await c.env.DB.prepare("SELECT username, role, role_key, team, on_leaderboard FROM users ORDER BY username COLLATE NOCASE").all()).results; }
-  catch { results = (await c.env.DB.prepare("SELECT username, role, team, on_leaderboard FROM users ORDER BY username COLLATE NOCASE").all()).results; }    // schema_v27 not run yet
-  return c.ok({ people: filterPeople(results || [], c.user, c.roles, c.perms).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0 })) });
+  const [results, roles] = await Promise.all([accountsWithPerms(c.env.DB), allRoles(c)]);
+  // `tasks` says whether the person can work on tasks at all. "Counts as a scored CS agent" is about the KPI score only and has nothing to do with tasks.
+  return c.ok({ people: filterPeople(results, c.user, c.roles, c.perms).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0, tasks: resolvePerms(u, roles).has("tasks.use") })) });
 }
 
 // ── GET /tasks ────────────────────────────────────────────────────────────────────────────────
@@ -528,7 +538,7 @@ async function remove(c, id) {
 async function workload(c) {
   const db = c.env.DB, today = mytToday();
   const [users, agg, ong] = await Promise.all([
-    db.prepare("SELECT username, team, (can_edit = 1 OR manage_users = 1 OR on_leaderboard = 1) AS listed FROM users").all(),     // everyone's team is known; only those who can act, or are scored agents, get a card
+    accountsWithPerms(db),                              // everyone's team is known; everyone who can work on tasks gets a card (the KPI "scored" switch has nothing to do with it)
     db.prepare(
       `SELECT assignee AS username,
               SUM(status != 'done') AS assigned,
@@ -543,9 +553,10 @@ async function workload(c) {
          FROM tasks t WHERE t.status = 'progress' AND t.deleted_at IS NULL`).all(),
   ]);
   const by = new Map();
-  const teamOf = new Map((users.results || []).map((u) => [u.username, u.team || null]));
+  const teamOf = new Map((users || []).map((u) => [u.username, u.team || null]));
   const get = (u) => { if (!by.has(u)) by.set(u, { username: u, team: teamOf.get(u) || null, assigned: 0, overdue: 0, done: 0, waiting: 0, ongoing: null }); return by.get(u); };
-  for (const u of users.results || []) if (u.listed) get(u.username);
+  const roles = await allRoles(c);
+  for (const u of users || []) if (resolvePerms(u, roles).has("tasks.use")) get(u.username);
   for (const r of agg.results || []) Object.assign(get(r.username), { assigned: r.assigned || 0, overdue: r.overdue || 0, done: r.done || 0, waiting: r.waiting || 0 });
   for (const r of ong.results || []) {
     const { username, ...o } = r;
