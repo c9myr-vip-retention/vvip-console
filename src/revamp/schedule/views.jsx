@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { Avatar } from "../ui";
 import { Brands, Who, typeOf } from "./forms.jsx";
-import { DAYS, byTime, dayNum, fmtD, monthGrid, timeStr } from "./logic.js";
+import { DAYS, byTime, dayNum, fmtD, isOvernight, monthGrid, timeStr } from "./logic.js";
 
 const ONE = { shift: "Shift", reload: "Reload", meeting: "Meeting", maint: "Maintenance", report: "Report", training: "Training" };
 export const oneName = (T) => ONE[T.key] || T.name;
@@ -53,7 +53,7 @@ export function WeekBoard({ days, today, occs, types, me, admin, hideShifts, onO
     <div className="board sched">
       {days.map((d, i) => {
         const list = occs.filter((o) => o.date === d).sort(byTime), shifts = list.filter((o) => o.item.type_key === "shift" && !o.item.off);
-        const warn = hideShifts ? "" : !shifts.length ? "No cover" : !shifts.some((o) => o.item.title === "Night") ? "No night cover" : "";
+        const warn = hideShifts ? "" : !shifts.length ? "No cover" : !shifts.some((o) => o.item.title === "Night" || isOvernight(o.item)) ? "No night cover" : "";
         return (
           <div key={d} className={"col" + (d === today ? " today" : "") + (dnd.over === d ? " drop" : "")} style={{ "--c": d === today ? "var(--accent)" : "#6B7385" }} {...dnd.props(d)}>
             <div className="ch">{DAYS[i]} <span>{fmtD(d)}</span></div>

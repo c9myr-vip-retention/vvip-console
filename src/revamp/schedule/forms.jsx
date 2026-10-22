@@ -4,7 +4,7 @@ import { Avatar, BrandBadge, Modal, MultiSelect, Select, toast } from "../ui";
 import { brandColor, BRAND_ORDER } from "../tokens.js";
 import { api } from "./api.js";
 import {
-  DAYS, SHIFT_PRESETS, REPEAT_OPTIONS, addDays, addMonths, dayNum, fmtD, fmtDow, monthGrid, monthLabel, monthStart,
+  DAYS, DEFAULT_SHIFTS, REPEAT_OPTIONS, TIME_OPTIONS, addDays, addMonths, dayNum, fmtD, fmtDow, monthGrid, monthLabel, monthStart,
   quickDates, timeOptionsFor, timeStr, todayMyt,
 } from "./logic.js";
 
@@ -46,17 +46,20 @@ function MultiCal({ dates, month, onMonth, onPick, single }) {
 const blankEntry = (type_key = "reload") => ({ type_key, title: "", start_time: "12:00", end_time: "23:59", brands: [], who: [], note: "", repeat: "none" });
 const fromItem = (it) => ({ type_key: it.type_key, title: it.title, start_time: it.start_time || "", end_time: it.end_time || "", brands: [...it.brands], who: [...it.who], note: it.note || "", repeat: it.repeat });
 
-function EntryForm({ e, i, n, types, people, edit, onChange, onRemove }) {
+function EntryForm({ e, i, n, types, people, shifts, edit, onChange, onRemove }) {
   const set = (k) => (v) => onChange({ ...e, [k]: v });
   const T = timeOptionsFor(e.start_time, e.end_time);
-  const quick = (k) => { const [title, start_time, end_time] = SHIFT_PRESETS[k]; onChange({ ...e, type_key: "shift", title, start_time, end_time }); };
+  const quick = (k) => {
+    const s = k === "OFF" ? { name: "Day off", start_time: "", end_time: "" } : shifts.find((x) => x.key === k);
+    if (s) onChange({ ...e, type_key: "shift", title: s.name, start_time: s.start_time, end_time: s.end_time });
+  };
   return (
     <div className="ent">
       <div className="ent-h">
         <b>{edit ? "Entry" : `Entry ${i + 1}`}</b><span className="grow" />
         {!edit && (
           <Select value="" placeholder="Quick fill a shift…" onChange={quick} style={{ width: 190 }}
-            options={[{ value: "AM", label: "Morning 09:00–17:00" }, { value: "PM", label: "Afternoon 13:00–21:00" }, { value: "NT", label: "Night 21:00–05:00" }, { value: "OFF", label: "Day off" }]} />
+            options={[...shifts.map((s) => ({ value: s.key, label: `${s.name} ${s.start_time}–${s.end_time}` })), { value: "OFF", label: "Day off" }]} />
         )}
         {n > 1 && <button type="button" className="btn sm danger" onClick={onRemove} aria-label="Remove this entry">✕</button>}
       </div>
@@ -82,7 +85,7 @@ function EntryForm({ e, i, n, types, people, edit, onChange, onRemove }) {
 }
 
 /** Add (many dates x many entries) or edit one item. */
-export function AddModal({ types, people, item, date0, type0, onClose, onDone }) {
+export function AddModal({ types, people, shifts = DEFAULT_SHIFTS, item, date0, type0, onClose, onDone }) {
   const today = todayMyt(), edit = !!item;
   const [dates, setDates] = useState(() => new Set([item ? item.date : date0 || today]));
   const [month, setMonth] = useState(() => monthStart(item ? item.date : date0 || today));
@@ -153,7 +156,7 @@ export function AddModal({ types, people, item, date0, type0, onClose, onDone })
           </div>
           <div>
             <div className="sch-h">{edit ? "Entry" : "Entries · add as many as you need"}</div>
-            {entries.map((e, i) => <EntryForm key={i} e={e} i={i} n={entries.length} edit={edit} types={types} people={people} onChange={upd(i)} onRemove={() => setEntries((l) => l.filter((_, j) => j !== i))} />)}
+            {entries.map((e, i) => <EntryForm key={i} e={e} i={i} n={entries.length} edit={edit} types={types} people={people} shifts={shifts} onChange={upd(i)} onRemove={() => setEntries((l) => l.filter((_, j) => j !== i))} />)}
             {!edit && <button type="button" className="addq" style={{ width: "100%" }} onClick={() => setEntries((l) => [...l, blankEntry(l.length ? l[l.length - 1].type_key : undefined)])}>+ Add another entry</button>}
           </div>
         </div>

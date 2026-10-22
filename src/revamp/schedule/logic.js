@@ -66,9 +66,14 @@ export const TIME_OPTIONS = (() => {
 })();
 export const timeOptionsFor = (...vals) => { const o = [...TIME_OPTIONS]; for (const v of vals) if (v && !o.some((x) => x.value === v)) o.splice(1, 0, { value: v, label: v }); return o; };
 
-export const SHIFT_PRESETS = {
-  AM: ["Morning", "09:00", "17:00"], PM: ["Afternoon", "13:00", "21:00"], NT: ["Night", "21:00", "05:00"], OFF: ["Day off", "", ""],
-};
+/** Shift times used until the Worker sends the admin-managed list (and by older Workers that do not send one). */
+export const DEFAULT_SHIFTS = [
+  { key: "am", name: "Morning", start_time: "09:00", end_time: "17:00" },
+  { key: "pm", name: "Afternoon", start_time: "13:00", end_time: "21:00" },
+  { key: "nt", name: "Night", start_time: "21:00", end_time: "05:00" },
+];
+/** A shift that runs past midnight (counts as night cover on the board, whatever it is called). */
+export const isOvernight = (it) => { const a = mins(it.start_time), b = mins(it.end_time); return a !== null && b !== null && b <= a; };
 export const REPEAT_OPTIONS = [{ value: "none", label: "Does not repeat" }, { value: "daily", label: "Every day" }, { value: "weekly", label: "Every week" }];
 
 /** Quick date picks for the add form. */

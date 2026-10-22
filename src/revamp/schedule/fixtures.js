@@ -53,7 +53,28 @@ swaps.push({ id: sid++, item_id: 3, from_user: "sara", note: "For Wed 21 Oct. De
 
 const inWindow = (it, from, to) => (it.repeat === "none" ? (!from || it.date >= from) && (!to || it.date <= to) : !to || it.date <= to);
 
-export const schedule = (from, to) => wait({ types, items: items.filter((i) => inWindow(i, from, to)), my_swaps: swaps.filter((s) => s.from_user === me.username).map((s) => ({ item_id: s.item_id, status: s.status })) });
+let shifts = [
+  { key: "am", name: "Morning", start_time: "09:00", end_time: "17:00" },
+  { key: "pm", name: "Afternoon", start_time: "13:00", end_time: "21:00" },
+  { key: "nt", name: "Night", start_time: "21:00", end_time: "05:00" },
+];
+const shiftBad = (b) => (!String(b.name || "").trim() ? "Give the shift a name" : !/^([01]\d|2[0-3]):[0-5]\d$/.test(b.start_time || "") || !/^([01]\d|2[0-3]):[0-5]\d$/.test(b.end_time || "") ? "Start and end must be times (HH:MM)" : b.start_time === b.end_time ? "Start and end cannot be the same time" : "");
+export const addShiftPreset = (b) => {
+  if (!admin()) return fail("Admin only", 403);
+  const bad = shiftBad(b); if (bad) return fail(bad, 400);
+  if (shifts.some((s) => s.name.toLowerCase() === b.name.trim().toLowerCase())) return fail("A shift with that name already exists", 409);
+  const s = { key: "s" + nid++, name: b.name.trim(), start_time: b.start_time, end_time: b.end_time };
+  shifts = [...shifts, s]; return wait({ shift: s });
+};
+export const updateShiftPreset = (key, b) => {
+  if (!admin()) return fail("Admin only", 403);
+  const s = shifts.find((x) => x.key === key); if (!s) return fail("Shift not found", 404);
+  const m = { ...s, ...b }, bad = shiftBad(m); if (bad) return fail(bad, 400);
+  if (shifts.some((x) => x.key !== key && x.name.toLowerCase() === m.name.trim().toLowerCase())) return fail("A shift with that name already exists", 409);
+  Object.assign(s, { name: m.name.trim(), start_time: m.start_time, end_time: m.end_time }); return wait({ shift: s });
+};
+export const deleteShiftPreset = (key) => { if (!admin()) return fail("Admin only", 403); shifts = shifts.filter((s) => s.key !== key); return wait({ ok: true }); };
+export const schedule = (from, to) => wait({ types, shifts, items: items.filter((i) => inWindow(i, from, to)), my_swaps: swaps.filter((s) => s.from_user === me.username).map((s) => ({ item_id: s.item_id, status: s.status })) });
 export const addScheduleItems = (list) => {
   if (!admin()) return fail("Admin only", 403);
   let n = 0;
@@ -69,6 +90,12 @@ export const updateScheduleItem = (id, b) => {
   Object.assign(it, b); return wait({ item: it });
 };
 export const deleteScheduleItem = (id) => { if (!admin()) return fail("Admin only", 403); items = items.filter((i) => i.id !== id); return wait({ ok: true }); };
+export const deleteScheduleItems = (b) => {
+  if (!admin()) return fail("Admin only", 403);
+  const hit = items.filter((i) => (!b.type_key || i.type_key === b.type_key) && (!b.from || i.date >= b.from) && (!b.to || i.date <= b.to));
+  if (b.preview) return wait({ count: hit.length, repeating: hit.filter((i) => i.repeat !== "none").length });
+  items = items.filter((i) => !hit.includes(i)); return wait({ deleted: hit.length });
+};
 export const addScheduleType = ({ name, color }) => {
   if (!admin()) return fail("Admin only", 403);
   const t = { key: name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + nid++, name, color, builtin: 0 };
