@@ -4,6 +4,7 @@ import { Seg, toast } from "../ui";
 import { Drawer, WL_BANDS, WL_NONE, exportQueue, ckey, fmt } from "../../App.jsx";
 import { useDailyBase, useDailyFilters } from "../daily/hooks.js";
 import { filterRows, sortPriority, buildBands, stageOf, isActioned, contactedPayload } from "../daily/logic.js";
+import Legend from "../daily/Legend.jsx";
 import { Banners, PageHead, SearchBox, AgentSelect, BrandMenu, FilterMenu, PlayerRow } from "../daily/widgets.jsx";
 
 const BAND_TOP = 10;   // same as the live worklist
@@ -17,6 +18,7 @@ export default function Page({ ctx }) {
   const [dr, setDr] = useState(null);   // { list, i }: the on-screen order frozen when the panel opens, so saving a contact (which moves the row between stages) never swaps the player under the panel
   const [allOpen, setAllOpen] = useState({});
   const [busy, setBusy] = useState(null);
+  const [showLegend, setShowLegend] = useState(false);
 
   // Counts per stage (every other filter applied) and per brand (to-contact players, all other filters applied).
   const pool = useMemo(() => filterRows(data, f, { ...env, stage: null }), [data, f, env.contactMap, env.cooldownSet, env.graceOf, env.me]);
@@ -88,8 +90,10 @@ export default function Page({ ctx }) {
         {f.focusKeys && <button className="btn sm on" title="Clear focus" onClick={() => patch({ focusKeys: null, focusLabel: "" })}>🔔 {f.focusLabel} · {f.focusKeys.size} ✕</button>}
         <span className="grow" style={{ flex: 1 }} />
         <span className="dim">{fmt(rows.length)} shown</span>
+        <button className="btn sm" title="What do these terms mean?" aria-pressed={showLegend} onClick={() => setShowLegend((v) => !v)}>?</button>
         <button className="btn sm" title="Download the filtered list as CSV and copy usernames" onClick={() => exportQueue(order, snap, null, contactMap)}>⤓ Export</button>
       </div>
+      {showLegend && <Legend />}
       {order.length === 0
         ? <div className="card"><div className="body dim" style={{ textAlign: "center", padding: 34 }}>Nothing here with these filters.</div></div>
         : <>
