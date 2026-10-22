@@ -1,8 +1,6 @@
 // Page registry: sidebar key -> component. Pre-wired so parallel agents only replace their own page files.
 // Every page receives ONE prop: ctx (see docs/design/BUILD-CONTRACT.md section 4).
 // Performance is shared: key "perf" (admin, all tabs) and "mine" (agent, own tabs); it reads ctx.me.role.
-import React, { useState } from "react";
-import { Seg } from "./ui/index.jsx";
 import TaskEfficiency from "./pages/TaskEfficiency.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Changes from "./pages/Changes.jsx";
@@ -24,21 +22,10 @@ import SettingsPage from "./pages/SettingsPage.jsx";
 import MyDay from "./pages/MyDay.jsx";
 import AccountPage from "./pages/AccountPage.jsx";
 
-// Mockup: Performance has two tabs, "Retention & save rate" and "Task efficiency" (agent: "My ..."). Kept here so both pages stay independent.
-function PerfTabs({ ctx }) {
-  const admin = !!ctx.me?.manage_users;
-  const [t, setT] = useState("ret");
-  const h = React.createElement;
-  return h(React.Fragment, null,
-    h("div", { className: "top", style: { marginBottom: 10 } }, h("span", { className: "grow" }),
-      h(Seg, { value: t, onChange: setT, options: [{ value: "ret", label: admin ? "Retention & save rate" : "My save rate" }, { value: "tasks", label: admin ? "Task efficiency" : "My task efficiency" }] })),
-    t === "ret" ? h(Performance, { ctx }) : h(TaskEfficiency, { ctx }));
-}
-
 export const PAGES = {
   dash: Dashboard,
   delta: Changes,
-  perf: PerfTabs,
+  perf: Performance,
   queue: Contact,
   checkin: CheckIn,
   grace: GraceClaims,
@@ -54,7 +41,7 @@ export const PAGES = {
   bin: RecycleBin,
   set: SettingsPage,
   home: MyDay,
-  mine: PerfTabs,
-  eff: TaskEfficiency,   // direct key; not a sidebar item (the mockup reaches it through the Performance tabs)
+  mine: Performance,
+  eff: TaskEfficiency,   // direct key; not a sidebar item (Performance.jsx shows it as its own tab)
   acct: AccountPage,
 };
