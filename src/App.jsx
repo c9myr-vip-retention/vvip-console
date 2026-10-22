@@ -4,6 +4,7 @@ import { phrase, newPatterns } from "./reportPhrases";
 import RevampShell from "./revamp/Shell.jsx";
 import { scopeLiveCss } from "./revamp/scopeCss.js";
 import { NativeSelect } from "./revamp/ui/index.jsx";
+import { readFlag } from "./flags.js";
 
 /* ════════════════════════════════════════════════════════════════════
    GROUP B · VIP RTN CONSOLE  v2.1
@@ -5693,15 +5694,8 @@ export function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
 }
 
 /* Rollout flag for the revamped shell (docs/design/BUILD-CONTRACT.md section 8). OFF by default.
-   ?revamp=1 turns it on and is remembered in localStorage.revamp_ui; ?revamp=0 turns it off. */
-function readRevampFlag() {
-  try {
-    const q = new URLSearchParams(window.location.search).get("revamp");
-    if (q === "1") localStorage.setItem("revamp_ui", "1");
-    else if (q === "0") localStorage.removeItem("revamp_ui");
-    return localStorage.getItem("revamp_ui") === "1";
-  } catch (e) { return false; }
-}
+   ?revamp=1 turns it on and is remembered; ?revamp=0 turns it off; ?flags=reset turns every flag off. See src/flags.js. */
+const readRevampFlag = () => readFlag("revamp");
 
 export default function App() {
   const [rv] = useState(readRevampFlag);                 // revamped shell on/off (fixed for the page's lifetime)

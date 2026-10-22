@@ -3,6 +3,7 @@
 // Menus, modals and drawers render into #rv-portal (a `.rv` host on <body>) so no ancestor can clip or transform them.
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { flagOn } from "../../flags.js";
 
 /* ---------------------------------------------------------------- portal host */
 export function portalRoot() {
@@ -360,7 +361,7 @@ function optionsOf(children, out = []) {
   });
   return out;
 }
-const revampOn = () => { try { return localStorage.getItem("revamp_ui") === "1"; } catch (e) { return false; } };   // same flag as App.jsx (?revamp=1)
+const revampOn = () => flagOn("revamp");                                                  // same flag as App.jsx (?revamp=1)
 export function NativeSelect({ value, defaultValue, onChange, children, className, disabled, title, style }) {
   const [own, setOwn] = useState(defaultValue === undefined ? "" : String(defaultValue));
   const controlled = value !== undefined;
