@@ -8,10 +8,11 @@
 //   POST /api/roles/:key/move            { dir: "up" | "down" }               change its rank
 //   POST /api/roles/:key/delete          { move_to? }                         remove any role (people on it move to move_to; roles that
 //                                                                             started from it keep the permissions they have now)
-//   POST /api/users/role                 { id, role_key, team? }              give an account a role
+//   POST /api/users/role                 { id, role_key, team? }              give an account a role (a new role clears its personal permissions)
+//   POST /api/users/perms                { id, overrides?, reset? }           personal permissions: { perm: true | false | null } on top of the role
 // Changing a role re-syncs the old columns of every account whose permissions could have changed (legacyColumns), and nothing may remove
 // the last account that can manage accounts.
-import { GROUPS, PERMS, PERM_KEYS, loadRoles, rolePerms, startPerms, baseProblem, legacyColumns, managerCount, slugRole } from "./perms.js";
+import { GROUPS, PERMS, PERM_KEYS, loadRoles, rolePerms, startPerms, baseProblem, legacyColumns, managerCount, slugRole, userOverrides, applyOverrides } from "./perms.js";
 
 const NO_TABLES = "Roles are not set up yet (schema_v27 has not been run)";
 const LAST = "Can't remove the last account that can manage accounts and roles. Give someone else that permission first.";
@@ -20,8 +21,17 @@ async function body(c) { try { const b = await c.request.json(); return b && typ
 const clone = (role) => ({ ...role, overrides: { ...role.overrides } });
 
 async function allUsers(db) {
-  const { results } = await db.prepare("SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, role_key, team FROM users").all();
-  return results || [];
+  try {
+    const { results } = await db.prepare("SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, role_key, team, perm_overrides FROM users").all();
+    return results || [];
+  } catch {                                  // schema_v28 not run yet: no perm_overrides column
+    const { results } = await db.prepare("SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, role_key, team FROM users").all();
+    return results || [];
+  }
+}
+/** Forget an account's personal permissions (when its role changes). Harmless before schema_v28. */
+async function clearOverrides(db, where, ...binds) {
+  try { await db.prepare(`UPDATE users SET perm_overrides = NULL WHERE ${where}`).bind(...binds).run(); } catch { /* no column yet */ }
 }
 /** True when `users` under `roles` would leave nobody able to manage accounts although somebody can today. */
 function locksOut(before, after, rolesBefore, rolesAfter) {
@@ -47,12 +57,21 @@ async function syncAll(db, roles) {
     return db.prepare("UPDATE users SET role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE role_key = ?")
       .bind(col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, role.key);
   }));
+  // accounts with personal permissions: their old columns follow the role AND their exceptions
+  let own = [];
+  try { own = (await db.prepare("SELECT id, role_key, perm_overrides FROM users WHERE role_key IS NOT NULL AND perm_overrides IS NOT NULL").all()).results || []; } catch { /* no column yet */ }
+  const fixes = own.filter((u) => roles.has(u.role_key)).map((u) => {
+    const col = legacyColumns(roles.get(u.role_key), roles, userOverrides(u));
+    return db.prepare("UPDATE users SET role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE id = ?")
+      .bind(col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, u.id);
+  });
+  if (fixes.length) await db.batch(fixes);
 }
 
 export async function handleRoles(c) {
   const { path, method } = c;
   const isUsersRole = path === "/api/users/role";
-  if (!path.startsWith("/api/roles") && !isUsersRole) return null;
+  if (!path.startsWith("/api/roles") && !isUsersRole && path !== "/api/users/perms") return null;
   if (!c.can("users.manage")) return c.err("Managers only", 403);
   const db = c.env.DB;
 
@@ -66,6 +85,34 @@ export async function handleRoles(c) {
 
   const roles = await loadRoles(db);
   if (!roles) return c.err(NO_TABLES, 503);
+
+  // ── personal permissions: an account's own exceptions on top of its role ──
+  if (path === "/api/users/perms" && method === "POST") {
+    const b = await body(c);
+    const users = await allUsers(db);
+    const target = users.find((u) => Number(u.id) === Number(b.id));
+    if (!target) return c.err("User not found", 404);
+    if (!target.role_key || !roles.has(target.role_key)) return c.err("Give this account a role first. Personal permissions sit on top of a role.", 400);
+    const next = b.reset ? {} : { ...userOverrides(target) };
+    if (b.overrides && typeof b.overrides === "object") {
+      for (const [k, v] of Object.entries(b.overrides)) {
+        if (!PERM_KEYS.includes(k)) return c.err(`Unknown permission "${k}"`, 400);
+        if (v === null) delete next[k]; else next[k] = !!v;
+      }
+    }
+    // an exception that equals what the role already says is not an exception: drop it
+    const roleSet = rolePerms(roles.get(target.role_key), roles);
+    for (const k of Object.keys(next)) if (next[k] === roleSet.has(k)) delete next[k];
+    const after = users.map((u) => (u.id === target.id ? { ...u, perm_overrides: JSON.stringify(next) } : u));
+    if (locksOut(users, after, roles, roles)) return c.err(LAST, 400);
+    const col = legacyColumns(roles.get(target.role_key), roles, next);
+    try {
+      await db.prepare("UPDATE users SET perm_overrides = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE id = ?")
+        .bind(Object.keys(next).length ? JSON.stringify(next) : null, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, target.id).run();
+    } catch { return c.err("Personal permissions are not set up yet (schema_v28 has not been run)", 503); }
+    c.log(c.user, "perm", `Personal permissions · ${target.username}: ${Object.keys(next).length ? Object.entries(next).map(([k, v]) => `${v ? "+" : "-"}${k}`).join(" ") : "none"}`);
+    return c.ok({ overrides: next, perms: [...applyOverrides(roleSet, next)], role_perms: [...roleSet] });
+  }
 
   // ── new role ──
   if (path === "/api/roles" && method === "POST") {
@@ -170,6 +217,7 @@ export async function handleRoles(c) {
       if (rows.length) await db.batch(rows.map(([k, v]) => db.prepare("INSERT INTO role_permissions (role_key, perm, allowed) VALUES (?,?,?)").bind(r.key, k, v ? 1 : 0)));
     }
     if (target) {
+      await clearOverrides(db, "role_key = ?", role.key);
       const col = legacyColumns(target, rolesAfter);
       await db.prepare("UPDATE users SET role_key = ?, role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ? WHERE role_key = ?")
         .bind(target.key, col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, role.key).run();
@@ -190,10 +238,12 @@ export async function handleRoles(c) {
     if (!target) return c.err("User not found", 404);
     const after = users.map((u) => (u.id === target.id ? { ...u, role_key: role.key } : u));
     if (locksOut(users, after, roles, roles)) return c.err(LAST, 400);
-    const col = legacyColumns(role, roles);
+    const changed = target.role_key !== role.key;                         // a new role starts the account clean; the same role keeps its personal permissions
+    const col = legacyColumns(role, roles, changed ? {} : userOverrides(target));
     const team = b.team === undefined ? target.team : (["A", "B", "C"].includes(b.team) ? b.team : null);
     await db.prepare("UPDATE users SET role_key = ?, role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ?, team = ? WHERE id = ?")
       .bind(role.key, col.role, col.can_edit, col.can_delete, col.on_leaderboard, col.manage_users, team, target.id).run();
+    if (changed) await clearOverrides(db, "id = ?", target.id);
     c.log(c.user, "perm", `Set role → ${role.name} · ${target.username}`);
     return c.ok({ saved: true, role_key: role.key });
   }

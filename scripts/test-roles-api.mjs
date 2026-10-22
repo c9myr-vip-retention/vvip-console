@@ -244,8 +244,58 @@ r = await call(A, "GET", "/api/rtn/login-check?brand=SK69&tier=V");
 check("a player left with an owner whose account no longer exists also shows as unassigned", !r.data.rows.some((x) => x.agent === "ghost") && r.data.unassigned.some((x) => x.player_key === "zz_orphan_1"));
 sql("DELETE FROM player_assignment WHERE player_key LIKE 'zz_orphan%'; DELETE FROM player_days WHERE player_key LIKE 'zz_orphan%'");
 
+// ---- personal permissions: same role, different people ----
+const isNull = (v) => v === null || v === "null";                      // the local D1 helper prints SQL NULL as the text "null"
+await call(A, "POST", "/api/roles", { name: "Floor", base: "agent" });
+await call(A, "POST", "/api/users", { username: "pia", password: PW, role_key: "floor", team: "B" });
+await call(A, "POST", "/api/users", { username: "pat", password: PW, role_key: "floor", team: "B" });
+const idPia = rows("SELECT id FROM users WHERE username = 'pia'")[0].id, idPat = rows("SELECT id FROM users WHERE username = 'pat'")[0].id;
+const PIA = await login("pia"), PAT = await login("pat");
+check("two people on the same role start with the same permissions", JSON.stringify((await me(PIA)).perms.sort()) === JSON.stringify((await me(PAT)).perms.sort()));
+r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true, "contact.edit": false } });
+check("give one person an extra permission and take one away", r.status === 200 && r.data.overrides["dashboard.view"] === true && r.data.overrides["contact.edit"] === false && r.data.perms.includes("dashboard.view") && !r.data.perms.includes("contact.edit"), JSON.stringify(r.data));
+let mp = await me(PIA), mt2 = await me(PAT);
+check("it shows on their /api/me", has(mp, "dashboard.view") && !has(mp, "contact.edit") && mp.can_edit === false, JSON.stringify(mp));
+check("the other person on the same role is unchanged", !has(mt2, "dashboard.view") && has(mt2, "contact.edit"));
+check("the old columns follow the exceptions (can_edit is 0)", rows("SELECT can_edit FROM users WHERE username = 'pia'")[0].can_edit === 0);
+check("GET /api/users shows the personal permissions", JSON.parse((await call(A, "GET", "/api/users")).data.find((u) => u.username === "pia").perm_overrides)["dashboard.view"] === true);
+check("it is enforced: they can use a permission they were given (tasks.assign_others)", (await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "tasks.assign_others": true } })).status === 200 && (await call(PIA, "POST", "/api/work/tasks", { title: "[r] pia gives", assignee: "pat" })).data.task.assignee === "pat");
+check("...and the other person still cannot", (await call(PAT, "POST", "/api/work/tasks", { title: "[r] pat tries", assignee: "pia" })).data.task.assignee === "pat");
+await call(A, "POST", "/api/roles/floor/update", { overrides: { "dashboard.view": true } });
+r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true } });
+check("setting what the role already has leaves no exception", r.status === 200 && !("dashboard.view" in r.data.overrides), JSON.stringify(r.data));
+await call(A, "POST", "/api/roles/floor/update", { overrides: { "dashboard.view": null } });
+r = await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "contact.edit": null } });
+check("clear one exception", r.status === 200 && !("contact.edit" in r.data.overrides) && r.data.perms.includes("contact.edit"), JSON.stringify(r.data));
+check("clearing it brings the old column back", rows("SELECT can_edit FROM users WHERE username = 'pia'")[0].can_edit === 1);
+await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "kpi.scored": false } });
+await call(A, "POST", "/api/roles/floor/update", { overrides: { "contact.delete": false } });
+check("editing the role keeps the exceptions and re-syncs the columns", rows("SELECT can_delete, on_leaderboard FROM users WHERE username = 'pia'")[0].can_delete === 0 && rows("SELECT on_leaderboard FROM users WHERE username = 'pia'")[0].on_leaderboard === 0 && JSON.stringify(Object.keys(JSON.parse(rows("SELECT perm_overrides FROM users WHERE username = 'pia'")[0].perm_overrides)).sort()) === JSON.stringify(["kpi.scored", "tasks.assign_others"]));
+check("unknown permission is 400", (await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "nope.nope": true } })).status === 400);
+check("unknown account is 404", (await call(A, "POST", "/api/users/perms", { id: 999999, overrides: { "dashboard.view": true } })).status === 404);
+check("an agent cannot set personal permissions (403)", (await call(S, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true } })).status === 403);
+check("a person cannot give themselves permissions (403)", (await call(PIA, "POST", "/api/users/perms", { id: idPia, overrides: { "users.manage": true } })).status === 403);
+await call(A, "POST", "/api/users", { username: "leg1", password: PW, role: "agent", can_edit: 1, team: "B" });                // an old-settings account: no role
+check("an account with no role cannot have personal permissions (400)", (await call(A, "POST", "/api/users/perms", { id: rows("SELECT id FROM users WHERE username = 'leg1'")[0].id, overrides: { "dashboard.view": true } })).status === 400);
+r = await call(A, "POST", "/api/users/perms", { id: idPia, reset: true });
+check("reset: back to exactly the role", r.status === 200 && Object.keys(r.data.overrides).length === 0 && isNull(rows("SELECT perm_overrides FROM users WHERE username = 'pia'")[0].perm_overrides), JSON.stringify(r.data));
+await call(A, "POST", "/api/users/perms", { id: idPia, overrides: { "dashboard.view": true } });
+await call(A, "POST", "/api/users/role", { id: idPia, role_key: "reader" });
+check("moving them to a different role clears their personal permissions", isNull(rows("SELECT perm_overrides FROM users WHERE username = 'pia'")[0].perm_overrides) && !has(await me(PIA), "dashboard.view"));
+// the last manager cannot lose users.manage through a personal exception
+await call(A, "POST", "/api/roles", { name: "Solo", base: "admin" });
+await call(A, "POST", "/api/roles/solo/update", { overrides: { "users.manage": true } });
+await call(A, "POST", "/api/users", { username: "solo1", password: PW, role_key: "solo", team: "B" });
+const idSolo = rows("SELECT id FROM users WHERE username = 'solo1'")[0].id;
+const idAldo2 = rows("SELECT id FROM users WHERE username = 'aldo'")[0].id;
+sql("DELETE FROM users WHERE username = 'boss1'");   // the earlier second manager
+sql("UPDATE users SET role_key = NULL, role = 'admin', manage_users = 0, can_edit = 1, can_delete = 1 WHERE username = 'aldo'");   // aldo is not a manager now, so solo1 is the only one
+r = await call(await login("solo1"), "POST", "/api/users/perms", { id: idSolo, overrides: { "users.manage": false } });
+check("the last manager cannot take users.manage away from themselves (400)", r.status === 400, JSON.stringify(r));
+sql("UPDATE users SET manage_users = 1 WHERE username = 'aldo'");
+
 // ---- leave the throwaway database the way the other suites expect it ----
-sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2'); UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
+sql("DELETE FROM role_permissions; DELETE FROM roles WHERE builtin = 0; UPDATE roles SET deleted_at = NULL, name = CASE key WHEN 'admin' THEN 'Admin' WHEN 'agent' THEN 'Agent' ELSE 'Viewer' END, base = key; DELETE FROM users WHERE username IN ('terry','rita','boss1','lena','vera','vic2','pia','pat','solo1','leg1'); UPDATE users SET perm_overrides = NULL; UPDATE roles SET sort = CASE key WHEN 'admin' THEN 1 WHEN 'agent' THEN 2 ELSE 3 END WHERE builtin = 1; UPDATE users SET role_key = NULL, role = 'admin', can_edit = 1, can_delete = 1, on_leaderboard = 0, manage_users = 1 WHERE username = 'aldo'; UPDATE users SET role_key = NULL, role = 'agent', can_edit = 1, can_delete = 1, on_leaderboard = 1, manage_users = 0 WHERE username = 'sara'");
 
 console.log(fails ? `\n${fails} check(s) FAILED (${passes} passed)` : `\nAll ${passes} checks passed`);
 process.exit(fails ? 1 : 0);

@@ -3756,12 +3756,18 @@ export default {
       let users;
       try {
         users = await env.DB.prepare(
-          "SELECT id, username, role, role_key, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+          "SELECT id, username, role, role_key, perm_overrides, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
         ).all();
-      } catch (e) {   // schema_v27 not run yet: no role_key column
-        users = await env.DB.prepare(
-          "SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
-        ).all();
+      } catch (e) {
+        try {   // schema_v28 not run yet: no perm_overrides column
+          users = await env.DB.prepare(
+            "SELECT id, username, role, role_key, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+          ).all();
+        } catch (e2) {   // schema_v27 not run yet: no role_key column
+          users = await env.DB.prepare(
+            "SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+          ).all();
+        }
       }
       return ok(users.results);
     }
@@ -3822,6 +3828,7 @@ export default {
       ).bind(b.role || "viewer", f(b.can_edit), f(b.can_delete), f(b.on_leaderboard), mgr, permTeam, b.id).run();
       // the old editor sets the flags by hand, so this account leaves the role system until a role is picked again
       try { await env.DB.prepare("UPDATE users SET role_key = NULL WHERE id = ?").bind(b.id).run(); } catch (e) { /* schema_v27 not run: no column */ }
+      try { await env.DB.prepare("UPDATE users SET perm_overrides = NULL WHERE id = ?").bind(b.id).run(); } catch (e) { /* schema_v28 not run: no column */ }
       log(user, "perm", `Set permissions → ${b.role || "viewer"} · user #${b.id}`);
       return ok({ saved: true });
     }

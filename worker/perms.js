@@ -127,16 +127,32 @@ export function rolePerms(role, roles, depth = 0) {
   return out;
 }
 
-/** The effective permission set of an account. roles may be null (tables missing): then everyone is legacy. */
+/** Personal exceptions on top of a role: { permission: true | false }, kept as JSON in users.perm_overrides. true grants a permission the role
+ *  lacks, false takes one away. Anything that is not a known permission with a true/false value is ignored. */
+export function userOverrides(user) {
+  try {
+    const raw = JSON.parse((user && user.perm_overrides) || "{}"), out = {};
+    for (const [k, v] of Object.entries(raw)) if (PERM_KEYS.includes(k) && typeof v === "boolean") out[k] = v;
+    return out;
+  } catch { return {}; }
+}
+export function applyOverrides(set, overrides) {
+  const out = new Set(set);
+  for (const [k, v] of Object.entries(overrides || {})) { if (v) out.add(k); else out.delete(k); }
+  return out;
+}
+
+/** The effective permission set of an account: its role plus its personal exceptions. roles may be null (tables missing): then everyone is legacy.
+ *  An account without a role keeps exactly what its old flags give it; personal exceptions only apply to accounts that have a role. */
 export function resolvePerms(user, roles) {
   const rk = user && user.role_key;
-  if (rk && roles && roles.has(rk)) return rolePerms(roles.get(rk), roles);
+  if (rk && roles && roles.has(rk)) return applyOverrides(rolePerms(roles.get(rk), roles), userOverrides(user));
   return legacyPerms(user);
 }
 
-/** The old columns an account on `role` must carry so every query that still reads them agrees. */
-export function legacyColumns(role, roles) {
-  const perms = rolePerms(role, roles);
+/** The old columns an account on `role` (with these personal exceptions) must carry so every query that still reads them agrees. */
+export function legacyColumns(role, roles, overrides) {
+  const perms = applyOverrides(rolePerms(role, roles), overrides);
   return {
     role: codeBase(role, roles) === "none" ? "viewer" : codeBase(role, roles),
     can_edit: perms.has("contact.edit") ? 1 : 0, can_delete: perms.has("contact.delete") ? 1 : 0,
