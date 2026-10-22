@@ -448,9 +448,10 @@
 
 /* ---- shell, dialogs and dropdowns (hand written; after the port so they win ties) ---- */
 /* shell layout */
-.rv .app{display:grid;grid-template-columns:216px minmax(0,1fr);height:100vh;height:100dvh;background:var(--bg)}
-.rv .side{overflow-x:hidden}
-.rv .side .me{position:sticky;bottom:-14px;background:var(--panel);margin-top:auto}
+.rv .app{display:grid;grid-template-columns:216px minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100vh;height:100dvh;background:var(--bg)}
+.rv .side{overflow-x:hidden;padding-bottom:0}
+.rv .side .me{position:sticky;bottom:0;background:var(--panel);margin-top:auto}
+.rv .rv-live input[type=file]::file-selector-button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 10px;margin-right:8px;cursor:pointer}
 .rv .main{min-width:0}
 .rv .topbar{position:relative}
 .rv .topbar .sel-team{display:inline-flex;align-items:center;gap:6px}
