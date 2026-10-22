@@ -20,7 +20,7 @@ export const Brands = ({ list, max = 3 }) => (
 );
 
 /* ---------- multi-date month calendar (the kit's DatePick picks one date; here several are needed) ---------- */
-function MultiCal({ dates, month, onMonth, onPick, single }) {
+export function MultiCal({ dates, month, onMonth, onPick, single }) {
   const grid = monthGrid(month), today = todayMyt();
   return (
     <div className="sch-cal">
