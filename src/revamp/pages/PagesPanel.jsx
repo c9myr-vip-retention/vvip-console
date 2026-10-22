@@ -43,7 +43,7 @@ export default function PagesPanel() {
   return (
     <div style={{ display: "grid", gap: 12 }}>
       {err && <div className="banner crit">{err}</div>}
-      <div className="dim">Which roles can open each page. A tick means they can. Click a tick to switch a page for a role when it depends on one permission; pages open to everyone, or that need any one of several permissions, are listed but not switched here. Accounts with personal permissions can differ from their role (see Accounts).</div>
+      <div className="dim">Which roles can open each page. A tick means they can. Click a tick to switch a page on or off for a role. This only decides whether the page shows in the sidebar; what people can do or see inside a page still follows the other permissions and their team. Accounts with personal permissions can differ from their role (see Accounts).</div>
       <div className="card"><div className="tw" style={{ overflowX: "auto" }}>
         <table className="pg-tbl">
           <thead><tr><th>Page</th>{data.roles.map((r) => <th key={r.key}>{r.name}</th>)}<th className="pg-need" style={{ textAlign: "left" }}>Needs</th></tr></thead>
@@ -62,7 +62,7 @@ export default function PagesPanel() {
                         <td key={r.key}>
                           {single
                             ? <button type="button" className={"pg-cell" + (on ? " on" : "")} disabled={busy} aria-pressed={on} aria-label={`${r.name}: ${p.label}`} onClick={() => flip(r, p)}>{on ? "✓" : ""}</button>
-                            : <span className={"pg-cell" + (on ? " on" : "")} title={need ? "Switch this through the permissions" : "Open to everyone who has this page in their sidebar"}>{on ? "✓" : ""}</span>}
+                            : <span className={"pg-cell" + (on ? " on" : "")}>{on ? "✓" : ""}</span>}
                         </td>
                       );
                     })}

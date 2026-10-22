@@ -10,7 +10,7 @@ export function useDailyBase(ctx) {
   const data = ctx.teamData || ctx.data || [];
   const contacts = ctx.contacts || ctx.board?.contacts || [];
   const health = ctx.board?.health || [];
-  const team = ctx.board?.team || [];
+  const team = ctx.team || ctx.board?.team || [];                    // already limited to the team in view (src/revamp/scope.js)
   const me = ctx.me || {};
   const isAdmin = can(me, "assign.manage") || can(me, "teams.all");   // sees every agent's queue and may assign
   const readOnly = !!(ctx.readOnly || ctx.isPast);

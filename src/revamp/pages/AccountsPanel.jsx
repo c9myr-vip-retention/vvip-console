@@ -18,7 +18,7 @@ function legacySet(u, perms) {
 
 /** Moves every "old settings" account onto the built-in role named in its old role, so edits to that role apply to it. */
 function AdoptModal({ users, roles, perms, onClose, onDone }) {
-  const [busy, setBusy] = useState(false), [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false), [err, setErr] = useState(""), [keep, setKeep] = useState(true);
   const olds = [...new Set(users.filter((u) => !u.role_key).map((u) => u.role || "viewer"))];            // the old roles still in use: admin, agent, viewer
   // which role each old group moves to: the role of the same name when it still exists, else the first role there is
   const [target, setTarget] = useState(() => Object.fromEntries(olds.map((o) => [o, (roles.find((r) => r.key === o) || roles[0] || {}).key])));
@@ -26,12 +26,17 @@ function AdoptModal({ users, roles, perms, onClose, onDone }) {
     const role = roles.find((r) => r.key === target[u.role || "viewer"]) || roles[0];
     const now = legacySet(u, perms), next = new Set(role ? role.perms : []);
     const label = (k) => (perms.find((p) => p.key === k) || {}).label || k;
-    return { u, role, gain: [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label), lose: [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label) };
+    const loseKeys = [...now].filter((k) => !next.has(k) && !hiddenPerm(k));
+    return { u, role, loseKeys, gain: [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label), lose: [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label) };
   });
   const differ = rows.filter((r) => r.gain.length || r.lose.length);
   const go = async () => {
     setBusy(true); setErr("");
-    try { for (const r of rows) await work.setAccountRole({ id: r.u.id, role_key: r.role.key }); toast(`Moved ${rows.length} account${rows.length === 1 ? "" : "s"} onto roles`); onDone(); }
+    try {
+      for (const r of rows) {
+        await work.setAccountRole({ id: r.u.id, role_key: r.role.key });
+        if (keep && r.loseKeys.length) await work.setAccountPerms({ id: r.u.id, overrides: Object.fromEntries(r.loseKeys.map((k) => [k, true])) });   // keep what they have today
+      } toast(`Moved ${rows.length} account${rows.length === 1 ? "" : "s"} onto roles`); onDone(); }
     catch (e) { setErr(e.message || "Could not move them"); setBusy(false); onDone(true); }
   };
   return (
@@ -57,6 +62,12 @@ function AdoptModal({ users, roles, perms, onClose, onDone }) {
             ))}
           </div>
         ) : <div className="pos">Nobody's access changes: every account already matches its role.</div>}
+        {differ.some((r) => r.lose.length) && (
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "row" }}>
+            <input type="checkbox" className="chk" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+            <span><b>Keep what each account has today.</b> <span className="dim">Whatever an account would lose above stays as a personal exception, so nobody drops out of anything (for example the KPI leaderboard).</span></span>
+          </label>
+        )}
         {err && <div className="neg">{err}</div>}
       </div>
     </Modal>
@@ -117,10 +128,11 @@ function PermsModal({ u, role, groups, perms, onClose }) {
 
 /** Asked before an account moves to a role that has fewer permissions: says exactly what they would lose. */
 function LoseModal({ ask, onClose, onYes, busy }) {
-  const { u, from, to, lost, gained } = ask;
+  const { u, from, to, lost, gained, legacy } = ask;
+  const [keep, setKeep] = useState(true);                // an old-settings account can keep what it has today as personal exceptions
   return (
     <Modal title={`Move ${u.username} to ${to}?`} onClose={onClose} width="min(560px,94vw)"
-      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn danger" disabled={busy} onClick={onYes}>Yes, move {u.username}</button></>}>
+      footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn danger" disabled={busy} onClick={() => onYes(legacy && keep)}>Yes, move {u.username}</button></>}>
       <div style={{ display: "grid", gap: 12 }}>
         <div><b>{u.username}</b> is <b>{from}</b> now. As <b>{to}</b> they will have <b>{lost.length} fewer permission{lost.length === 1 ? "" : "s"}</b>.</div>
         <div>
@@ -128,6 +140,12 @@ function LoseModal({ ask, onClose, onYes, busy }) {
           <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 2 }}>{lost.map((l) => <li key={l}>{l}</li>)}</ul>
         </div>
         {gained.length > 0 && <div className="dim" style={{ fontSize: 12 }}>They will also gain: {gained.join(", ")}.</div>}
+        {legacy && (
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", flexDirection: "row" }}>
+            <input type="checkbox" className="chk" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+            <span><b>Keep what they have today.</b> <span className="dim">They keep the permissions above as personal exceptions, so nothing changes for them except the role name. You can remove an exception later under Permissions.</span></span>
+          </label>
+        )}
         <div className="dim" style={{ fontSize: 12 }}>It applies the next time their page loads. You can move them back at any time. {Object.keys(parseOv(u)).length > 0 && "Their personal exceptions are cleared when the role changes."}</div>
       </div>
     </Modal>
@@ -151,10 +169,13 @@ export default function AccountsPanel({ me }) {
 
   const roleOpts = roles.map((r) => ({ value: r.key, label: r.name }));
   const [ask, setAsk] = useState(null), [moving, setMoving] = useState(false);
-  const doRole = async (u, key) => {
+  const doRole = async (u, key, keepKeys = []) => {
     setMoving(true);
-    try { await work.setAccountRole({ id: u.id, role_key: key }); toast(`${u.username} is now ${(roles.find((r) => r.key === key) || {}).name || key}`); load(); }
-    catch (e) { toast(e.message || "Could not save"); }
+    try {
+      await work.setAccountRole({ id: u.id, role_key: key });
+      if (keepKeys.length) await work.setAccountPerms({ id: u.id, overrides: Object.fromEntries(keepKeys.map((k) => [k, true])) });   // what they had that the role lacks
+      toast(`${u.username} is now ${(roles.find((r) => r.key === key) || {}).name || key}${keepKeys.length ? ` (kept ${keepKeys.length} permission${keepKeys.length === 1 ? "" : "s"} they had)` : ""}`); load();
+    } catch (e) { toast(e.message || "Could not save"); }
     setMoving(false); setAsk(null);
   };
   // Ask first when the new role has fewer permissions than the account has today
@@ -163,9 +184,9 @@ export default function AccountsPanel({ me }) {
     const cur = u.role_key ? roles.find((r) => r.key === u.role_key) : null;
     const now = cur ? withOv(cur.perms, parseOv(u)) : legacySet(u, perms), next = new Set(target.perms);
     const label = (k) => (perms.find((p) => p.key === k) || {}).label || k;
-    const lost = [...now].filter((k) => !next.has(k) && !hiddenPerm(k)).map(label), gained = [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label);
+    const lostKeys = [...now].filter((k) => !next.has(k) && !hiddenPerm(k)), lost = lostKeys.map(label), gained = [...next].filter((k) => !now.has(k) && !hiddenPerm(k)).map(label);
     if (!lost.length) return doRole(u, key);
-    setAsk({ u, key, from: cur ? cur.name : `${cap(u.role)} (old settings)`, to: target.name, lost, gained });
+    setAsk({ u, key, from: cur ? cur.name : `${cap(u.role)} (old settings)`, to: target.name, lost, lostKeys, gained, legacy: !cur });
   };
   const setTeam = async (u, team) => {
     try {
@@ -229,7 +250,7 @@ export default function AccountsPanel({ me }) {
         </div>
       </div></div>
 
-      {ask && <LoseModal ask={ask} busy={moving} onClose={() => setAsk(null)} onYes={() => doRole(ask.u, ask.key)} />}
+      {ask && <LoseModal ask={ask} busy={moving} onClose={() => setAsk(null)} onYes={(keep) => doRole(ask.u, ask.key, keep ? ask.lostKeys : [])} />}
       {pm && roles.find((r) => r.key === pm.role_key) && <PermsModal u={pm} role={roles.find((r) => r.key === pm.role_key)} groups={groups} perms={perms} onClose={() => { setPm(null); load(); }} />}
       {adopt && <AdoptModal users={users} roles={roles} perms={perms} onClose={() => setAdopt(false)} onDone={(failed) => { setAdopt(false); load(); if (failed) return; }} />}
       {del && (

@@ -45,7 +45,7 @@ export default function Dashboard({ ctx }) {
       <DashStaff viewTeam={viewTeam} />
       <div className="rv-live">
         <LiveDashboard data={teamData} brandOrder={teamBrands} viewTeam={viewTeam} snap={board.snapshot_date} isPast={isPast}
-          contacts={contacts} me={me} team={board.team || []} dates={dates} onSaveContact={saveContact} onClearContact={clearContact} readOnly={readOnly} />
+          contacts={contacts} me={me} team={ctx.team || board.team || []} dates={dates} onSaveContact={saveContact} onClearContact={clearContact} readOnly={readOnly} />
       </div>
       <div style={{ marginTop: 18 }}><BrandCards ctx={ctx} /></div>
     </>

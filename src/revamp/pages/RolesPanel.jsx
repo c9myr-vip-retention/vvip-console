@@ -4,7 +4,7 @@
 // One switch = one permission = one function. A switch that differs from the starting point is marked "changed". The Worker enforces all of it
 // (worker/perms.js, worker/roles.js); this page only edits it. Needs the users.manage permission.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Select, toast } from "../ui/index.jsx";
+import { Modal, MultiSelect, Select, toast } from "../ui/index.jsx";
 import { work } from "../api/work.js";
 import { hiddenPerm } from "../schedule/logic.js";
 
@@ -163,6 +163,21 @@ export default function RolesPanel() {
                 <button className="btn sm danger" onClick={() => setModal({ kind: "delete" })}>Delete role</button>
               </div>
             </div>
+          </div></div>
+
+          <div className="card"><div className="body" style={{ display: "grid", gap: 10 }}>
+            <div className="rl-gh">Who they can see</div>
+            <div className="dim">Decides which people show in agent and staff lists for this role. The role hierarchy (the order in the list on the left) is what “rank” follows: roles lower down are more junior. A role can always see itself.</div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <Select value={(role.sees || { mode: "all" }).mode} style={{ width: "auto", minWidth: 330 }}
+                options={[{ value: "all", label: "Everyone (no limit)" }, { value: "rank", label: "Their own rank and more junior roles" }, { value: "list", label: "Only the roles I pick" }]}
+                onChange={(m) => change({ sees: { mode: m, list: m === "list" ? ((role.sees || {}).list || []) : [] } }, "Saved")} />
+              {(role.sees || {}).mode === "list" && (
+                <MultiSelect label="Roles they can see" value={(role.sees || {}).list || []} options={data.roles.filter((r) => r.key !== role.key).map((r) => ({ value: r.key, label: r.name }))}
+                  onChange={(v) => change({ sees: { mode: "list", list: v } })} />
+              )}
+            </div>
+            <div className="dim" style={{ fontSize: 12 }}>Lists also follow the team in view. To let this role see people from every team, switch on “See people from every team” below.</div>
           </div></div>
 
           {data.groups.map(([gk, gl]) => (

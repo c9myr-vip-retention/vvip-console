@@ -17,7 +17,7 @@ export const NAV = {
     ["Overview", [["dash", "Dashboard"], ["delta", "Changes"], ["perf", "Performance"]]],
     ["Daily work", [["queue", "Contact"], ["checkin", "Check-in"], ["grace", "Grace claims"], ["players", "Players"], ["assign", "Assignments"]]],
     ["Work", [["tasks", "Tasks"], ["sched", "Schedule"], ["proj", "Projects"], ["flows", "Flows"], ["tpl", "Templates"], ["team", "Team workload"]]],
-    ["Task insight", [["ana", "Analytics"], ["bin", "Recycle bin"]]],
+    ["Task insight", [["ana", "Analytics"]]],                 // the Recycle bin lives in Settings only
     ["Admin", [["set", "Settings"]]],
   ],
   agent: [

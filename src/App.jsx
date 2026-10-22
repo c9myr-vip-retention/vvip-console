@@ -5,6 +5,7 @@ import RevampShell from "./revamp/Shell.jsx";
 import { scopeLiveCss } from "./revamp/scopeCss.js";
 import { NativeSelect } from "./revamp/ui/index.jsx";
 import { readFlag } from "./flags.js";
+import { scopeTeam } from "./revamp/scope.js";
 
 /* ════════════════════════════════════════════════════════════════════
    GROUP B · VIP RTN CONSOLE  v2.1
@@ -5807,7 +5808,7 @@ export default function App() {
     const ctx = {
       me, viewTeam, board, data, teamData, teamBrands, contacts: board?.contacts || [], dates, viewDate, setViewDate, isPast,
       readOnly: queueRO, saveContact, clearContact, loadBoard, drill, setDrill, goto,
-      setViewTeam, teamKeys: TEAM_KEYS, team: board?.team || [], health: board?.health || [], snap: board?.snapshot_date || null, loading,
+      setViewTeam, teamKeys: TEAM_KEYS, team: scopeTeam(board?.team, viewTeam, me), health: board?.health || [], snap: board?.snapshot_date || null, loading,
     };
     return (<><Style scope /><RevampShell ctx={ctx} tab={rvTab || (me.manage_users ? "dash" : "home")} notices={notices} loading={loading} loadErr={loadErr} onSignOut={signOut} /></>);
   }
