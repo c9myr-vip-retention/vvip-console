@@ -173,7 +173,12 @@ function LoseModal({ ask, onClose, onYes, busy }) {
 }
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
-const when = (t) => (t ? String(t).slice(0, 16).replace("T", " ") : "never");
+// The database keeps UTC ('YYYY-MM-DD HH:MM:SS'); show it in Malaysia time (GMT+8) like the rest of the console.
+const when = (t) => {
+  if (!t) return "never";
+  const d = new Date(String(t).replace(" ", "T") + "Z");
+  return isNaN(d) ? String(t).slice(0, 16).replace("T", " ") : new Date(d.getTime() + 8 * 3600e3).toISOString().slice(0, 16).replace("T", " ");
+};
 
 export default function AccountsPanel({ me }) {
   const [users, setUsers] = useState(null), [roles, setRoles] = useState([]), [perms, setPerms] = useState([]), [groups, setGroups] = useState([]), [err, setErr] = useState(""), [adopt, setAdopt] = useState(false), [pm, setPm] = useState(null);
@@ -234,7 +239,7 @@ export default function AccountsPanel({ me }) {
       {err && <div className="banner warn">{err}</div>}
       <div className="card"><div className="tw">
         <table className="acc-tbl">
-          <thead><tr><th>Account</th><th style={{ width: 230 }}>Role</th><th style={{ width: 150 }}>Team</th><th style={{ width: 130 }}>Personal</th><th>Last sign-in</th><th /></tr></thead>
+          <thead><tr><th>Account</th><th style={{ width: 230 }}>Role</th><th style={{ width: 150 }}>Team</th><th style={{ width: 130 }}>Personal</th><th>Last sign-in (GMT+8)</th><th /></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>

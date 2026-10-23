@@ -49,6 +49,7 @@ export default function DashStaff({ viewTeam, me }) {
   useLive(["tasks", "schedule"], () => setTick((n) => n + 1));
 
   const agents = useMemo(() => (people || []).filter((p) => (p.tasks !== undefined ? p.tasks : (p.on_leaderboard || p.role === "agent")) && (viewTeam === "ALL" || p.team === viewTeam || (!!me && !!me.role_key && p.role_key === me.role_key))).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam, me]);
+  const roleOf = useMemo(() => Object.fromEntries((people || []).map((p) => [p.username, p.role_name])), [people]);   // the role name shown next to each person
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const nOn = rows.filter((r) => r.on).length, nTask = rows.filter((r) => ongoing[r.u]).length;
@@ -92,7 +93,7 @@ export default function DashStaff({ viewTeam, me }) {
           <div className="dst-grid">
             {shown.map((r) => (
               <div key={r.u} className="card dst-card">
-                <div className="who"><Avatar name={r.u} /><b>{r.u}</b></div>
+                <div className="who"><Avatar name={r.u} /><b>{r.u}</b>{roleOf[r.u] && <span className="role-tag">{roleOf[r.u]}</span>}</div>
                 <div className="dst-big mono">{NA}</div>
                 <div className="dim">accepting chats for · off-chat for</div>
                 <div className="dst-pills">

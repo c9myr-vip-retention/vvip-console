@@ -574,6 +574,7 @@ await call(A, "POST", `/api/roles/${SCr}/update`, { overrides: { "kpi.scored": t
 await call(A, "POST", "/api/users", { username: "to9", password: PW, role_key: TOr, team: "B" });
 await call(A, "POST", "/api/users", { username: "sc9", password: PW, role_key: SCr, team: "B" });
 const ppl = (await call(A, "GET", "/api/work/people")).data.people, wl9 = (await call(A, "GET", "/api/work/workload")).data.people.map((x) => x.username);
+check("the people list carries each person's role name (shown on the live board)", ppl.find((x) => x.username === "to9").role_name === "TaskOnly9" && ppl.find((x) => x.username === "sc9").role_name === "ScoreOnly9");
 check("someone who works on tasks but is not a scored CS agent still shows in the task views", ppl.find((x) => x.username === "to9").tasks === true && ppl.find((x) => x.username === "to9").on_leaderboard === 0 && wl9.includes("to9"), JSON.stringify(wl9));
 check("a scored CS agent who cannot use tasks is not a task person (the KPI switch does not make one)", ppl.find((x) => x.username === "sc9").tasks === false && ppl.find((x) => x.username === "sc9").on_leaderboard === 1 && !wl9.includes("sc9"), JSON.stringify(wl9));
 
