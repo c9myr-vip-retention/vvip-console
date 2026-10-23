@@ -42,7 +42,7 @@ export default function Dashboard({ ctx }) {
     <>
       <div className="top"><h1>Dashboard</h1><span className="badge admin">Admin only</span></div>
       {staleList.length > 0 && <div className="banner warn">⚠ {staleList.length} brand{staleList.length > 1 ? "s" : ""} not fed today: {staleList.join(", ")}. Report will be incomplete.</div>}
-      <DashStaff viewTeam={viewTeam} />
+      <DashStaff viewTeam={viewTeam} me={me} />
       <div className="rv-live">
         <LiveDashboard data={teamData} brandOrder={teamBrands} viewTeam={viewTeam} snap={board.snapshot_date} isPast={isPast}
           contacts={contacts} me={me} team={ctx.team || board.team || []} dates={dates} onSaveContact={saveContact} onClearContact={clearContact} readOnly={readOnly} />

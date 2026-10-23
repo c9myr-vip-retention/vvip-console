@@ -25,7 +25,7 @@ function shiftOf(items, user, today, minute, onNow) {
   return a !== null && minute < a ? { tone: "later", text: `Shift ${s.start_time}–${s.end_time}` } : { tone: "done", text: `Shift ended ${b !== null && b <= a ? "" : s.end_time}`.trim() };
 }
 
-export default function DashStaff({ viewTeam }) {
+export default function DashStaff({ viewTeam, me }) {
   const [people, setPeople] = useState(null), [items, setItems] = useState(null), [err, setErr] = useState("");
   const [q, setQ] = useState(""), [pick, setPick] = useState("all");      // all | on | off
   const [tick, setTick] = useState(0);
@@ -48,7 +48,7 @@ export default function DashStaff({ viewTeam }) {
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
   useLive(["tasks", "schedule"], () => setTick((n) => n + 1));
 
-  const agents = useMemo(() => (people || []).filter((p) => (p.tasks !== undefined ? p.tasks : (p.on_leaderboard || p.role === "agent")) && (viewTeam === "ALL" || p.team === viewTeam)).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam]);
+  const agents = useMemo(() => (people || []).filter((p) => (p.tasks !== undefined ? p.tasks : (p.on_leaderboard || p.role === "agent")) && (viewTeam === "ALL" || p.team === viewTeam || (!!me && !!me.role_key && p.role_key === me.role_key))).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam, me]);
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const nOn = rows.filter((r) => r.on).length, nTask = rows.filter((r) => ongoing[r.u]).length;
