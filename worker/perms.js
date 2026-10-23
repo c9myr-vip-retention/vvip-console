@@ -50,7 +50,7 @@ export const PERMS = [
   { key: "kpi.scored", group: "daily", label: "Counts as a scored CS agent", desc: "Shows on the KPI leaderboard and in agent scoring.", d: [0, 1, 0] },
   { key: "teams.all", group: "daily", label: "See every team", desc: "See all teams' brands and data and switch between teams. Without it the account only sees its own team.", d: [1, 0, 0] },
   { key: "people.above", group: "daily", label: "See people above their rank", desc: "The role hierarchy hides people in more senior roles (a HOD cannot see the CEO). Switch this on to let this role see them, in staff lists and their tasks. The most senior role never needs it.", d: [0, 0, 0] },
-  { key: "people.same_rank", group: "daily", label: "See same-rank colleagues' tasks when on a team", desc: "People in the same role with no team see each other's tasks. When this role has a team it only sees the tasks of people below it. Switch this on to also see the tasks of same-rank colleagues.", d: [0, 0, 0] },
+  { key: "people.same_rank", group: "daily", label: "See same-rank colleagues' tasks when on a team", desc: "People in the same role with no team see each other's tasks. When this role has a team it only sees the tasks of people below it. Switch this on to also see the tasks of same-rank colleagues. If the role is also limited to its own team, this is what lets it see same-rank colleagues of other teams (never their downline).", d: [0, 0, 0] },
   { key: "people.all", group: "daily", label: "See people from every team", desc: "Agent and staff lists show people from every team, not only the team in view. Off for everyone by default.", d: [0, 0, 0] },
   { key: "activity.view", group: "daily", label: "See the activity log", desc: "Read the audit trail of who did what.", d: [1, 0, 0] },
 
@@ -135,16 +135,19 @@ export function parseSees(raw) {
 // Tasks go one step further: two people in the same role see each other's tasks only when the viewer has no team; a viewer who has a team sees just the
 // tasks of people below them, unless "people.same_rank" is on. Accounts without a role (old settings) are outside the hierarchy and see as they always did.
 
-/** May `viewer` see `target`? tasks = the stricter rule for other people's tasks. rm = Map(role key -> rank, 0 is the most senior). */
-export function canViewPerson(viewer, target, rm, perms, tasks) {
+/** May `viewer` see `target`? tasks = the stricter rule for other people's tasks. rm = Map(role key -> rank, 0 is the most senior).
+ *  own = the viewer's role is limited to its own team: then only the downline of the viewer's OWN team is seen. With "people.same_rank" also on, same-rank
+ *  colleagues of other teams are seen as well (but not their downline). Someone with no team has nothing to be limited to. */
+export function canViewPerson(viewer, target, rm, perms, tasks, own) {
   if (!viewer || !target || viewer.username === target.username) return true;
+  const teamOk = !own || !viewer.team || target.team === viewer.team;
   const vr = rm.get(viewer.role_key), tr = rm.get(target.role_key);
-  if (vr === undefined || tr === undefined) return true;                  // no role: outside the hierarchy
+  if (vr === undefined || tr === undefined) return teamOk;                // no role: outside the hierarchy
   const has = (k) => !!perms && perms.has(k);
   if (tr < vr) return has("people.above");                                // more senior
-  if (tr > vr) return true;                                               // below: downline
-  if (!tasks) return true;                                                // same rank, in a staff list
-  return !viewer.team || has("people.same_rank");                         // same rank, tasks: no team sees each other; a team needs the exception
+  if (tr > vr) return teamOk;                                             // below: downline (of the viewer's own team when limited)
+  if (tasks) return !viewer.team || has("people.same_rank");              // same rank, tasks: no team sees each other; a team needs the exception
+  return teamOk || has("people.same_rank");                               // same rank, staff list: own team (and any team when limited, only with the exception)
 }
 const rankMap = (roles) => new Map([...(roles ? roles.keys() : [])].map((k, i) => [k, i]));
 
@@ -152,18 +155,16 @@ const rankMap = (roles) => new Map([...(roles ? roles.keys() : [])].map((k, i) =
 export function hiddenPeople(rows, viewer, roles, perms, { tasks = false } = {}) {
   const out = new Set();
   if (!viewer || !viewer.role_key || !roles || !roles.has(viewer.role_key)) return out;
-  const rm = rankMap(roles);
-  for (const r of rows || []) if (!canViewPerson(viewer, r, rm, perms, tasks)) out.add(r.username);
+  const rm = rankMap(roles), sees = roles.get(viewer.role_key).sees, own = !!(sees && sees.team === "own");
+  for (const r of rows || []) if (!canViewPerson(viewer, r, rm, perms, tasks, own)) out.add(r.username);
   return out;
 }
 
-/** People this account may see: the hierarchy first, then (when its role says so) only its own team. Always includes itself. Rows need `team` and `role_key`. */
+/** People this account may see: the hierarchy, narrowed to its own team's downline plus same-rank colleagues when its role says so. Always includes itself.
+ *  Rows need `team` and `role_key`. */
 export function filterPeople(rows, user, roles, perms, opts) {
-  const rk = user && user.role_key, sees = rk && roles && roles.has(rk) ? roles.get(rk).sees : null;
   const hid = hiddenPeople(rows, user, roles, perms, opts);
-  const own = !!(sees && sees.team === "own");
-  if (!hid.size && !own) return rows;
-  return rows.filter((r) => r.username === user.username || (!hid.has(r.username) && (!own || (!!user.team && r.team === user.team))));
+  return hid.size ? rows.filter((r) => r.username === user.username || !hid.has(r.username)) : rows;
 }
 
 /** The permissions a role starts from. base is "none", a fixed code default set ("admin", "agent", "viewer"), or the key of another role,

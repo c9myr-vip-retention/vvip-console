@@ -181,7 +181,7 @@ export default function RolesPanel() {
 
           <div className="card"><div className="body" style={{ display: "grid", gap: 10 }}>
             <div className="rl-gh">Who they can see</div>
-            <div className="dim">The ranking on the left decides who sees whom: a role sees its own rank and everyone below it, not above (the permission “See people above their rank” makes an exception). For tasks, people in the same role with no team see each other's tasks; with a team, only the tasks of people below (the permission “See same-rank colleagues' tasks when on a team” makes an exception). The box below adds a team limit on top: everyone, or only their own team.</div>
+            <div className="dim">The ranking on the left decides who sees whom: a role sees its own rank and everyone below it, not above (the permission “See people above their rank” makes an exception). For tasks, people in the same role with no team see each other's tasks; with a team, only the tasks of people below (the permission “See same-rank colleagues' tasks when on a team” makes an exception). The box below adds a team limit on top: everyone, or only their own team (then only their own team's downline; colleagues of the same rank in other teams appear only when “See same-rank colleagues' tasks when on a team” is on too, and never their downline).</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
               <Select value={(role.sees || {}).team === "own" ? "own" : "all"} style={{ width: "auto", minWidth: 330 }}
                 options={[{ value: "all", label: "Everyone (no limit)" }, { value: "own", label: "Only their own team" }]}
