@@ -48,7 +48,7 @@ check("an agent cannot read roles (403)", r.status === 403);
 check("unauthenticated is 401", (await call(null, "GET", "/api/roles")).status === 401);
 r = await call(A, "GET", "/api/roles");
 const keys = (r.data.perms || []).map((p) => p.key);
-check("admin reads the catalogue (49 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 49 && new Set(keys).size === 49 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
+check("admin reads the catalogue (50 permissions, 5 groups) and 3 built-in roles", r.status === 200 && keys.length === 50 && new Set(keys).size === 50 && r.data.groups.length === 5 && r.data.roles.map((x) => x.key).join() === "admin,agent,viewer" && r.data.setup_needed === false, JSON.stringify(r.data).slice(0, 300));
 check("built-in role counts match accounts (1 admin, 1 agent)", r.data.roles.find((x) => x.key === "admin").users === 1 && r.data.roles.find((x) => x.key === "agent").users === 1);
 check("every page has its own permission", ["page.changes", "page.performance", "page.contact", "page.checkin", "page.grace", "page.players", "page.tasks", "page.schedule", "page.projects", "page.workload", "page.myday", "page.myperf", "page.account", "page.settings"].every((k) => keys.includes(k)));
 const agentRole = r.data.roles.find((x) => x.key === "agent"), adminRole = r.data.roles.find((x) => x.key === "admin");
@@ -575,6 +575,10 @@ await call(A, "POST", "/api/users", { username: "to9", password: PW, role_key: T
 await call(A, "POST", "/api/users", { username: "sc9", password: PW, role_key: SCr, team: "B" });
 const ppl = (await call(A, "GET", "/api/work/people")).data.people, wl9 = (await call(A, "GET", "/api/work/workload")).data.people.map((x) => x.username);
 check("the people list carries each person's role name and hierarchy rank (the live board shows and sorts by them)", ppl.find((x) => x.username === "to9").role_name === "TaskOnly9" && ppl.find((x) => x.username === "sc9").role_name === "ScoreOnly9" && ppl.find((x) => x.username === "to9").rank < ppl.find((x) => x.username === "sc9").rank && ppl.find((x) => x.username === "aldo").rank === null);
+await call(A, "POST", `/api/roles/${TOr}/update`, { overrides: { "tasks.use": true, "chat.exempt": true } });
+const ppl2 = (await call(A, "GET", "/api/work/people")).data.people;
+check("the people list says who has no chat duty (by role), and only them", ppl2.find((x) => x.username === "to9").no_chat === true && ppl2.find((x) => x.username === "sc9").no_chat === false, JSON.stringify(ppl2.filter((x) => ["to9", "sc9"].includes(x.username))));
+await call(A, "POST", `/api/roles/${TOr}/update`, { overrides: { "chat.exempt": null } });
 check("someone who works on tasks but is not a scored CS agent still shows in the task views", ppl.find((x) => x.username === "to9").tasks === true && ppl.find((x) => x.username === "to9").on_leaderboard === 0 && wl9.includes("to9"), JSON.stringify(wl9));
 check("a scored CS agent who cannot use tasks is not a task person (the KPI switch does not make one)", ppl.find((x) => x.username === "sc9").tasks === false && ppl.find((x) => x.username === "sc9").on_leaderboard === 1 && !wl9.includes("sc9"), JSON.stringify(wl9));
 

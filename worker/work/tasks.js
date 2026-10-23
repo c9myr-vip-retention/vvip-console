@@ -177,7 +177,7 @@ const allRoles = async (c) => c.roles || c._allRoles || (c._allRoles = await loa
 async function people(c) {
   const [results, roles] = await Promise.all([accountsWithPerms(c.env.DB), allRoles(c)]);
   // `tasks` says whether the person can work on tasks at all. "Counts as a scored CS agent" is about the KPI score only and has nothing to do with tasks.
-  return c.ok({ people: filterPeople(results, c.user, c.roles, c.perms).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0, tasks: resolvePerms(u, roles).has("tasks.use"), role_name: (u.role_key && roles && roles.get(u.role_key) && roles.get(u.role_key).name) || null, rank: u.role_key && roles && roles.has(u.role_key) ? [...roles.keys()].indexOf(u.role_key) : null })) });
+  return c.ok({ people: filterPeople(results, c.user, c.roles, c.perms).map((u) => ({ username: u.username, role: u.role, role_key: u.role_key || null, team: u.team || null, on_leaderboard: u.on_leaderboard ? 1 : 0, tasks: resolvePerms(u, roles).has("tasks.use"), role_name: (u.role_key && roles && roles.get(u.role_key) && roles.get(u.role_key).name) || null, rank: u.role_key && roles && roles.has(u.role_key) ? [...roles.keys()].indexOf(u.role_key) : null, no_chat: resolvePerms(u, roles).has("chat.exempt") })) });
 }
 
 // ── GET /tasks ────────────────────────────────────────────────────────────────────────────────

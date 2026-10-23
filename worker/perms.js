@@ -47,6 +47,7 @@ export const PERMS = [
   { key: "campaigns.manage", group: "daily", label: "Manage campaigns", desc: "Create, edit, export, close and delete campaigns and their reports.", d: [1, 0, 0] },
   { key: "data.sync", group: "daily", label: "Run data syncs", desc: "Run feeders, Lark and engagement syncs, feed checks, and log livechat numbers.", d: [1, 0, 0] },
   { key: "mistakes.log", group: "daily", label: "Log mistakes", desc: "Log a mistake against an agent.", d: [1, 0, 0] },
+  { key: "chat.exempt", group: "daily", label: "No chat duty (does not need to accept chats)", desc: "Switch on for people who no longer have to accept chats. Their card on the Dashboard live board then shows only the clock-in, without the accepting-chats and shift status. Off for everyone by default.", d: [0, 0, 0] },
   { key: "kpi.scored", group: "daily", label: "Counts as a scored CS agent", desc: "Shows on the KPI leaderboard and in agent scoring.", d: [0, 1, 0] },
   { key: "teams.all", group: "daily", label: "See every team", desc: "See all teams' brands and data and switch between teams. Without it the account only sees its own team.", d: [1, 0, 0] },
   { key: "people.above", group: "daily", label: "See people above their rank", desc: "The role hierarchy hides people in more senior roles (a HOD cannot see the CEO). Switch this on to let this role see them, in staff lists and their tasks. The most senior role never needs it.", d: [0, 0, 0] },

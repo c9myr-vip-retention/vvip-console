@@ -49,6 +49,9 @@ export default function DashStaff({ viewTeam, me }) {
   useLive(["tasks", "schedule"], () => setTick((n) => n + 1));
 
   const agents = useMemo(() => (people || []).filter((p) => (p.tasks !== undefined ? p.tasks : (p.on_leaderboard || p.role === "agent")) && (viewTeam === "ALL" || p.team === viewTeam || (!!me && !!me.role_key && p.role_key === me.role_key))).sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || a.username.localeCompare(b.username)).map((p) => p.username), [people, viewTeam, me]);   // most senior role first (the hierarchy), then by name
+  const noChat = useMemo(() => new Set((people || []).filter((p) => p.no_chat).map((p) => p.username)), [people]);   // people who do not accept chats: their card shows only the clock-in
+  const meName = me && me.username;
+  const rankOf = useMemo(() => Object.fromEntries((people || []).map((p) => [p.username, p.rank ?? 1e9])), [people]);   // hierarchy position: 0 = most senior
   const roleOf = useMemo(() => Object.fromEntries((people || []).map((p) => [p.username, p.role_name])), [people]);   // the role name shown next to each person
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -56,7 +59,7 @@ export default function DashStaff({ viewTeam, me }) {
   const needle = q.trim().toLowerCase();
   const match = (r) => (pick === "all" ? true : pick === "task" ? !!ongoing[r.u] : (pick === "on") === r.on);
   const shown = rows.filter((r) => match(r) && (!needle || r.u.toLowerCase().includes(needle)))
-    .sort((a, b) => (!!ongoing[b.u] - !!ongoing[a.u]) || (b.on - a.on) || a.u.localeCompare(b.u));
+    .sort((a, b) => ((b.u === meName) - (a.u === meName)) || (rankOf[a.u] - rankOf[b.u]) || (!!ongoing[b.u] - !!ongoing[a.u]) || (b.on - a.on) || a.u.localeCompare(b.u));   // yourself first, then the hierarchy (most senior first), then who is on a task or on shift, then the name
 
   const Chip = ({ id, n, label, na }) => (
     <button type="button" className={"dst-chip" + (pick === id ? " on" : "") + (na ? " na" : "")} disabled={na} aria-pressed={pick === id}
@@ -94,12 +97,14 @@ export default function DashStaff({ viewTeam, me }) {
             {shown.map((r) => (
               <div key={r.u} className="card dst-card">
                 <div className="who"><Avatar name={r.u} /><b>{r.u}</b>{roleOf[r.u] && <span className="role-tag">{roleOf[r.u]}</span>}</div>
-                <div className="dst-big mono">{NA}</div>
-                <div className="dim">accepting chats for · off-chat for</div>
-                <div className="dst-pills">
-                  <span className="pill np" style={{ "--c": "#8B94A7" }}>● Accepting chats: {NA}</span>
-                  <span className={"pill np dst-sh " + r.shift.tone}>{r.shift.text}</span>
-                </div>
+                {!noChat.has(r.u) && <>
+                  <div className="dst-big mono">{NA}</div>
+                  <div className="dim">accepting chats for · off-chat for</div>
+                  <div className="dst-pills">
+                    <span className="pill np" style={{ "--c": "#8B94A7" }}>● Accepting chats: {NA}</span>
+                    <span className={"pill np dst-sh " + r.shift.tone}>{r.shift.text}</span>
+                  </div>
+                </>}
                 <div className="dst-pills"><span className="dim dst-tag">Clocked in: {NA}</span></div>
                 {ongoing[r.u] ? (
                   <div className="dst-task on">
