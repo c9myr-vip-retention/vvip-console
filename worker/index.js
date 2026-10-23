@@ -2139,12 +2139,15 @@ const worker = {
       const brands = (TEAM_BRANDS[b.team] || []).filter((x) => brandAllowed(x));
       if (!brands.length) return err("Unknown team", 400);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(b.snapshot_date || "")) return err("snapshot_date must be YYYY-MM-DD", 400);
-      const r = await env.DB.prepare(
-        `UPDATE contact_log SET assigned_to = NULL, updated_by = ?, updated_at = datetime('now')
-          WHERE snapshot_date = ? AND brand IN (${brands.map(() => "?").join(",")}) AND assigned_to IS NOT NULL AND (status IS NULL OR status = 'ASSIGNED')`
-      ).bind(user.username, b.snapshot_date, ...brands).run();
-      log(user, "assign", `Unassigned ${r.meta.changes} player${r.meta.changes === 1 ? "" : "s"} · Team ${b.team}`);
-      return ok({ unassigned: r.meta.changes });
+      // A bare assignment (no status, no note) is just a marker: take it away entirely, so nothing is left to be counted in Performance. A row that
+      // carries a note keeps the note and loses its owner.
+      const inB = `brand IN (${brands.map(() => "?").join(",")})`;
+      const idle = `snapshot_date = ? AND ${inB} AND assigned_to IS NOT NULL AND (status IS NULL OR status = 'ASSIGNED')`;
+      const gone = await env.DB.prepare(`DELETE FROM contact_log WHERE ${idle} AND (note IS NULL OR note = '')`).bind(b.snapshot_date, ...brands).run();
+      const kept = await env.DB.prepare(`UPDATE contact_log SET assigned_to = NULL, status = NULL, updated_by = ?, updated_at = datetime('now') WHERE ${idle}`).bind(user.username, b.snapshot_date, ...brands).run();
+      const n = (gone.meta.changes || 0) + (kept.meta.changes || 0);
+      log(user, "assign", `Unassigned ${n} player${n === 1 ? "" : "s"} · Team ${b.team}`);
+      return ok({ unassigned: n });
     }
 
     if (path === "/api/rtn/board" && method === "GET") {
@@ -2519,6 +2522,7 @@ const worker = {
           WITH lg AS (
             SELECT snapshot_date, contacted_at, player_key, brand, tier_segment, class, assigned_to, status, updated_by
             FROM contact_log WHERE substr(COALESCE(contacted_at, snapshot_date),1,7) = ?${pf.s}
+              AND NOT (assigned_to IS NULL AND (status IS NULL OR status = 'ASSIGNED'))      -- unassigned and not worked: nothing to track
           ),
           need AS (SELECT DISTINCT snapshot_date, brand FROM lg WHERE class IS NULL),
           rk AS (

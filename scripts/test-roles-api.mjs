@@ -465,15 +465,19 @@ check("an agent cannot unassign (403)", (await call(S, "POST", "/api/rtn/unassig
 check("a bad team or date is 400", (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "Z" })).status === 400 && (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: "nope", team: "B" })).status === 400);
 const bc0 = (await call(A, "GET", `/api/rtn/board-contacts?date=${snap}`)).data.contacts;
 check("board-contacts returns just the contact rows", Array.isArray(bc0) && bc0.some((x) => x.player_key === "zz_un_done") && !("rows" in (await call(A, "GET", `/api/rtn/board-contacts?date=${snap}`)).data));
-const pu0 = (await call(A, "GET", "/api/work/pulse")).data.areas.contact || 0;
+const pu0 = (await call(A, "GET", "/api/work/pulse")).data.areas.contactreset || 0;
 r = await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "B" });
 const who = Object.fromEntries(rows("SELECT player_key, assigned_to FROM contact_log WHERE player_key LIKE 'zz_un%'").map((x) => [x.player_key, x.assigned_to]));
-check("unassign takes back the assigned players not contacted yet, only", r.status === 200 && r.data.unassigned === 2 && isNull(who.zz_un_idle) && isNull(who.zz_un_blank) && isNull(who.zz_un_free) && who.zz_un_done === "sara", JSON.stringify([r.data, who]));
+check("unassign takes back the assigned players not contacted yet, only", r.status === 200 && r.data.unassigned === 2 && who.zz_un_idle === undefined && who.zz_un_blank === undefined && isNull(who.zz_un_free) && who.zz_un_done === "sara", JSON.stringify([r.data, who]));
 check("a player of another team (Team A brand) is left alone", who.zz_un_other === "sara", JSON.stringify(who));
 await new Promise((r2) => setTimeout(r2, 700));
-check("the change bumps the 'contact' live counter", ((await call(A, "GET", "/api/work/pulse")).data.areas.contact || 0) === pu0 + 1);
+check("the change bumps the 'contactreset' live counter (rows were removed)", ((await call(A, "GET", "/api/work/pulse")).data.areas.contactreset || 0) === pu0 + 1);
 check("running it again unassigns nobody", (await call(A, "POST", "/api/rtn/unassign", { snapshot_date: snap, team: "B" })).data.unassigned === 0);
-sql("DELETE FROM contact_log WHERE player_key LIKE 'zz_un%'");
+// Performance leaves out rows that are unassigned and not worked (after "Unassign all" there are such rows)
+sql(`INSERT INTO contact_log (snapshot_date, player_key, brand, tier_segment, assigned_to, status, updated_by) VALUES ('${snap}', 'zz_pf_idle', 'SK69', 'V', NULL, 'ASSIGNED', 'aldo'), ('${snap}', 'zz_pf_work', 'SK69', 'V', 'sara', 'CONTACTED', 'sara')`);
+const perfLogs = (await call(A, "GET", "/api/rtn/performance")).data.logs || [];
+check("Performance does not list an unassigned, unworked row, but does list worked ones", !perfLogs.some((l) => l.player_key === "zz_pf_idle") && perfLogs.some((l) => l.player_key === "zz_pf_work"), JSON.stringify(perfLogs.filter((l) => String(l.player_key).startsWith("zz_pf"))));
+sql("DELETE FROM contact_log WHERE player_key LIKE 'zz_un%' OR player_key LIKE 'zz_pf%'");
 
 // ---- live: a person's own permissions, the contact rows, and the other areas ----
 const pulseOf = async (tok) => (await call(tok, "GET", "/api/work/pulse")).data.areas;

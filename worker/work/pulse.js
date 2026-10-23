@@ -8,8 +8,8 @@ export function areaOf(path) {
   if (path.startsWith("/api/work/tasks") || path.startsWith("/api/work/attachments") || path.startsWith("/api/work/comments")) return "tasks";
   if (/^\/api\/work\/(projects|flows|templates|bin)/.test(path)) return "projects";
   if (path.startsWith("/api/users") || path.startsWith("/api/roles")) return "people";
-  if (path === "/api/rtn/contact" || path === "/api/rtn/unassign") return "contact";            // who owns which player, and its status (rows stamped with updated_at)
-  if (path.startsWith("/api/rtn/auto-assign")) return "contactreset";                             // may write rows without a fresh stamp: pull the full list
+  if (path === "/api/rtn/contact") return "contact";            // who owns which player, and its status (rows stamped with updated_at)
+  if (path === "/api/rtn/unassign" || path.startsWith("/api/rtn/auto-assign")) return "contactreset";   // rows can be removed or written without a stamp                             // may write rows without a fresh stamp: pull the full list
   if (path.startsWith("/api/rtn/login-check")) return "checkin";
   if (/^\/api\/rtn\/(notes|crm|telegram|livechat)/.test(path)) return "player";                                               // the player drawer
   if (/^\/api\/rtn\/(kpi|mistakes)/.test(path)) return "kpi";

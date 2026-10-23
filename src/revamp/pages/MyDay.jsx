@@ -6,6 +6,7 @@ import { api as sched } from "../schedule/api.js";
 import { Brands, typeOf } from "../schedule/forms.jsx";
 import { HIDE_SHIFTS, byTime, expand, timeStr } from "../schedule/logic.js";
 import { useLive, useLiveTick } from "../live.js";
+import { can as canDo } from "../perms.js";
 import { api, TEAMS, BRAND_ORDER, dispName, dispId, keyMetric, ckey, fmt } from "../../App.jsx";
 import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
@@ -128,7 +129,10 @@ function DailyCards({ ctx }) {
   );
 }
 
-export default function MyDay({ ctx }) {
+// Leaders (the admin Dashboard permission) use My day for their own tasks only: no players to contact, no check-in, no grace. `embedded` is the same
+// thing placed on the Dashboard under the Live board (no greeting; the Dashboard puts a separator above it).
+export default function MyDay({ ctx, embedded }) {
+  const tasksOnly = !!embedded || canDo(ctx.me, "dashboard.view");
   const me = useMemo(() => meOf(ctx), [ctx.me]);   // eslint-disable-line react-hooks/exhaustive-deps
   const { tasks, people, projects, loading, error, reload } = useTasksData();
   const { overlays, openTask, newTask } = useTaskOverlays({ me, people, projects, tasks, onChange: reload });
@@ -170,19 +174,27 @@ export default function MyDay({ ctx }) {
   );
   return (
     <div>
-      <div className="hello top">
-        <div>
-          <h1>{greet()}, {me.username}</h1>
-          <p>{dateLine()}{ctx.viewTeam && ctx.viewTeam !== "ALL" ? ` · Team ${ctx.viewTeam}` : ""}</p>
+      {embedded ? (
+        <div className="top" style={{ marginBottom: 10 }}>
+          <span className="dim">{dateLine()} · your own tasks</span>
+          <span className="grow" />
+          {ed && <button className="btn pri" onClick={() => newTask({})}>+ New task</button>}
         </div>
-        <span className="grow" />
-        {ed && <button className="btn pri" onClick={() => newTask({})}>+ New task</button>}
-      </div>
+      ) : (
+        <div className="hello top">
+          <div>
+            <h1>{greet()}, {me.username}</h1>
+            <p>{dateLine()}{ctx.viewTeam && ctx.viewTeam !== "ALL" ? ` · Team ${ctx.viewTeam}` : ""}{tasksOnly ? " · your tasks" : ""}</p>
+          </div>
+          <span className="grow" />
+          {ed && <button className="btn pri" onClick={() => newTask({})}>+ New task</button>}
+        </div>
+      )}
       {error && <div className="banner crit">{error}</div>}
       <ConflictBanner conflict={conflict} onOpen={(id) => { clearConflict(); openTask(id); }} onClose={clearConflict} />
 
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", marginBottom: 14 }}>
-        {snap && <Tile label="Players to contact" value={toContact} sub={toContact ? "waiting for you" : "all done"} onClick={() => ctx.goto && ctx.goto("queue")} />}
+        {snap && !tasksOnly && <Tile label="Players to contact" value={toContact} sub={toContact ? "waiting for you" : "all done"} onClick={() => ctx.goto && ctx.goto("queue")} />}
         <Tile label="Open tasks" value={active.length} sub="assigned to me" onClick={() => setHt("active")} />
         <Tile label="Due today" value={dueToday.length} sub={dueToday.length ? "finish these today" : "nothing due"} onClick={() => setHt("today")} />
         <Tile label="Overdue" value={over.length} sub={over.length ? "needs attention" : "all on time"} tone={over.length ? "alert" : ""} onClick={() => setHt("over")} />
@@ -234,7 +246,7 @@ export default function MyDay({ ctx }) {
           </div>
           <div style={{ display: "grid", gap: 14 }}>
             <TodayCard ctx={ctx} today={today} />
-            <DailyCards ctx={ctx} />
+            {!tasksOnly && <DailyCards ctx={ctx} />}
           </div>
         </div>
       )}

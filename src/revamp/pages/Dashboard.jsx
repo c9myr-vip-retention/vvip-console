@@ -5,6 +5,7 @@ import { Dashboard as LiveDashboard, BRANDS, fmtK } from "../../App.jsx";
 import { brandColor } from "../tokens.js";
 import { contactTodo } from "../shellHelpers.js";
 import DashStaff from "./DashStaff.jsx";
+import MyDay from "./MyDay.jsx";
 import { can } from "../perms.js";
 
 function BrandCards({ ctx }) {
@@ -34,6 +35,15 @@ function BrandCards({ ctx }) {
   );
 }
 
+/** A clear divider between the sections of the Dashboard. */
+const Sep = ({ title, note }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "28px 0 14px" }}>
+    <h2 style={{ margin: 0, fontSize: 16 }}>{title}</h2>
+    {note && <span className="dim">{note}</span>}
+    <span style={{ flex: 1, height: 1, background: "var(--line)" }} />
+  </div>
+);
+
 export default function Dashboard({ ctx }) {
   const { me, viewTeam, teamData, teamBrands, board, contacts, dates, isPast, readOnly, saveContact, clearContact, snap, health } = ctx;
   const staleList = (health || []).filter((h) => h.last_fed && h.last_fed !== snap).map((h) => h.brand).filter((b) => teamBrands.includes(b));
@@ -43,6 +53,9 @@ export default function Dashboard({ ctx }) {
       <div className="top"><h1>Dashboard</h1><span className="badge admin">Admin only</span></div>
       {staleList.length > 0 && <div className="banner warn">⚠ {staleList.length} brand{staleList.length > 1 ? "s" : ""} not fed today: {staleList.join(", ")}. Report will be incomplete.</div>}
       <DashStaff viewTeam={viewTeam} me={me} />
+      <Sep title="My tasks" note="Your own work as a leader: tasks only, nothing to contact" />
+      <MyDay ctx={ctx} embedded />
+      <Sep title="Team numbers" note={viewTeam === "ALL" ? "All teams" : `Team ${viewTeam}`} />
       <div className="rv-live">
         <LiveDashboard data={teamData} brandOrder={teamBrands} viewTeam={viewTeam} snap={board.snapshot_date} isPast={isPast}
           contacts={contacts} me={me} team={ctx.team || board.team || []} dates={dates} onSaveContact={saveContact} onClearContact={clearContact} readOnly={readOnly} />
