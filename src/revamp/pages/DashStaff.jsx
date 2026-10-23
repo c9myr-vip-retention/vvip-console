@@ -48,7 +48,7 @@ export default function DashStaff({ viewTeam, me }) {
   useEffect(() => { const id = setInterval(() => setTick((n) => n + 1), 60000); return () => clearInterval(id); }, []);
   useLive(["tasks", "schedule"], () => setTick((n) => n + 1));
 
-  const agents = useMemo(() => (people || []).filter((p) => (p.tasks !== undefined ? p.tasks : (p.on_leaderboard || p.role === "agent")) && (viewTeam === "ALL" || p.team === viewTeam || (!!me && !!me.role_key && p.role_key === me.role_key))).map((p) => p.username).sort((a, b) => a.localeCompare(b)), [people, viewTeam, me]);
+  const agents = useMemo(() => (people || []).filter((p) => (p.tasks !== undefined ? p.tasks : (p.on_leaderboard || p.role === "agent")) && (viewTeam === "ALL" || p.team === viewTeam || (!!me && !!me.role_key && p.role_key === me.role_key))).sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || a.username.localeCompare(b.username)).map((p) => p.username), [people, viewTeam, me]);   // most senior role first (the hierarchy), then by name
   const roleOf = useMemo(() => Object.fromEntries((people || []).map((p) => [p.username, p.role_name])), [people]);   // the role name shown next to each person
   const onNow = useMemo(() => new Set((items ? onDuty(items, today, minute) : []).flatMap((i) => i.who)), [items, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => agents.map((u) => ({ u, on: onNow.has(u), shift: HIDE_SHIFTS ? { tone: "none", text: "Shift: NA" } : items ? shiftOf(items, u, today, minute, onNow) : null })), [agents, items, onNow, today, minute]);   // eslint-disable-line react-hooks/exhaustive-deps
