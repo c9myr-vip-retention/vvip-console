@@ -1885,7 +1885,7 @@ const worker = {
     // name as `author`. The key opens ONLY these two routes. Kept ABOVE the requireAuth gate, like
     // /api/ingest. Notes land in the same player_notes table the console drawer shows, so they
     // appear there at once, authored "<name> (widget)".
-    if (path === "/api/ext/note" || path === "/api/ext/notes" || path === "/api/ext/action" || path === "/api/ext/actions") {
+    if (path === "/api/ext/note" || path === "/api/ext/notes" || path === "/api/ext/action" || path === "/api/ext/actions" || path === "/api/ext/action/remove") {
       const key = request.headers.get("x-widget-token") || "";
       if (!env.WIDGET_API_KEY || !(await safeEqual(key, env.WIDGET_API_KEY))) return err("unauthorized", 401);
       const known = new Set(Object.values(TEAM_BRANDS).flat());
@@ -1985,6 +1985,48 @@ const worker = {
         }
         if (ctx) ctx.waitUntil(logAct(env, clientIp, { username: `widget:${author}`, role: "widget" }, "contact", `Added action via widget · ${row.player_key} (${brand})`));
         return ok({ saved: true, player_key: row.player_key, snapshot_date: snap.d, appended: !!(hit && hit.note) });
+      }
+      /* Undo ONE widget action line. The widget calls this when an agent undoes a claim it filed through /api/ext/action.
+         The console's "Clear / undo this contact" is not suitable: it wipes the whole contact (assignee, status, every note
+         line) and drops the player from Performance. This removes only the LAST widget-written line that starts with
+         `starts_with` (the text after the "[widget · name · time]" stamp), from the newest contact_log row that has one.
+           • Only lines in the exact widget format can match, so an agent's own typed text never does.
+           • If nothing is left of the note AND the row was created only by the widget (no status, no assignee, updated_by
+             ends with "(widget)"), the row is deleted; otherwise only `note` is updated (NULL when empty).
+           • status, assigned_to, class, updated_by, updated_at and contacted_at are never touched: updated_at drives the 6h
+             auto NO_RESPONSE flip and the 48h cooldown, and updated_by <> 'auto' marks an auto-assign pin (same rule as /action).
+           • No matching line is NOT an error (200, removed:false): the widget treats it as already done. */
+      if (path === "/api/ext/action/remove" && method === "POST") {
+        let b; try { b = await request.json(); } catch (e) { return err("invalid_json"); }
+        const brand = normBrand(b && b.brand);
+        const startsWith = String((b && b.starts_with) || "").trim();
+        if (!known.has(brand)) return err("unknown brand");
+        if (startsWith.length < 8) return err("starts_with must be at least 8 characters", 400);
+        const pk = await resolve(b.player_key, brand);
+        if (!pk) return err("player not found in the console", 404);
+        const rows = await env.DB.prepare(
+          `SELECT id, snapshot_date, note, status, assigned_to, updated_by FROM contact_log
+            WHERE player_key = ? AND brand = ? AND note IS NOT NULL AND note <> ''
+            ORDER BY snapshot_date DESC, updated_at DESC LIMIT 10`).bind(pk, brand).all();
+        const WIDGET_LINE = /^\[widget · [^\]]* · [^\]]*\] (.*)$/;
+        for (const r of rows.results || []) {
+          const lines = String(r.note).split("\n");
+          let at = -1;
+          for (let i = lines.length - 1; i >= 0; i--) {       // the LAST matching widget line
+            const m = WIDGET_LINE.exec(lines[i]);
+            if (m && m[1].startsWith(startsWith)) { at = i; break; }
+          }
+          if (at < 0) continue;
+          const rest = lines.filter((_, i) => i !== at).join("\n");
+          const empty = rest.trim() === "";
+          const widgetOnly = empty && !r.status && !r.assigned_to && /\(widget\)$/.test(String(r.updated_by || ""));
+          if (widgetOnly) await env.DB.prepare("DELETE FROM contact_log WHERE id = ?").bind(r.id).run();
+          else await env.DB.prepare("UPDATE contact_log SET note = ? WHERE id = ?").bind(empty ? null : rest, r.id).run();
+          const who = cleanAgentName(b && b.author);
+          if (ctx) ctx.waitUntil(logAct(env, clientIp, { username: `widget:${who || "widget"}`, role: "widget" }, "contact", `Removed a widget action line · ${pk} (${brand})`));
+          return ok({ removed: true, player_key: pk, snapshot_date: r.snapshot_date, deletedRow: widgetOnly });
+        }
+        return ok({ removed: false, player_key: pk });
       }
       if (path === "/api/ext/actions" && method === "GET") {
         const brand = normBrand(url.searchParams.get("brand"));
