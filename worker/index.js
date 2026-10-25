@@ -4,6 +4,11 @@
 // v2: adds POST /api/ingest (Google Sheets feeder → player_days)
 // ═══════════════════════════════════════════════════
 
+import { handleWork } from "./work/index.js";
+import { handleRoles } from "./roles.js";
+import { liveBump, bumpArea } from "./work/pulse.js";
+import { loadRoles, resolvePerms, rolePerms, legacyColumns, filterPeople } from "./perms.js";
+
 function corsFor(request) {
   const origin = request.headers.get("Origin") || "";
   const allowed =
@@ -1094,7 +1099,7 @@ async function computeAutoAssign(env, opts = {}) {
   if (!snap) return { skipped: "no snapshots", team };
 
   const picRows = await env.DB.prepare(
-    "SELECT username FROM users WHERE team=? AND role='agent' ORDER BY username"
+    "SELECT username FROM users WHERE team=? AND (role='agent' OR on_leaderboard=1) ORDER BY username"
   ).bind(team).all();
   const pics = (picRows.results || []).map((r) => r.username).filter((u) => !off.has(u));
   if (!pics.length) return { skipped: `no active PICs on team ${team}`, team, pics: [], assignments: {}, summary: {} };
@@ -1757,7 +1762,7 @@ async function autoAssignOneRoster(env, brand, tier, assignedBy) {
 
   // Eligible agents = scored Team B CS agents, derived from users (not hardcoded).
   const ag = await env.DB.prepare(
-    "SELECT username FROM users WHERE team = 'B' AND on_leaderboard = 1 AND role = 'agent' ORDER BY username"
+    "SELECT username FROM users WHERE team = 'B' AND on_leaderboard = 1 ORDER BY username"
   ).all();
   const agents = (ag.results || []).map((r) => r.username);
   if (!agents.length) return { assigned: 0, reason: "no agents" };
@@ -1776,7 +1781,8 @@ async function autoAssignOneRoster(env, brand, tier, assignedBy) {
      WHERE pd.snapshot_date = ? AND pd.brand = ? AND pd.tier_segment = ?
        AND NOT EXISTS (SELECT 1 FROM player_assignment a
                         WHERE a.brand = pd.brand AND a.tier_segment = pd.tier_segment
-                          AND a.player_key = pd.player_key AND a.active = 1)
+                          AND a.player_key = pd.player_key AND a.active = 1
+                          AND a.agent IN (SELECT username FROM users))
      ORDER BY pd.daily_deposit DESC, pd.player_key
   `).bind(latest.d, brand, tier).all();
   const players = (un.results || []).map((r) => r.player_key);
@@ -1810,8 +1816,8 @@ async function autoAssignRosters(env, assignedBy = "cron") {
   return out;
 }
 
-export default {
-  async fetch(request, env, ctx) {
+const worker = {
+  async route(request, env, ctx) {
     CORS = corsFor(request);
     if (env.LARK_HOST) LARK.HOST = env.LARK_HOST;   // local preview only: point Lark calls at a mock; unset in production
     const url = new URL(request.url);
@@ -2000,14 +2006,34 @@ export default {
 
     // Per-account permissions (enforced server-side). The flags are the single source of truth;
     // a manage_users account always keeps edit+delete. The last-manager guard prevents lockout.
-    const canManage = !!user.manage_users;
-    const canEdit = !!user.can_edit || canManage;
-    const canDelete = !!user.can_delete || canManage;
+    // Roles: an account with a role_key gets that role's permissions; every other account keeps exactly what its old flags give it.
+    const roleMap = user.role_key ? await loadRoles(env.DB) : null;
+    const perms = resolvePerms(user, roleMap);
+    const can = (k) => perms.has(k);
+    const canManage = can("users.manage");
+    // Contacts come as a pair: "any" (contact.edit / contact.delete) and "own" (contact.edit_own / contact.delete_own). canEdit / canDelete mean
+    // "some version of it"; the *Any flags say whether it reaches players and notes that belong to other agents.
+    const canEditAny = can("contact.edit"), canDeleteAny = can("contact.delete");
+    const canEdit = canEditAny || can("contact.edit_own");
+    const canDelete = canDeleteAny || can("contact.delete_own");
     const NOEDIT = () => err("View-only — your account has no edit permission", 403);
+    const OWNONLY = () => err("You can only work on players assigned to you", 403);
+    // Who a player is assigned to today: the day's contact row first, then the standing assignment. null = nobody (anyone may pick it up).
+    const ownerOf = async (b) => {
+      const row = b.snapshot_date ? await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
+        .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first() : null;
+      if (row && row.assigned_to) return row.assigned_to;
+      const a = await env.DB.prepare("SELECT agent FROM player_assignment WHERE brand = ? AND player_key = ? AND active = 1 ORDER BY (tier_segment = ?) DESC LIMIT 1")
+        .bind(b.brand, b.player_key, b.tier_segment || "").first();
+      if (a) return a.agent;
+      if (b.snapshot_date) return null;
+      const last = await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE player_key = ? AND brand = ? AND assigned_to IS NOT NULL ORDER BY snapshot_date DESC LIMIT 1").bind(b.player_key, b.brand).first();   // notes carry no day: use the latest contact row
+      return last ? last.assigned_to : null;
+    };
 
     // Team wall: managers see every brand; everyone else is locked to their team's brands.
     // allowedBrands === null → no restriction. Else an array (empty array → sees nothing).
-    const allowedBrands = canManage ? null : (TEAM_BRANDS[user.team] || []);
+    const allowedBrands = can("teams.all") ? null : (TEAM_BRANDS[user.team] || []);
     // SQL fragment to AND onto a query that already has a WHERE. `col` is the brand column.
     const teamAnd = (col = "brand") =>
       allowedBrands === null ? { s: "", b: [] }
@@ -2015,10 +2041,14 @@ export default {
       : { s: ` AND ${col} IN (${allowedBrands.map(() => "?").join(",")})`, b: allowedBrands };
     const brandAllowed = (b) => allowedBrands === null || allowedBrands.includes(b);
 
+    // Work management (tasks, schedule, projects...). Routes live in worker/work/*.js.
+    { const w = await handleWork({ path, method, url, request, env, user, canManage, can, perms, roles: roleMap, ok, err, log, ctx }); if (w) return w; }
+    { const r = await handleRoles({ path, method, url, request, env, user, can, perms, ok, err, log, ctx }); if (r) return r; }
+
     // Aggregate endpoints (trend/performance/kpi) accept ?team=A|B|C so a MANAGER can narrow
     // the all-teams view to one team. Non-managers stay pinned to their own team (param ignored).
     const reqTeam = url.searchParams.get("team");
-    const scopeBrands = canManage ? (TEAM_BRANDS[reqTeam] || null) : allowedBrands;
+    const scopeBrands = can("teams.all") ? (TEAM_BRANDS[reqTeam] || null) : allowedBrands;
     const scopeAnd = (col = "brand") =>
       scopeBrands === null ? { s: "", b: [] }
       : scopeBrands.length === 0 ? { s: " AND 1=0", b: [] }
@@ -2027,7 +2057,8 @@ export default {
     // ── GET /api/me ────────────────────────────────────────────────────────────
     if (path === "/api/me" && method === "GET") {
       return ok({ username: user.username, role: user.role, can_edit: canEdit,
-        can_delete: canDelete, on_leaderboard: !!user.on_leaderboard, manage_users: canManage, team: user.team || null });
+        can_delete: canDelete, on_leaderboard: !!user.on_leaderboard, manage_users: canManage, team: user.team || null,
+        role_key: user.role_key || null, role_name: (roleMap && roleMap.get(user.role_key) || {}).name || null, perms: [...perms] });
     }
 
     // ── POST /api/logout — record sign-out (token is cleared client-side) ───────
@@ -2038,7 +2069,7 @@ export default {
 
     // ── GET /api/activity — audit trail (managers only) — filters: username, action, date ──
     if (path === "/api/activity" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("activity.view")) return err("Managers only", 403);
       const fu = url.searchParams.get("username"), fa = url.searchParams.get("action"), fd = url.searchParams.get("date"), ft = url.searchParams.get("team");
       const where = [], binds = [];
       if (ft && ["A", "B", "C"].includes(ft)) { where.push("username IN (SELECT username FROM users WHERE team = ?)"); binds.push(ft); }
@@ -2081,6 +2112,44 @@ export default {
     }
 
     // ── GET /api/rtn/board — everything the console needs in one call ─────────
+    // GET /api/rtn/board-contacts?date= : only the contact rows the board carries, so a page can refresh who owns what without the whole board.
+    if (path === "/api/rtn/board-contacts" && method === "GET") {
+      const latest = await env.DB.prepare("SELECT MAX(snapshot_date) AS d FROM player_days").first();
+      const reqDate = url.searchParams.get("date");
+      const target = reqDate && /^\d{4}-\d{2}-\d{2}$/.test(reqDate) ? reqDate : (latest && latest.d);
+      if (!target) return ok({ contacts: [] });
+      const bfc = teamAnd();
+      // ?since=<updated_at of the newest row you already have> returns only what changed after it (a few rows, read through the updated_at index).
+      // Removed rows are announced by the 'contactreset' live counter instead, and the page then asks for the full list.
+      const since = (url.searchParams.get("since") || "").replace("T", " ").slice(0, 19);
+      const base = `(snapshot_date = ? OR updated_at >= datetime('now','-7 days'))${bfc.s}`;
+      if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(since)) {
+        const cr = await env.DB.prepare(`SELECT * FROM contact_log WHERE ${base} AND updated_at >= ?`).bind(target, ...bfc.b, since).all();
+        return ok({ contacts: cr.results || [], partial: true });
+      }
+      const cr = await env.DB.prepare(`SELECT * FROM contact_log WHERE ${base}`).bind(target, ...bfc.b).all();
+      return ok({ contacts: cr.results || [] });
+    }
+
+    // POST /api/rtn/unassign { snapshot_date, team } : take every player of the team back that is assigned but not contacted yet. Players who already
+    // have a real status (contacted, responded, recovered...) keep their owner, so no contact history is lost.
+    if (path === "/api/rtn/unassign" && method === "POST") {
+      if (!can("assign.manage")) return err("Managers only", 403);
+      const b = await request.json().catch(() => ({}));
+      const brands = (TEAM_BRANDS[b.team] || []).filter((x) => brandAllowed(x));
+      if (!brands.length) return err("Unknown team", 400);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(b.snapshot_date || "")) return err("snapshot_date must be YYYY-MM-DD", 400);
+      // A bare assignment (no status, no note) is just a marker: take it away entirely, so nothing is left to be counted in Performance. A row that
+      // carries a note keeps the note and loses its owner.
+      const inB = `brand IN (${brands.map(() => "?").join(",")})`;
+      const idle = `snapshot_date = ? AND ${inB} AND assigned_to IS NOT NULL AND (status IS NULL OR status = 'ASSIGNED')`;
+      const gone = await env.DB.prepare(`DELETE FROM contact_log WHERE ${idle} AND (note IS NULL OR note = '')`).bind(b.snapshot_date, ...brands).run();
+      const kept = await env.DB.prepare(`UPDATE contact_log SET assigned_to = NULL, status = NULL, updated_by = ?, updated_at = datetime('now') WHERE ${idle}`).bind(user.username, b.snapshot_date, ...brands).run();
+      const n = (gone.meta.changes || 0) + (kept.meta.changes || 0);
+      log(user, "assign", `Unassigned ${n} player${n === 1 ? "" : "s"} · Team ${b.team}`);
+      return ok({ unassigned: n });
+    }
+
     if (path === "/api/rtn/board" && method === "GET") {
       const latest = await env.DB.prepare("SELECT MAX(snapshot_date) AS d FROM player_days").first();
       if (!latest || !latest.d) return ok({ snapshot_date: null, rows: [], contacts: [], health: [], team: [] });
@@ -2115,7 +2184,8 @@ export default {
                WHERE p2.brand = pd.brand AND p2.snapshot_date = (SELECT MAX(p3.snapshot_date) FROM player_days p3 WHERE p3.brand = pd.brand)
             ) AS newest_dep
           FROM player_days pd ${healthWhere} GROUP BY pd.brand`).bind(...healthBinds).all(),
-        env.DB.prepare(`SELECT username, role, on_leaderboard FROM users ORDER BY username`).all(),
+        env.DB.prepare(`SELECT username, role, role_key, team, on_leaderboard FROM users ORDER BY username`).all()
+          .catch(() => env.DB.prepare(`SELECT username, role, team, on_leaderboard FROM users ORDER BY username`).all()),     // schema_v27 not run yet: no role_key
         env.DB.prepare("SELECT MAX(ingested_at) AS t FROM player_days WHERE snapshot_date = ?").bind(target).first(),
         env.DB.prepare("SELECT player_key, brand, url FROM player_telegram").all(),
         showCooling ? env.DB.prepare(`
@@ -2171,7 +2241,7 @@ export default {
       return ok({
         snapshot_date: target, synced_at: sync?.t || null,
         rows: rows.results, contacts: contacts.results,
-        health: health.results, team: team.results,
+        health: health.results, team: filterPeople(team.results || [], user, roleMap, perms),
         telegram: telegram.results, cooling: cooling.results, reactivation: reactivation.results,
       });
     }
@@ -2185,13 +2255,24 @@ export default {
       if (!brandAllowed(b.brand)) return err("Not your team", 403);
       if (b.clear) {
         if (!canDelete) return err("No permission to clear contacts", 403);
+        if (!canDeleteAny) {                                   // own only: a contact somebody else logged stays
+          const was = await env.DB.prepare("SELECT updated_by FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
+            .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first();
+          if (was && was.updated_by && was.updated_by !== user.username) return err("You can only clear contacts you logged yourself", 403);
+        }
         await env.DB.prepare(
           `DELETE FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?`
         ).bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).run();
+        if (ctx) bumpArea(env, ctx, "contactreset");                      // a removed row cannot be seen by "changed since": everyone takes the full list
         log(user, "clear", `Cleared contact · ${b.player_key} (${b.brand})`);
         return ok({ cleared: true });
       }
       if (!canEdit) return NOEDIT();
+      if (!canEditAny) {                                       // own only: players assigned to someone else are off limits, and so is handing them over
+        const owner = await ownerOf(b);
+        if (owner && owner !== user.username) return OWNONLY();
+        if (b.assigned_to && b.assigned_to !== user.username) return err("You can only assign players to yourself", 403);
+      }
       // contacted_at = the real MYT calendar day the agent acted (date('now','+8 hours')),
       // NOT snapshot_date (the data day, which lags before the 15:00 feed). Set on the
       // first human write; COALESCE keeps that first-touch day on later status changes,
@@ -2233,7 +2314,7 @@ export default {
       // belongs to one agent; who actually ticks a row is recorded in filled_by.
       const agent = url.searchParams.get("agent") || null;
 
-      const conds = ["a.brand = ?", "a.tier_segment = ?", "a.active = 1"];
+      const conds = ["a.brand = ?", "a.tier_segment = ?", "a.active = 1", "a.agent IN (SELECT username FROM users)"];   // players owned by a deleted account show as unassigned
       // ? order: c=date, pdd=date, pdl=latest, pdy=date(-1 day), then brand, tier, [agent]
       const rowBinds = [date, date, latest, date, brand, tier];
       if (agent) { conds.push("a.agent = ?"); rowBinds.push(agent); }
@@ -2271,7 +2352,7 @@ export default {
                (SELECT COUNT(*) FROM player_assignment a
                  WHERE a.brand = ? AND a.tier_segment = ? AND a.active = 1 AND a.agent = u.username) AS n
           FROM users u
-         WHERE u.team = ? AND u.on_leaderboard = 1 AND u.role = 'agent'
+         WHERE u.team = ? AND u.on_leaderboard = 1
          ORDER BY u.username
       `).bind(brand, tier, teamKey).all();
 
@@ -2283,7 +2364,8 @@ export default {
          WHERE pd.snapshot_date = ? AND pd.brand = ? AND pd.tier_segment = ?
            AND NOT EXISTS (SELECT 1 FROM player_assignment a
                             WHERE a.brand = pd.brand AND a.tier_segment = pd.tier_segment
-                              AND a.player_key = pd.player_key AND a.active = 1)
+                              AND a.player_key = pd.player_key AND a.active = 1
+                          AND a.agent IN (SELECT username FROM users))
          ORDER BY pd.daily_deposit DESC, pd.player_key
       `).bind(latest, brand, tier).all();
 
@@ -2323,7 +2405,7 @@ export default {
 
     // ── POST /api/rtn/login-check/assign — set/move/retire an owner (admin only) ──
     if (path === "/api/rtn/login-check/assign" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("assign.manage")) return err("Managers only", 403);
       const b = await request.json();
       const brand = b.brand || "SK69", tier = b.tier_segment || "V";
       if (!b.player_key || !b.agent) return err("Missing player_key or agent");
@@ -2341,7 +2423,7 @@ export default {
 
     // ── POST /api/rtn/login-check/auto-assign — deal unassigned players evenly (admin) ──
     if (path === "/api/rtn/login-check/auto-assign" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("assign.manage")) return err("Managers only", 403);
       const b = await request.json().catch(() => ({}));
       const brand = b.brand || "SK69", tier = b.tier_segment || "V";
       if (!brandAllowed(brand)) return err("Not your team", 403);
@@ -2440,6 +2522,7 @@ export default {
           WITH lg AS (
             SELECT snapshot_date, contacted_at, player_key, brand, tier_segment, class, assigned_to, status, updated_by
             FROM contact_log WHERE substr(COALESCE(contacted_at, snapshot_date),1,7) = ?${pf.s}
+              AND NOT (assigned_to IS NULL AND (status IS NULL OR status = 'ASSIGNED'))      -- unassigned and not worked: nothing to track
           ),
           need AS (SELECT DISTINCT snapshot_date, brand FROM lg WHERE class IS NULL),
           rk AS (
@@ -2498,7 +2581,7 @@ export default {
       // Staff who moved OUT of the viewed team: their work on the new team's brands since the move,
       // returned separately so By CS can show it as an extra "<agent> · Team X" row (and only there —
       // By Class / By Brand stay this team's own brands).
-      const viewT = canManage ? (TEAM_BRANDS[reqTeam] ? reqTeam : null) : user.team;
+      const viewT = can("teams.all") ? (TEAM_BRANDS[reqTeam] ? reqTeam : null) : user.team;
       const moves = STAFF_MOVES.filter((m) => m.on.slice(0, 7) <= month && (m.from === viewT || m.to === viewT));
       const away = [];
       for (const m of moves.filter((x) => x.from === viewT)) {
@@ -2631,6 +2714,7 @@ export default {
       const note = (b.note || "").trim();
       if (!b.player_key || !b.brand || !note) return err("Missing player_key / brand / note");
       if (!brandAllowed(b.brand)) return err("Not your team", 403);
+      if (!canEditAny) { const owner = await ownerOf({ player_key: b.player_key, brand: b.brand }); if (owner && owner !== user.username) return OWNONLY(); }
       if (note.length > 2000) return err("Note too long");
       await env.DB.prepare(
         `INSERT INTO player_notes (player_key, brand, note, created_by, created_at)
@@ -2645,6 +2729,10 @@ export default {
       if (!canDelete) return err("No permission to delete notes", 403);
       const id = path.split("/").pop();
       if (!id) return err("Missing note id");
+      if (!canDeleteAny) {                                     // own only: a note somebody else wrote stays
+        const n = await env.DB.prepare("SELECT created_by FROM player_notes WHERE id = ?").bind(id).first();
+        if (n && n.created_by && n.created_by !== user.username) return err("You can only delete notes you wrote yourself", 403);
+      }
       await env.DB.prepare("DELETE FROM player_notes WHERE id = ?").bind(id).run();
       log(user, "note", `Deleted note #${id}`);
       return ok({ deleted: true });
@@ -2687,6 +2775,7 @@ export default {
       const b = await request.json();
       if (!b.player_key || !b.brand) return err("Missing player_key / brand");
       if (!brandAllowed(b.brand)) return err("Not your team", 403);
+      if (!canEditAny) { const owner = await ownerOf({ player_key: b.player_key, brand: b.brand }); if (owner && owner !== user.username) return OWNONLY(); }
       await env.DB.prepare(`
         INSERT INTO player_crm (player_key, brand, next_followup, updated_by, updated_at)
         VALUES (?, ?, ?, ?, datetime('now'))
@@ -2719,7 +2808,7 @@ export default {
 
     // DELETE /api/rtn/livechat/:id — remove a log entry (managers only — it's an audit trail)
     if (path.startsWith("/api/rtn/livechat/") && method === "DELETE") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const id = path.split("/").pop();
       if (!id) return err("Missing id");
       await env.DB.prepare("DELETE FROM livechat_log WHERE id = ?").bind(id).run();
@@ -2735,6 +2824,7 @@ export default {
       // Single-player edit from the drawer: { player_key, brand, url }. Empty url removes the link.
       if (b.player_key && b.brand && !Array.isArray(b.rows)) {
         const pk = String(b.player_key).trim(), brand = String(b.brand).trim(), u = String(b.url || "").trim();
+        if (!canEditAny) { const owner = await ownerOf({ player_key: pk, brand }); if (owner && owner !== user.username) return OWNONLY(); }
         if (!u) {
           await env.DB.prepare(`DELETE FROM player_telegram WHERE player_key = ? AND brand = ?`).bind(pk, brand).run();
           log(user, "telegram", `Removed Telegram link · ${pk} (${brand})`);
@@ -2781,7 +2871,7 @@ export default {
     // POST /api/rtn/engagement-sync?date=YYYY-MM-DD — run the Lark engagement count now (managers).
     // &dry=1 → count only, writes nothing.
     if (path === "/api/rtn/engagement-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await larkEngagementSync(env, { date: url.searchParams.get("date"), dryRun });
@@ -2793,7 +2883,7 @@ export default {
     // POST /api/rtn/feeders/run — start every brand's feeder now, same as the 12:15 cron (managers).
     // ?dry=1 → only list how many feeder URLs are configured; starts nothing.
     if (path === "/api/rtn/feeders/run" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       if (url.searchParams.get("dry") === "1") return ok({ dryRun: true, configured: feederUrls(env).length });
       const r = await kickFeeders(env);
       log(user, "feed", `Feeders started by hand · ${r.ok ?? 0}/${r.kicked ?? 0} ok`);
@@ -2814,7 +2904,7 @@ export default {
     // POST /api/rtn/engagement-sync?date=YYYY-MM-DD — run the Lark engagement count now (managers).
     // &dry=1 → count only, writes nothing.
     if (path === "/api/rtn/engagement-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await larkEngagementSync(env, { date: url.searchParams.get("date"), dryRun });
@@ -2827,7 +2917,7 @@ export default {
     // ?dry=1 → counts (incl. how many stored links would be removed) + sample only, writes nothing.
     // ?force=1 → allow a run even if Lark returns less than half of the stored links (the safety stop).
     if (path === "/api/rtn/lark-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await larkTelegramSync(env, { dryRun, force: url.searchParams.get("force") === "1" });
@@ -2839,7 +2929,7 @@ export default {
     // POST /api/rtn/feed-check — run the daily feed-health check now (managers).
     // ?dry=1 → compute + return the card JSON, post nothing. Otherwise posts to Lark.
     if (path === "/api/rtn/feed-check" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       try {
         const r = await feedCheckReport(env, { dryRun });
@@ -2867,7 +2957,7 @@ export default {
        excuse to coast. */
     if (path === "/api/rtn/contact-rate" && method === "GET") {
       const reqT = url.searchParams.get("team");
-      const team = canManage ? (TEAM_BRANDS[reqT] ? reqT : (user.team || "B")) : user.team;
+      const team = can("teams.all") ? (TEAM_BRANDS[reqT] ? reqT : (user.team || "B")) : user.team;
       const brands = TEAM_BRANDS[team];
       if (!brands) return err(`unknown team ${team || "(none)"}`, 400);
       const ph = brands.map(() => "?").join(",");
@@ -2943,12 +3033,12 @@ export default {
     }
 
     if (path === "/api/rtn/auto-assign" && method === "GET") {
-      const off = canManage ? (url.searchParams.get("off") || "").split(",").map((s) => s.trim()).filter(Boolean) : [];
-      const team = canManage ? (TEAM_BRANDS[reqTeam] ? reqTeam : (user.team || "B")) : user.team;
+      const off = can("assign.manage") ? (url.searchParams.get("off") || "").split(",").map((s) => s.trim()).filter(Boolean) : [];
+      const team = can("teams.all") ? (TEAM_BRANDS[reqTeam] ? reqTeam : (user.team || "B")) : user.team;
       const batch = url.searchParams.get("batch");
       try {
         const res = await computeAutoAssign(env, { off, team, batch });
-        if (canManage || res.skipped) return ok(res);
+        if (can("assign.manage") || res.skipped) return ok(res);
         const self = user.username;
         return ok({ ...res, pics: (res.pics || []).includes(self) ? [self] : [],
           assignments: { [self]: (res.assignments && res.assignments[self]) || [] },
@@ -2960,7 +3050,7 @@ export default {
     // ?dry=1 computes and reports the counts without writing a single row. This is the
     // same function the daily cron calls, so a dry run here proves the real job.
     if (path === "/api/rtn/auto-assign/run" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("assign.manage")) return err("Managers only", 403);
       const dryRun = url.searchParams.get("dry") === "1";
       if (!dryRun && !AUTO_ASSIGN_ENABLED) return err("Auto-assign is OFF — flip AUTO_ASSIGN_ENABLED and redeploy, or use ?dry=1", 400);
       const off = (url.searchParams.get("off") || "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -2975,7 +3065,7 @@ export default {
     // ?base=<app_token> → look at another Base (read-only). Without ?table it then lists table ids/names only.
     // &raw=1 with ?table&n → return the first n records' fields as-is (any table shape).
     if (path === "/api/rtn/lark-debug" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("data.sync")) return err("Managers only", 403);
       try {
         const token = await larkToken(env);
         const baseQ = url.searchParams.get("base");
@@ -3088,7 +3178,7 @@ export default {
     // ── POST /api/rtn/campaign/event — create + shuffle + assign (managers) ──
     // Body: { event_date, brand, tier_segment, bands:[{label, code, amount}] }
     if (path === "/api/rtn/campaign/event" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       const day = String(b.event_date || "").trim();
       const brand = String(b.brand || "").trim();
@@ -3114,7 +3204,7 @@ export default {
     // ── POST /api/rtn/campaign/auto-create — run the 00:00 job now (managers) ──
     // Same code path the cron uses, so testing it proves the real thing works.
     if (path === "/api/rtn/campaign/auto-create" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const dry = url.searchParams.get("dry") === "1";
       const r = await autoCreateEvents(env, { dry });
       if (!dry) log(user, "campaign", `Ran auto-create manually · ${JSON.stringify(r)}`);
@@ -3123,7 +3213,7 @@ export default {
 
     // ── POST /api/rtn/campaign/bands — set/replace the 2 codes (managers, draft only) ──
     if (path === "/api/rtn/campaign/bands" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(b.event_id).first();
       if (!ev) return err("Event not found", 404);
@@ -3143,7 +3233,7 @@ export default {
     // managers exporting at once cannot both believe they locked it. Re-downloads
     // are always allowed (a lost file is not a reason to reshuffle).
     if (path === "/api/rtn/campaign/export" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const eventId = Number(url.searchParams.get("event_id"));
       const label = String(url.searchParams.get("label") || "").toUpperCase();
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(eventId).first();
@@ -3188,7 +3278,7 @@ export default {
     // the event, so it can be pulled any number of times during the day as the
     // list shrinks. Same BO upload shape (one column, user_id).
     if (path === "/api/rtn/campaign/unclaimed" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const eventId = Number(url.searchParams.get("event_id"));
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(eventId).first();
       if (!ev) return err("Event not found", 404);
@@ -3280,7 +3370,7 @@ export default {
 
     // ── GET /api/rtn/campaign/assignments?event_id=&view= — the tables (managers) ──
     if (path === "/api/rtn/campaign/assignments" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const eventId = Number(url.searchParams.get("event_id"));
       const view = String(url.searchParams.get("view") || "all");
       const where = view === "claimed" ? " AND a.claimed = 1"
@@ -3297,7 +3387,7 @@ export default {
 
     // ── GET /api/rtn/campaign/report?date= — per-brand + per-code result (managers) ──
     if (path === "/api/rtn/campaign/report" && method === "GET") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const d = url.searchParams.get("date");
       const day = d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : snapshotDateMYT();
       // Scope every section to one team. by_brand used to be filtered in the
@@ -3341,7 +3431,7 @@ export default {
     // read-then-write, so an export landing mid-request cannot slip through:
     // if it flipped to 'exported', all three statements no-op together.
     if (path === "/api/rtn/campaign/delete" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       const id = Number(b.event_id);
       const ev = await env.DB.prepare("SELECT * FROM code_events WHERE id = ?").bind(id).first();
@@ -3374,7 +3464,7 @@ export default {
 
     // ── POST /api/rtn/campaign/close — end the event (managers) ──
     if (path === "/api/rtn/campaign/close" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("campaigns.manage")) return err("Managers only", 403);
       const b = await request.json();
       await env.DB.prepare(
         "UPDATE code_events SET status = 'closed', closed_by = ?, closed_at = datetime('now') WHERE id = ? AND status = 'exported'"
@@ -3601,7 +3691,7 @@ export default {
 
     // POST /api/rtn/mistakes — add a mistake { month, agent, category, points, note, brand } (admin only)
     if (path === "/api/rtn/mistakes" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("mistakes.log")) return err("Managers only", 403);
       const b = await request.json();
       if (!b.month || !/^\d{4}-\d{2}$/.test(b.month) || !b.agent || !b.category) return err("Missing month / agent / category");
       const pts = (b.points === "" || b.points == null || isNaN(b.points)) ? 1 : Number(b.points);
@@ -3615,7 +3705,7 @@ export default {
 
     // DELETE /api/rtn/mistakes/:id (admin only)
     if (path.startsWith("/api/rtn/mistakes/") && method === "DELETE") {
-      if (!canManage) return err("Managers only", 403);
+      if (!can("mistakes.log")) return err("Managers only", 403);
       const id = path.split("/").pop();
       if (!id) return err("Missing id");
       await env.DB.prepare("DELETE FROM mistakes WHERE id = ?").bind(id).run();
@@ -3667,7 +3757,7 @@ export default {
 
     // ── POST /api/upload — save daily data batch ───────────────────────────────
     if (path === "/api/upload" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);   // legacy v1 write — restrict to managers
+      if (!can("data.sync")) return err("Managers only", 403);   // legacy v1 write — restrict to managers
       const { date, brand, players: rows, filename } = await request.json();
       if (!date || !brand || !rows || !filename) return err("Missing fields");
 
@@ -3738,9 +3828,22 @@ export default {
     // ── GET /api/users (admin only — enforced) ─────────────────────────────────
     if (path === "/api/users" && method === "GET") {
       if (!canManage) return err("Managers only", 403);
-      const users = await env.DB.prepare(
-        "SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
-      ).all();
+      let users;
+      try {
+        users = await env.DB.prepare(
+          "SELECT id, username, role, role_key, perm_overrides, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+        ).all();
+      } catch (e) {
+        try {   // schema_v28 not run yet: no perm_overrides column
+          users = await env.DB.prepare(
+            "SELECT id, username, role, role_key, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+          ).all();
+        } catch (e2) {   // schema_v27 not run yet: no role_key column
+          users = await env.DB.prepare(
+            "SELECT id, username, role, can_edit, can_delete, on_leaderboard, manage_users, team, created_at, last_login FROM users ORDER BY created_at ASC"
+          ).all();
+        }
+      }
       return ok(users.results);
     }
 
@@ -3754,6 +3857,19 @@ export default {
       const f = (v) => (v ? 1 : 0);
       const newTeam = ["A", "B", "C"].includes(b.team) ? b.team : null;
       try {
+        const roleMap = b.role_key ? await loadRoles(env.DB) : null;
+        const picked = b.role_key && roleMap ? roleMap.get(b.role_key) : null;
+        if (b.role_key && !picked) return err("Unknown role", 400);
+        if (picked) {
+          // a role decides the old columns too, so every query that still reads them agrees
+          const perms = rolePerms(picked, roleMap), f2 = (k) => (perms.has(k) ? 1 : 0), lc = legacyColumns(picked, roleMap);
+          await env.DB.prepare(
+            "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team, role_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+          ).bind(b.username.trim().toLowerCase(), hash, legacyColumns(picked, roleMap).role,
+            lc.can_edit, lc.can_delete, f2("kpi.scored"), f2("users.manage"), newTeam, picked.key).run();
+          log(user, "user", `Created account · ${b.username.trim().toLowerCase()} (${picked.name})`);
+          return ok({ message: "User created" });
+        }
         await env.DB.prepare(
           "INSERT INTO users (username, password_hash, role, can_edit, can_delete, on_leaderboard, manage_users, team) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         ).bind(b.username.trim().toLowerCase(), hash, b.role || "viewer",
@@ -3785,6 +3901,9 @@ export default {
       await env.DB.prepare(
         "UPDATE users SET role = ?, can_edit = ?, can_delete = ?, on_leaderboard = ?, manage_users = ?, team = ? WHERE id = ?"
       ).bind(b.role || "viewer", f(b.can_edit), f(b.can_delete), f(b.on_leaderboard), mgr, permTeam, b.id).run();
+      // the old editor sets the flags by hand, so this account leaves the role system until a role is picked again
+      try { await env.DB.prepare("UPDATE users SET role_key = NULL WHERE id = ?").bind(b.id).run(); } catch (e) { /* schema_v27 not run: no column */ }
+      try { await env.DB.prepare("UPDATE users SET perm_overrides = NULL WHERE id = ?").bind(b.id).run(); } catch (e) { /* schema_v28 not run: no column */ }
       log(user, "perm", `Set permissions → ${b.role || "viewer"} · user #${b.id}`);
       return ok({ saved: true });
     }
@@ -3801,7 +3920,9 @@ export default {
         if ((others?.c || 0) === 0) return err("Can't delete the last manager — promote someone else first", 400);
       }
       await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
-      log(user, "user", `Deleted account · ${target.username}`);
+      // release the players this account owned, so they show as unassigned and get dealt to someone who is still here
+      const released = await env.DB.prepare("UPDATE player_assignment SET active = 0 WHERE agent = ? AND active = 1").bind(target.username).run();
+      log(user, "user", `Deleted account · ${target.username}${released.meta && released.meta.changes ? ` (released ${released.meta.changes} assigned players)` : ""}`);
       return ok({ message: "User deleted" });
     }
 
@@ -3892,4 +4013,14 @@ export default {
       }
     }
   },
+};
+
+// Every request goes through route(); a successful change then bumps its area's live counter (worker/work/pulse.js).
+export default {
+  async fetch(request, env, ctx) {
+    const res = await worker.route(request, env, ctx);
+    liveBump(request, res, env, ctx);
+    return res;
+  },
+  scheduled: async (event, env, ctx) => { await worker.scheduled(event, env, ctx); bumpArea(env, ctx, "contactreset"); },   // the jobs may have assigned players
 };

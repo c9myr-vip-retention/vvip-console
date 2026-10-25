@@ -1,0 +1,8 @@
+/* DEV ONLY. Page-level tokens that src/App.jsx <Style> normally provides on :root (live console values). Component classes come from ../revamp.css. */
+:root{
+  --bg:#0B0E13; --panel:#12161E; --panel2:#171C26; --line:#232A37; --txt:#E7EAF0; --dim:#8B94A7;
+  --gold:#D4AF37; --accent:#E9E3D3; --neg:#F2727F; --pos:#4CC38A;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--txt)}

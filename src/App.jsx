@@ -1,6 +1,16 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { buildMessage, buildInstruction, buildHooks, buildAngles, buildHistoryHooks } from "./messageLibrary";
 import { phrase, newPatterns } from "./reportPhrases";
+import RevampShell from "./revamp/Shell.jsx";
+import { scopeLiveCss } from "./revamp/scopeCss.js";
+import { NativeSelect } from "./revamp/ui/index.jsx";
+import { readFlag } from "./flags.js";
+import { scopeTeam } from "./revamp/scope.js";
+import { can as canDo } from "./revamp/perms.js";
+import { useLive, useLiveTick } from "./revamp/live.js";
+
+// The newest updated_at among contact rows that came from the server ("changed since" asks for everything after it).
+const newestStamp = (list) => (list || []).reduce((m, c) => (c.updated_at && c.updated_at > m ? c.updated_at : m), "");
 
 /* ════════════════════════════════════════════════════════════════════
    GROUP B · VIP RTN CONSOLE  v2.1
@@ -8,9 +18,9 @@ import { phrase, newPatterns } from "./reportPhrases";
    sequence cards activate as daily history accumulates.
    ════════════════════════════════════════════════════════════════════ */
 
-const API_BASE = import.meta.env.VITE_API_BASE || "https://groupb-tracker-api.viprtn.workers.dev";   // VITE_API_BASE only for a local preview
+export const API_BASE = import.meta.env.VITE_API_BASE || "https://groupb-tracker-api.viprtn.workers.dev";   // VITE_API_BASE only for a local preview
 
-const BRANDS = {
+export const BRANDS = {
   LPK777: { p: "#7C3AED", a: "#D4AF37", txt: "#E9D5FF", prov: "TC" },
   ACE33:  { p: "#6D28D9", a: "#D946EF", txt: "#F5D0FE", prov: "TC" },
   BM69:   { p: "#4338CA", a: "#FFD23F", txt: "#C7D2FE", prov: "ZY" },
@@ -39,19 +49,19 @@ const BRANDS = {
   AC69:   { p: "#B45309", a: "#FBBF24", txt: "#FDE68A", prov: "ZY" },
   OG:     { p: "#0F766E", a: "#5EEAD4", txt: "#99F6E4", prov: "ZY" },   // onboarded 2026-09-10
 };
-const BRAND_ORDER = ["LPK777", "ACE33", "BM69", "HOT321", "RM68", "SK69", "JK32", "ZAS36"];
+export const BRAND_ORDER = ["LPK777", "ACE33", "BM69", "HOT321", "RM68", "SK69", "JK32", "ZAS36"];
 
 // Brand → team map (keep in sync with TEAM_BRANDS in worker/index.js).
-const TEAMS = {
+export const TEAMS = {
   A: ["JOM99", "EZ96", "PP96", "BIG321", "FUN36", "JUS22", "YES82", "SA"],
   B: ["LPK777", "BM69", "HOT321", "RM68", "SK69", "ACE33", "JK32", "ZAS36"],
   C: ["SPIN321", "MY36", "VS96", "ONG66", "RUSH33", "MAX39", "OMG67", "AC69", "OG"],
 };
-const TEAM_KEYS = ["A", "B", "C"];
+export const TEAM_KEYS = ["A", "B", "C"];
 
 // Colour channels (batch 1): each hue family carries one meaning. Quiet-days classes are one
 // cold ramp (darker = silent longer); TOP_LOSS/TOP_DEP match money neg/pos; GRACE is the only yellow.
-const CLASSES = {
+export const CLASSES = {
   GRACE:    { label: "GRACE",       color: "#E8C547", desc: "Tier deadline ≤3 days — act today" },
   TOP_LOSS: { label: "TOP LOSS",    color: "#F2727F", desc: "Top-20 net loss today (per brand)" },
   TOP_DEP:  { label: "TOP DEPOSIT", color: "#4CC38A", desc: "Top-20 deposit + winning today" },
@@ -62,14 +72,15 @@ const CLASSES = {
   WATCH:    { label: "WATCH",       color: "#8893A7", desc: "Quiet 3–6 days — observe, no contact" },
   HEALTHY:  { label: "HEALTHY",     color: "#64748B", desc: "No action — restraint is the action" },
 };
-const CLASS_ORDER = ["GRACE","TOP_LOSS","TOP_DEP","BLOCKED","DSLD30","DSLD14","DSLD7","WATCH","HEALTHY"];
-const RISK = { GRACE:3, TOP_LOSS:3, BLOCKED:2, DSLD30:2, DSLD14:2, DSLD7:2, TOP_DEP:1, WATCH:1, HEALTHY:0 };
-const STATUSES = ["ASSIGNED","CONTACTED","RESPONDED","RECOVERED","NO_RESPONSE","SKIPPED"];
+export const CLASS_ORDER = ["GRACE","TOP_LOSS","TOP_DEP","BLOCKED","DSLD30","DSLD14","DSLD7","WATCH","HEALTHY"];
+export const RISK = { GRACE:3, TOP_LOSS:3, BLOCKED:2, DSLD30:2, DSLD14:2, DSLD7:2, TOP_DEP:1, WATCH:1, HEALTHY:0 };
+export const STATUSES = ["ASSIGNED","CONTACTED","RESPONDED","RECOVERED","NO_RESPONSE","SKIPPED"];
 // Status = a pipeline: grey, teal, green as the player moves forward. No response is an outcome, not an alarm.
-const ST_COLOR = { ASSIGNED:"#8A94A6", CONTACTED:"#56B6C2", RESPONDED:"#3FA7A0", RECOVERED:"#4CC38A", NO_RESPONSE:"#7A8294", SKIPPED:"#64748B" };
+export const ST_COLOR = { ASSIGNED:"#8A94A6", CONTACTED:"#56B6C2", RESPONDED:"#3FA7A0", RECOVERED:"#4CC38A", NO_RESPONSE:"#7A8294", SKIPPED:"#64748B" };
 
 /* ── helpers ─────────────────────────────────────────────────────── */
-async function api(path, options = {}) {
+export async function api(path, options = {}) {
+  path = path.replace(/([?&])team=ALL(&|$)/, (m, a, b) => (b ? a : ""));           // "All teams" in the selector = no team filter
   const token = localStorage.getItem("session_token");
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -90,7 +101,7 @@ async function api(path, options = {}) {
        the click appeared to do nothing at all.
    Now: try the real API, fall back to a hidden textarea + execCommand (works over http and
    in most in-app browsers), and return true/false so callers can tell the truth. */
-async function copyText(text) {
+export async function copyText(text) {
   const s = String(text ?? "");
   if (!s) return false;
   try {
@@ -116,7 +127,7 @@ async function copyText(text) {
    the Mac users saw it.)
    ClipboardItem accepts a PROMISE, so we hand the clipboard a placeholder synchronously and
    let the fetches resolve into it. Callers must NOT await anything before calling this. */
-async function copyTextPromise(promise) {
+export async function copyTextPromise(promise) {
   try {
     if (window.isSecureContext && navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
       const blob = promise.then((t) => new Blob([String(t ?? "")], { type: "text/plain" }));
@@ -126,12 +137,12 @@ async function copyTextPromise(promise) {
   } catch (e) { /* Safari can still refuse — fall through and try the plain path */ }
   try { return await copyText(await promise); } catch (e) { return false; }
 }
-const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString("en-MY", { maximumFractionDigits: 0 }));
-const fmtRM = (n) => (n == null ? "—" : "RM " + fmt(n));
+export const fmt = (n) => (n == null ? "—" : Number(n).toLocaleString("en-MY", { maximumFractionDigits: 0 }));
+export const fmtRM = (n) => (n == null ? "—" : "RM " + fmt(n));
 
 // Tolerant number parse: some brands (e.g. RM68) feed comma-decimal text ("78,06", "-1.234,56")
 // that lands in D1 as TEXT. Left raw it poisons sums (→ "RM NaN") and value-based classification.
-const toNum = (v) => {
+export const toNum = (v) => {
   if (v == null || v === "") return 0;
   if (typeof v === "number") return v;
   let s = String(v).trim();
@@ -140,26 +151,26 @@ const toNum = (v) => {
   return isNaN(n) ? 0 : n;
 };
 // Numeric columns to normalize at classify time (leave counts/ids/dates as-is).
-const NUMERIC_FIELDS = ["daily_deposit", "daily_deposit_count", "daily_withdraw", "daily_withdraw_count",
+export const NUMERIC_FIELDS = ["daily_deposit", "daily_deposit_count", "daily_withdraw", "daily_withdraw_count",
   "monthly_deposit", "monthly_deposit_count", "monthly_withdraw", "monthly_withdraw_count",
   "lifetime_deposit", "lifetime_withdraw", "bet", "valid_bet", "win_loss", "pnl", "member_days", "status_days"];
-const fmtK = (n) => { const v = Number(n) || 0, a = Math.abs(v); return a >= 1e6 ? "RM " + (v / 1e6).toFixed(1) + "M" : a >= 1e3 ? "RM " + Math.round(v / 1e3) + "k" : "RM " + Math.round(v); };
-const days = (a, b) => (!a || !b ? null : Math.floor((new Date(b) - new Date(a)) / 86400000));
-const ckey = (r) => `${r.player_key}|${r.brand}|${r.tier_segment}`;
+export const fmtK = (n) => { const v = Number(n) || 0, a = Math.abs(v); return a >= 1e6 ? "RM " + (v / 1e6).toFixed(1) + "M" : a >= 1e3 ? "RM " + Math.round(v / 1e3) + "k" : "RM " + Math.round(v); };
+export const days = (a, b) => (!a || !b ? null : Math.floor((new Date(b) - new Date(a)) / 86400000));
+export const ckey = (r) => `${r.player_key}|${r.brand}|${r.tier_segment}`;
 /* Keyboard access for clickable rows/cards that aren't <button>s: Tab reaches them, Enter/Space acts.
    Table rows pass role=null to keep table semantics. Keys inside nested inputs are left alone. */
-const tap = (fn, role = "button") => ({ onClick: fn, tabIndex: 0, ...(role ? { role } : {}),
+export const tap = (fn, role = "button") => ({ onClick: fn, tabIndex: 0, ...(role ? { role } : {}),
   onKeyDown: (e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); fn(e); } } });
-const HIST_CACHE = new Map(); // ckey -> player daily series (per session, drawer memory hooks)
-const looksNumeric = (s) => !s || /^[\d.]+$/.test(String(s).trim());
+export const HIST_CACHE = new Map(); // ckey -> player daily series (per session, drawer memory hooks)
+export const looksNumeric = (s) => !s || /^[\d.]+$/.test(String(s).trim());
 /* Only render/open http(s) links — blocks javascript:/data: URLs that could run as stored XSS */
-const safeHttpUrl = (u) => (/^https?:\/\//i.test(String(u || "").trim()) ? String(u).trim() : null);
+export const safeHttpUrl = (u) => (/^https?:\/\//i.test(String(u || "").trim()) ? String(u).trim() : null);
 /* Account id: Zyra brands key on the UID, TC brands on the username. Machine-readable — use
    this for exports and anything pasted into BO, never for showing an agent who a player is. */
-const dispId = (r) => (BRANDS[r.brand]?.prov === "ZY" ? (r.uid || r.username) : (r.username || r.uid));
+export const dispId = (r) => (BRANDS[r.brand]?.prov === "ZY" ? (r.uid || r.username) : (r.username || r.uid));
 /* The player's real name, when the feed carries one. `addressing` holds it ("Mr. Goh",
    "Akak Weng Sam"); it can also be blank, "-", or junk, so those are rejected. */
-const realName = (r) => {
+export const realName = (r) => {
   const a = String((r && r.addressing) || "").trim();
   return a && a !== "-" && !looksNumeric(a) ? a : null;
 };
@@ -171,18 +182,18 @@ const realName = (r) => {
    for Zyra. The player's name is real but it is a CS-maintained salutation that gets edited
    often (one player changed name 12 times in 30 days), so it belongs underneath as context,
    never as the identifier. */
-const dispName = (r) => dispId(r);
+export const dispName = (r) => dispId(r);
 /* Telegram availability flag — shown next to a player's name wherever it appears */
-const TgFlag = ({ on }) => (on ? <span className="tg-flag" title="On Telegram">✈</span> : null);
+export const TgFlag = ({ on }) => (on ? <span className="tg-flag" title="On Telegram">✈</span> : null);
 /* Convert UTC ingest timestamp -> Malaysia clock HH:MM */
-const mytClock = (ts) => {
+export const mytClock = (ts) => {
   if (!ts) return "";
   const d = new Date(String(ts).replace(" ", "T") + "Z");
   return isNaN(d) ? "" : new Date(d.getTime() + 8 * 3600e3).toISOString().slice(11, 16);
 };
 
 /* ── Blast export: filtered queue → CSV download + usernames to clipboard ── */
-function exportQueue(rows, snap, label, contactMap) {
+export function exportQueue(rows, snap, label, contactMap) {
   if (!rows.length) return;
   const cm = contactMap || {};
   // CSV-safe: neutralise Excel formula injection (leading = + - @), then quote/escape as needed.
@@ -218,12 +229,12 @@ function exportQueue(rows, snap, label, contactMap) {
 /* ── Paste-list select: "username brand" lines → ckeys to tick in the Table ──
    Brand may be the full name (SPIN321) or the short code (spin). The player token may be the
    username, the uid or the player_key. One pair per line; separators: space, tab, comma, ; or |. */
-const BRAND_ALIAS = (() => {
+export const BRAND_ALIAS = (() => {
   const m = {};
   for (const b of Object.keys(BRANDS)) { m[b.toLowerCase()] = b; m[b.toLowerCase().replace(/\d+$/, "")] = b; }
   return m;
 })();
-function parsePasteList(text, rows) {
+export function parsePasteList(text, rows) {
   const idx = new Map();   // "token|BRAND" -> row
   for (const r of rows) for (const t of [r.username, r.uid, r.player_key]) {
     const s = String(t || "").trim().toLowerCase();
@@ -250,7 +261,7 @@ function parsePasteList(text, rows) {
 }
 
 /* ── Phase-1 classification (Behavior Book precedence) ──────────── */
-function classifyAll(rows, snap) {
+export function classifyAll(rows, snap) {
   // Derive player net (pnl) where the feed omitted it — only BM69 sends pnl, but every brand sends
   // lifetime figures, and pnl is exactly lifetime_withdraw - lifetime_deposit (verified against fed values).
   // This makes value-based logic (whales, Priority, at-risk, sorting) work across all 6 brands.
@@ -301,18 +312,18 @@ function classifyAll(rows, snap) {
 }
 
 /* ── Worklist bands (action-first grouping of the queue) ───────────── */
-const WL_BANDS = [
+export const WL_BANDS = [
   { key: "ACT",     label: "ACT NOW",  color: "var(--band-act)", desc: "Cooling whales, deadlines & big losses — handle personally, today" },
   { key: "TODAY",   label: "TODAY",    color: "var(--band-today)", desc: "Today's movers — losses, big deposits, funding gaps" },
   { key: "WINBACK", label: "WIN-BACK", color: "var(--band-win)", desc: "Gone quiet — bring them back" },
 ];
-const WL_NONE = { key: "NONE", label: "NO ACTION", color: "#64748B", desc: "restraint is the action" };
+export const WL_NONE = { key: "NONE", label: "NO ACTION", color: "#64748B", desc: "restraint is the action" };
 
 
 /* The one key number for the right-aligned amount column */
 // Day counts spelled out ("6 days", not "6d") so newer agents read them without decoding.
-const dayCount = (n) => (n == null ? "? days" : `${n} ${n === 1 ? "day" : "days"}`);
-function keyMetric(p) {
+export const dayCount = (n) => (n == null ? "? days" : `${n} ${n === 1 ? "day" : "days"}`);
+export function keyMetric(p) {
   switch (p._cls) {
     case "GRACE":    return dayCount(p._graceDays);
     case "TOP_LOSS": return `RM ${fmt(Math.abs(p.win_loss ?? 0))}`;
@@ -325,7 +336,7 @@ function keyMetric(p) {
 }
 
 /* ════════════════════════ DROPDOWN (hover/click filter menus) ════════════════════════ */
-function Dropdown({ label, value, items, onPick, multi }) {
+export function Dropdown({ label, value, items, onPick, multi }) {
   const [open, setOpen] = useState(false);
   const timer = useRef(null);
   const openNow = () => { if (timer.current) clearTimeout(timer.current); timer.current = null; setOpen(true); };
@@ -355,7 +366,7 @@ function Dropdown({ label, value, items, onPick, multi }) {
 }
 
 /* ════════════════════════ LOGIN ════════════════════════ */
-function Login({ onLogin }) {
+export function Login({ onLogin }) {
   const [mode, setMode] = useState("login");
   const [u, setU] = useState(""); const [p, setP] = useState("");
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
@@ -395,7 +406,7 @@ function Login({ onLogin }) {
 // Deterministic "smart read" — assembles a plain-English situation + recommended tone from the player's
 // OWN data. No LLM: instant, RG-safe, explainable. It advises the AGENT; the customer message still
 // comes from the approach angles below. Upgrade path later = a live model (Workers AI) for richer prose.
-function whaleSummary(p) {
+export function whaleSummary(p) {
   const s = [];
   const risk = p._cool2 ? p._cool2.risk : null;
   if (risk != null) {
@@ -420,7 +431,7 @@ function whaleSummary(p) {
   return { read: s.join(" ") || (CLASSES[p._cls] ? CLASSES[p._cls].desc : "Steady — no action needed today."), tone };
 }
 
-function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClear, onClose, readOnly }) {
+export function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClear, onClose, readOnly }) {
   const p = list[index];
   const c = BRANDS[p.brand] || {};
   const ap = buildMessage(p);
@@ -496,6 +507,12 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
       .catch(() => { if (alive) setCrmHist([]); });
     return () => { alive = false; };
   }, [index]);
+  // Someone added a note or a follow-up on this player: refresh the ledger without touching what is being typed.
+  useLive(["player"], () => {
+    const pq = `player_key=${encodeURIComponent(p.player_key)}&brand=${encodeURIComponent(p.brand)}`;
+    api(`/api/rtn/notes?${pq}`).then((d) => setNotes(d.notes || [])).catch(() => {});
+    api(`/api/rtn/crm?${pq}`).then((d) => { setCrmHist(d.history || []); setLivechat(d.livechat || []); if (!tgEdit) setTgUrl(d.telegram_url || null); }).catch(() => {});
+  });
   // Asked on demand (one click), not on every drawer open: each lookup is ~11 Lark reads shared with the widget.
   async function checkBonuses() {
     const key = ckey(p);
@@ -855,10 +872,10 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
         {/* WORKFLOW */}
         <div className="dsec">Action log{readOnly ? " — read-only" : ""}</div>
         <div className="wf-row">
-          <select value={assign} disabled={readOnly} onChange={(e) => { setAssign(e.target.value); save({ assigned_to: e.target.value, status: status || "ASSIGNED" }); if (!status) setStatus("ASSIGNED"); }}>
+          <NativeSelect value={assign} disabled={readOnly} onChange={(e) => { setAssign(e.target.value); save({ assigned_to: e.target.value, status: status || "ASSIGNED" }); if (!status) setStatus("ASSIGNED"); }}>
             <option value="">Assign to…</option>
             {team.map((t) => <option key={t.username} value={t.username}>{t.username}</option>)}
-          </select>
+          </NativeSelect>
         </div>
         <div className="wf-status">
           {[["set", ["ASSIGNED", "CONTACTED", "RESPONDED"]], ["auto", ["RECOVERED", "NO_RESPONSE", "SKIPPED"]]].map(([grp, list]) => (
@@ -941,9 +958,9 @@ function Drawer({ list, index, setIndex, snap, me, team, contact, onSave, onClea
 
 /* Custom dark calendar for snapshot dates. Days without data are disabled;
    month nav is bounded to the available range. Replaces the native date input. */
-const CAL_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-function fmtDate(iso) { const [y, m, d] = iso.split("-").map(Number); return `${d} ${CAL_MON[m - 1]} ${y}`; }
-function DateCalendar({ cur, newest, oldest, avail, readOnly, onPick }) {
+export const CAL_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function fmtDate(iso) { const [y, m, d] = iso.split("-").map(Number); return `${d} ${CAL_MON[m - 1]} ${y}`; }
+export function DateCalendar({ cur, newest, oldest, avail, readOnly, onPick }) {
   const [open, setOpen] = useState(false);
   const [mon, setMon] = useState(() => cur.slice(0, 7));  // "YYYY-MM" being shown
   const ref = useRef(null);
@@ -994,7 +1011,7 @@ function DateCalendar({ cur, newest, oldest, avail, readOnly, onPick }) {
 /* Money calendar — drawer popup. Same compact look as DateCalendar, but each day is coloured by
    that day's result (withdraw > deposit = won, else lost, 0/0 = no play) and clicking a day shows
    its numbers. Days are REAL game days (snapshot − 1), matching the SPV sheet and Lost & gone. */
-function MoneyCalendar({ hist, snap }) {
+export function MoneyCalendar({ hist, snap }) {
   const byDay = useMemo(() => {
     const m = {};
     (hist || []).forEach((h) => { if (h.snapshot_date <= snap) m[shiftDate(h.snapshot_date, -1)] = h; });
@@ -1060,7 +1077,7 @@ function MoneyCalendar({ hist, snap }) {
 
 /* Shared snapshot-date bar: Today/Yesterday/−7d quick jumps + the calendar.
    Sits above every data tab; drives the global viewDate (which refetches the board). */
-function SnapshotPicker({ dates, viewDate, setViewDate, isPast }) {
+export function SnapshotPicker({ dates, viewDate, setViewDate, isPast }) {
   if (!dates || dates.length === 0) return null;
   const newest = dates[0].snapshot_date;
   const oldest = dates[dates.length - 1].snapshot_date;
@@ -1094,7 +1111,7 @@ function SnapshotPicker({ dates, viewDate, setViewDate, isPast }) {
 }
 
 /* ════════════════════════ QUEUE ════════════════════════ */
-function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, contacts, health, onSaveContact, onClearContact, readOnly, dates, viewDate, setViewDate, drill, clearDrill }) {
+export function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, contacts, health, onSaveContact, onClearContact, readOnly, dates, viewDate, setViewDate, drill, clearDrill }) {
   const [brands, setBrands] = useState(() => new Set());   // multi-select; empty = all brands
   const [tier, setTier] = useState("ALL");
   const [classes, setClasses] = useState(() => new Set()); // multi-select; empty = all classes
@@ -1323,10 +1340,10 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
   const pager = (
     <div className="pager">
       <label className="pager-size">Show per page
-        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+        <NativeSelect value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
           {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
           <option value={100000}>All</option>
-        </select>
+        </NativeSelect>
       </label>
       <span className="pager-info">Showing {pagedSource.length ? pageStart + 1 : 0}–{Math.min(pageStart + pageSize, pagedSource.length)} of {fmt(pagedSource.length)}</span>
       <div className="pager-nav">
@@ -1711,10 +1728,10 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
             <span className="neg"><b className="mono">{pulse.no_response}</b> no response</span>
             <span><b className="mono">{pulse.pending}</b> pending</span>
           </div>
-          <select className="ct-agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
+          <NativeSelect className="ct-agent" value={agentFilter} onChange={(e) => setAgentFilter(e.target.value)}>
             <option value="">All agents</option>
             {contactAgents.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
+          </NativeSelect>
         </div>
         <table>
           <thead><tr>
@@ -1818,17 +1835,17 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
 /* Retention trend — Active depositors vs Cold (7+ days), compact dual-line area chart. */
 // Trend series colours: validated on the dark panel (dataviz validate_palette.js, all checks pass).
 // Teal = flow in / active, blue = cold (matches the DSLD class ramp), orange = withdrawals.
-const TREND_C = { active: "#2FA98C", cold: "#4A87DB", dep: "#2FA98C", wd: "#CC7626" };
-const TREND_PLAYERS = [
+export const TREND_C = { active: "#2FA98C", cold: "#4A87DB", dep: "#2FA98C", wd: "#CC7626" };
+export const TREND_PLAYERS = [
   { k: "active", label: "Active depositors", short: "Active", val: (r) => fmt(r.active || 0) },
   { k: "cold", label: "Cold (7+ days quiet)", short: "Cold", val: (r) => fmt(r.cold || 0) },
 ];
-const TREND_MONEY = [
+export const TREND_MONEY = [
   { k: "dep", label: "Deposits", short: "Dep", val: (r) => fmtRM(r.dep || 0) },
   { k: "wd", label: "Withdrawals", short: "WD", val: (r) => fmtRM(r.wd || 0), dash: true },
 ];
 // One measure family per chart: never two y-scales on one plot. Players and RM get separate charts.
-function TrendChart({ rows, series, axis = fmt, extra = [], label }) {
+export function TrendChart({ rows, series, axis = fmt, extra = [], label }) {
   const wrapRef = useRef(null);
   const [w, setW] = useState(900);
   const [hi, setHi] = useState(null);
@@ -1889,13 +1906,13 @@ function TrendChart({ rows, series, axis = fmt, extra = [], label }) {
     </div>
   );
 }
-function TrendLegend({ series }) {
+export function TrendLegend({ series }) {
   return <div className="trend-legend">{series.map((sr) => (
     <span key={sr.k}><i className={sr.dash ? "dash" : ""} style={{ "--c": TREND_C[sr.k] }} />{sr.label}</span>))}</div>;
 }
 
 /* KPI headline card with a hover popover showing a breakdown (by brand / band / agent). */
-function KpiCard({ label, value, valClass, sub, acc, pop, muted }) {
+export function KpiCard({ label, value, valClass, sub, acc, pop, muted }) {
   return (
     <div className={"kpi2-wrap" + (pop && pop.length ? " has-pop" : "")} tabIndex={pop && pop.length ? 0 : undefined}
       aria-label={pop && pop.length ? `${label}: ${value}. Breakdown on focus.` : undefined}>
@@ -1919,7 +1936,7 @@ function KpiCard({ label, value, valClass, sub, acc, pop, muted }) {
 
 // Nearest available snapshot to "same day, one calendar month before `snap`".
 // Returns a snapshot_date string, or null if none within ~5 days (e.g. before history begins).
-function pickLastMonthSnap(snap, dates) {
+export function pickLastMonthSnap(snap, dates) {
   if (!snap) return null;
   const all = (dates || []).map((d) => d.snapshot_date).filter(Boolean);
   if (!all.length) return null;
@@ -1950,7 +1967,7 @@ function pickLastMonthSnap(snap, dates) {
    Retention = players with monthly_deposit>0 / tier pool; Reactivation = the 'Reactivated' cohort.
    Sections 2-5 are drafted from the same data + the contact log for the ATL to check (no marker,
    so it pastes clean); free-text lines stay blank. Output is Markdown that pastes cleanly into Lark Docs. */
-function buildDailyReport({ curRows, prevRows, snap, prevSnap, brandOrder, lastMonthRows, lastMonthSnap, depStats, contacts, engagement }) {
+export function buildDailyReport({ curRows, prevRows, snap, prevSnap, brandOrder, lastMonthRows, lastMonthSnap, depStats, contacts, engagement }) {
   const brands = brandOrder.filter((b) => curRows.some((r) => r.brand === b));
   const int = (n) => Math.round(n).toLocaleString("en-US");
   const money = (n) => "RM" + int(n);
@@ -2348,7 +2365,7 @@ function buildDailyReport({ curRows, prevRows, snap, prevSnap, brandOrder, lastM
 /* Last resort when the browser refuses the clipboard entirely (Safari with an expired gesture,
    an in-app browser, plain http). The report is already built — show it, pre-selected, so it can
    be copied by hand. Better a second keystroke than a dead button and no report. */
-function ReportFallback({ text, onClose }) {
+export function ReportFallback({ text, onClose }) {
   const ref = useRef(null);
   const [done, setDone] = useState(false);
   useEffect(() => { const t = ref.current; if (t) { t.focus(); t.select(); } }, []);
@@ -2371,7 +2388,7 @@ function ReportFallback({ text, onClose }) {
   );
 }
 
-function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = "B", snap, isPast, contacts, me, team, dates, onSaveContact, onClearContact, readOnly }) {
+export function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = "B", snap, isPast, contacts, me, team, dates, onSaveContact, onClearContact, readOnly }) {
   const [sel, setSel] = useState(null);   // { list, index } — open the player Drawer in place
   const [rptMsg, setRptMsg] = useState(""); // "" | "busy" | "ok" | "err" — daily-report copy status
   const [rptText, setRptText] = useState(null);   // manual-copy fallback when the browser refuses
@@ -2438,11 +2455,13 @@ function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = "B", sn
   const [trendErr, setTrendErr] = useState(false);
   const [range, setRange] = useState(14);
   const [trendBrand, setTrendBrand] = useState("ALL");   // "ALL" = whole of Group B, else one brand
+  const trendTick = useLiveTick(["feed"]), trendSeen = useRef(0);
   useEffect(() => {
-    setTrend(null); setTrendErr(false);
+    const quiet = trendSeen.current !== trendTick; trendSeen.current = trendTick;          // new data landed: reload without blanking the chart
+    if (!quiet) { setTrend(null); setTrendErr(false); }
     const bq = trendBrand !== "ALL" ? `&brand=${encodeURIComponent(trendBrand)}` : "";
-    api(`/api/rtn/trend?days=${range}${bq}&team=${encodeURIComponent(viewTeam)}`).then((d) => setTrend(d || [])).catch(() => { setTrend([]); setTrendErr(true); });
-  }, [range, trendBrand, viewTeam]);
+    api(`/api/rtn/trend?days=${range}${bq}&team=${encodeURIComponent(viewTeam)}`).then((d) => setTrend(d || [])).catch(() => { if (!quiet) { setTrend([]); setTrendErr(true); } });
+  }, [range, trendBrand, viewTeam, trendTick]);
 
   const sum = (f) => data.reduce((s, r) => s + (r[f] || 0), 0);
   const dep = sum("daily_deposit"), wd = sum("daily_withdraw"), wl = sum("win_loss");
@@ -2574,10 +2593,10 @@ function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = "B", sn
 
       <div className="set-card">
         <h3 className="dash-trend-head">Retention trend{tierF !== "ALL" && <span className="dim" style={{ fontSize: 11, fontWeight: 400, marginLeft: 8 }}>· all tiers (not filtered)</span>}
-          <select className="trend-brand" value={trendBrand} onChange={(e) => setTrendBrand(e.target.value)}>
+          <NativeSelect className="trend-brand" value={trendBrand} onChange={(e) => setTrendBrand(e.target.value)}>
             <option value="ALL">All brands</option>
             {brandOrder.map((b) => <option key={b} value={b}>{b}</option>)}
-          </select>
+          </NativeSelect>
           <span className="range-toggle">{[7, 14, 30].map((d) => (
             <button key={d} className={range === d ? "on" : ""} onClick={() => setRange(d)}>{d}d</button>))}</span>
         </h3>
@@ -2646,10 +2665,10 @@ function Dashboard({ data: allData, brandOrder = BRAND_ORDER, viewTeam = "B", sn
 // KPI engine + leaderboard are DISABLED for the KPI-system revision (2026-07). Flip to true to
 // restore the old Base/Bonus/FinalKPI scorecard + KPI Leaderboard. Everything else (retention
 // detail, save-rate By CS/Class/Brand, Team snapshot) stays live regardless.
-const KPI_ENABLED = false;
-const KPI_TARGET = { t3: 92, tv: 94.5 };
+export const KPI_ENABLED = false;
+export const KPI_TARGET = { t3: 92, tv: 94.5 };
 // BaseKPI band tables (points) — editable config, verbatim from KPI_ENGINE_FULL_SPEC.md.
-const KPI_BANDS = {
+export const KPI_BANDS = {
   t3:  [[95, 15], [93, 12], [91, 8], [89, 4]],          // % >= threshold -> pts (else 0); max 15
   tv:  [[97.5, 15], [95.5, 12], [93.5, 8], [91.5, 4]],  // max 15
   growth: [[30, 20], [25, 15], [15, 10], [6, 5]],       // MoM % >= threshold -> pts; max 20
@@ -2657,30 +2676,30 @@ const KPI_BANDS = {
   disc: [[2, 20], [4, 15], [6, 10], [8, 5]],            // mistakes <= threshold -> pts; max 20
 };
 // Bonus track ("Extra KPI") — unlocks only when BaseKPI > 75. Max 20 (8+6+4+2). Editable config.
-const KPI_BONUS_UNLOCK = 75;       // BaseKPI must EXCEED this to earn AddMarks
-const KPI_BONUS = {
+export const KPI_BONUS_UNLOCK = 75;       // BaseKPI must EXCEED this to earn AddMarks
+export const KPI_BONUS = {
   react:  [[4, 8], [3, 6], [2, 4], [1, 2]],   // reactivated players >= threshold -> pts; max 8
   growth: [[20, 6], [15, 4], [12, 2]],         // MoM % >= threshold -> pts; max 6
   disc:   [[0, 4], [1, 2]],                     // mistakes <= threshold -> pts (else 0); max 4
   frt:    5,                                     // FRT sec < this -> 2, else 0; max 2
 };
-const scoreHi = (v, bands) => { for (const b of bands) if (v >= b[0]) return b[1]; return 0; }; // higher better
-const scoreLo = (v, bands) => { for (const b of bands) if (v <= b[0]) return b[1]; return 0; }; // lower better
-const bonusFrt = (sec) => (sec !== "" && sec != null && !isNaN(parseFloat(sec)) && parseFloat(sec) < KPI_BONUS.frt ? 2 : 0);
-const lbByMarks = (a, b) => { const av = parseFloat(a.marks), bv = parseFloat(b.marks); return (isNaN(bv) ? -Infinity : bv) - (isNaN(av) ? -Infinity : av); };
-const MISTAKE_CATS = ["Communication Errors", "Bonus & Promotional Execution", "Data Integrity", "Workflow & Ticket Management", "System & Tool Misuse"];
+export const scoreHi = (v, bands) => { for (const b of bands) if (v >= b[0]) return b[1]; return 0; }; // higher better
+export const scoreLo = (v, bands) => { for (const b of bands) if (v <= b[0]) return b[1]; return 0; }; // lower better
+export const bonusFrt = (sec) => (sec !== "" && sec != null && !isNaN(parseFloat(sec)) && parseFloat(sec) < KPI_BONUS.frt ? 2 : 0);
+export const lbByMarks = (a, b) => { const av = parseFloat(a.marks), bv = parseFloat(b.marks); return (isNaN(bv) ? -Infinity : bv) - (isNaN(av) ? -Infinity : av); };
+export const MISTAKE_CATS = ["Communication Errors", "Bonus & Promotional Execution", "Data Integrity", "Workflow & Ticket Management", "System & Tool Misuse"];
 // Retention auto-computes from cumulative monthly deposits, EXCEPT brands listed here.
 // ACE33: its official retention is a "still in grace" metric (~60-day window), NOT a deposit
 // metric. A too-low VVIP threshold upgraded many small rollers who then churned but linger in
 // grace, bloating the tier pool. So auto-from-deposits reads ~30pts below official (verified
 // 2026-06: Tier3 auto 63% vs official 96%). Kept manual until tiering is fixed at source or the
 // feed sends a grace flag we can exclude. See memory: ace33-retention-feed-bloat.
-const RETENTION_MANUAL_BRANDS = new Set([]);   // all brands auto-compute; pool self-corrects as non-retained players are downgraded out of tier
+export const RETENTION_MANUAL_BRANDS = new Set([]);   // all brands auto-compute; pool self-corrects as non-retained players are downgraded out of tier
 
 /* Small "i" help icon — replaces inline explanatory notes. The explanation shows as a hover/focus
    popup, keeping cards clean. Put it right after a title. align="right" anchors the popup to the
    right edge (for titles near the screen edge, e.g. the right column). */
-function InfoTip({ children, align }) {
+export function InfoTip({ children, align }) {
   return (
     <span className={"infotip" + (align === "right" ? " r" : "")} tabIndex={0} role="note" aria-label="More info">
       <span className="infotip-i" aria-hidden="true">i</span>
@@ -2690,7 +2709,7 @@ function InfoTip({ children, align }) {
 }
 
 /* Reusable manual ranked board (KPI Leaderboard / Team Challenge): name + score, add/edit/remove, ranked. */
-function ManualBoard({ title, note, addPlaceholder, month, endpoint, initial, bare }) {
+export function ManualBoard({ title, note, addPlaceholder, month, endpoint, initial, bare }) {
   const [rows, setRows] = useState([]);
   const [newName, setNewName] = useState("");
   const [saved, setSaved] = useState("");
@@ -2748,7 +2767,7 @@ function ManualBoard({ title, note, addPlaceholder, month, endpoint, initial, ba
    (from contact_log) + manual follow-up counts (saved server-side via /api/rtn/kpi/challenge-eng).
    Deposits & Growth rank PROPORTIONAL to the highest team. With only Team B present it IS the
    highest, so those two show full points, flagged "provisional (*)" until rival teams are added. */
-function TeamChallenge({ teamData, month, lastDep, eng: engData }) {
+export function TeamChallenge({ teamData, month, lastDep, eng: engData }) {
   const [fu, setFu] = useState({ fuDone: "", fuReq: "" });
   const [saved, setSaved] = useState(false);
   useEffect(() => {
@@ -2836,7 +2855,7 @@ function TeamChallenge({ teamData, month, lastDep, eng: engData }) {
 }
 
 /* Mistake log — per-agent, feeds Discipline KPI. View all; add/delete admin only. */
-function MistakeLog({ data, me, team, onMutate }) {
+export function MistakeLog({ data, me, team, onMutate }) {
   const isAdmin = !!me?.manage_users;
   const month = data.month;
   const list = data.mistakes || [];
@@ -2868,13 +2887,13 @@ function MistakeLog({ data, me, team, onMutate }) {
       </h3>
       {isAdmin && (
         <div className="mk-form">
-          <select value={agent} onChange={(e) => setAgent(e.target.value)}>
+          <NativeSelect value={agent} onChange={(e) => setAgent(e.target.value)}>
             <option value="">Agent…</option>
             {(team || []).filter((t) => t.on_leaderboard).map((t) => <option key={t.username} value={t.username}>{t.username}</option>)}
-          </select>
-          <select value={cat} onChange={(e) => setCat(e.target.value)}>
+          </NativeSelect>
+          <NativeSelect value={cat} onChange={(e) => setCat(e.target.value)}>
             {MISTAKE_CATS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </NativeSelect>
           <input className="mk-pts" type="number" step="1" min="0" value={points} title="Points / weight"
             onChange={(e) => setPoints(e.target.value)} onWheel={(e) => e.currentTarget.blur()} />
           <input className="mk-note" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} maxLength={300} />
@@ -2906,7 +2925,7 @@ function MistakeLog({ data, me, team, onMutate }) {
   );
 }
 
-function KpiScorecard({ onDrill, data, team, children, mistakeList, viewTeam = "B" }) {
+export function KpiScorecard({ onDrill, data, team, children, mistakeList, viewTeam = "B" }) {
   const [kpi, setKpi] = useState(null);
   const [err, setErr] = useState("");
   const [vals, setVals] = useState({});       // brand -> { t3, tv, l3, lv } (strings)
@@ -2959,7 +2978,8 @@ function KpiScorecard({ onDrill, data, team, children, mistakeList, viewTeam = "
       .catch((e) => setErr(e.message))
       .finally(() => setRefreshing(false));
   }
-  useEffect(() => { loadKpi(); }, [viewTeam]);
+  const kpiTick = useLiveTick(["kpi", "contact", "feed"]);
+  useEffect(() => { loadKpi(); }, [viewTeam, kpiTick]);
 
   // guard states still render the page grid (so the By CS/Class/Brand blocks below show)
   const gridWrap = (top) => (
@@ -3237,10 +3257,10 @@ function KpiScorecard({ onDrill, data, team, children, mistakeList, viewTeam = "
                 <InfoTip>
                   BaseKPI = Tier 3 + Tier V + Growth + FRT + Discipline (max 100). {kpiFor === "TEAM" ? "Team view." : `Showing ${kpiFor} — FRT and Discipline are their own; Tier/Growth are team-shared.`}
                 </InfoTip>
-                <select className="kpi-for" value={kpiFor} onChange={(e) => setKpiFor(e.target.value)}>
+                <NativeSelect className="kpi-for" value={kpiFor} onChange={(e) => setKpiFor(e.target.value)}>
                   <option value="TEAM">Team</option>
                   {agents.map((t) => <option key={t.username} value={t.username}>{t.username}</option>)}
-                </select>
+                </NativeSelect>
                 {savedTeam && <span className="kpi-saved"> Saved ✓</span>}
               </div>
               <div className="kpi-team-inputs two">
@@ -3359,7 +3379,7 @@ function KpiScorecard({ onDrill, data, team, children, mistakeList, viewTeam = "
 }
 
 /* One performance table (By CS / Class / Brand) — click a row to reveal the players behind the numbers. */
-function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactPlayers, marks }) {
+export function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactPlayers, marks }) {
   const hasScore = react !== undefined;   // By CS passes the weighted reactivation map; Class/Brand don't
   const [open, setOpen] = useState(null);   // { name, status } — status null = all players; else filter the drill to that status
   const [sort, setSort] = useState({ col: hasScore ? "score" : "actioned", dir: "desc" });
@@ -3475,7 +3495,7 @@ function PerfBlock({ title, rows, logs, keyField, onOpen, liveSet, react, reactP
   );
 }
 
-function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, onSaveContact, onClearContact, readOnly }) {
+export function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, onSaveContact, onClearContact, readOnly }) {
   const [logs, setLogs] = useState(null);
   const [perfMonth, setPerfMonth] = useState("");   // which calendar month these logs cover (from server)
   const [react, setReact] = useState({});           // agent -> weighted reactivation breakdown (By CS Score column)
@@ -3496,7 +3516,8 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
   const [selMonth, setSelMonth] = useState(monthOptions[0]);
 
   // Endpoint returns { month, logs } for ONE calendar month; pass ?month= to review a past one.
-  useEffect(() => { setLogs(null); api(`/api/rtn/performance?team=${encodeURIComponent(viewTeam)}&month=${selMonth}`)
+  const perfTick = useLiveTick(["contact", "kpi", "feed"]), perfSeen = useRef(0);
+  useEffect(() => { const quiet = perfSeen.current !== perfTick; perfSeen.current = perfTick; if (!quiet) setLogs(null); api(`/api/rtn/performance?team=${encodeURIComponent(viewTeam)}&month=${selMonth}`)
     .then((d) => { setLogs(d.logs || []); setPerfMonth(d.month || "");
       // reactivation is now one row per recovered player {agent, player_key, brand, tier_segment, tier}.
       // Fold into per-agent totals (Score + band counts) and a per-player tier map (drill-down band tags).
@@ -3520,7 +3541,7 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
       }));
       Object.values(agg).forEach((a) => { a.score = Math.round(a.score * 100) / 100; });
       setReact(agg); setReactPlayers(byPlayer); setMoves(d.moves || []); setAway(awayRows); })
-    .catch((e) => setErr(e.message)); loadMistakes(); }, [viewTeam, selMonth]);
+    .catch((e) => setErr(e.message)); loadMistakes(); }, [viewTeam, selMonth, perfTick]);
 
   // Export the raw contact log behind these tables: who contacted whom, status, date.
   const exportPerf = () => {
@@ -3607,9 +3628,9 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
         {!err && logs && (
           <div className="perf-bar">
             <span className="perf-month">Save rate ·
-              <select className="perf-mth-sel" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
+              <NativeSelect className="perf-mth-sel" value={selMonth} onChange={(e) => setSelMonth(e.target.value)}>
                 {monthOptions.map((m, i) => <option key={m} value={m}>{m}{i === 0 ? " (this month)" : ""}</option>)}
-              </select>
+              </NativeSelect>
             </span>
             {logs.length > 0 && <button className="btn-ghost" onClick={exportPerf}>↓ Export contacts CSV</button>}
           </div>
@@ -3631,19 +3652,19 @@ function Performance({ onDrill, data, team, me, viewTeam = "B", contacts, snap, 
 }
 
 /* ════════════════════════ SETTINGS (admin) ════════════════════════ */
-const ROLE_DEFAULTS = {
+export const ROLE_DEFAULTS = {
   admin:  { can_edit: 1, can_delete: 1, on_leaderboard: 0, manage_users: 1 },
   agent:  { can_edit: 1, can_delete: 1, on_leaderboard: 1, manage_users: 0 },
   viewer: { can_edit: 0, can_delete: 0, on_leaderboard: 0, manage_users: 0 },
 };
-const PERM_KEYS = [["can_edit", "Edit"], ["can_delete", "Delete"], ["on_leaderboard", "Scored"], ["manage_users", "Manage"]];
+export const PERM_KEYS = [["can_edit", "Edit"], ["can_delete", "Delete"], ["on_leaderboard", "Scored"], ["manage_users", "Manage"]];
 
-const ACT_FILTERS = [["all", "All activity"], ["login", "Sign in"], ["logout", "Sign out"], ["contact", "Contact"],
+export const ACT_FILTERS = [["all", "All activity"], ["login", "Sign in"], ["logout", "Sign out"], ["contact", "Contact"],
   ["recovered", "Recovered"], ["clear", "Clear/delete"], ["note", "Notes"], ["telegram", "Telegram"],
   ["kpi", "KPI"], ["mistake", "Mistakes"], ["perm", "Permissions"], ["user", "Users"]];
 
 /* Activity Logs — append-only audit trail (managers only). Filter by user / type / date. */
-function ActivityLog({ viewTeam = "B" }) {
+export function ActivityLog({ viewTeam = "B" }) {
   const [logs, setLogs] = useState(null);
   const [fu, setFu] = useState(""); const [fa, setFa] = useState("all"); const [fd, setFd] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3668,7 +3689,7 @@ function ActivityLog({ viewTeam = "B" }) {
       </h3>
       <div className="act-filters">
         <input placeholder="username" value={fu} onChange={(e) => setFu(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} />
-        <select value={fa} onChange={(e) => setFa(e.target.value)}>{ACT_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+        <NativeSelect value={fa} onChange={(e) => setFa(e.target.value)}>{ACT_FILTERS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</NativeSelect>
         <input type="date" value={fd} onChange={(e) => setFd(e.target.value)} />
         <button className="btn-gold" onClick={load} disabled={busy}>{busy ? "…" : "Filter"}</button>
       </div>
@@ -3696,8 +3717,8 @@ function ActivityLog({ viewTeam = "B" }) {
 
 /* Bulk Telegram-link import (managers only). Accepts CSV of brand,player,link;
    short brand codes map to full names. Re-uses the existing /api/rtn/telegram bulk endpoint. */
-const TG_SHORT = { LPK: "LPK777", BM: "BM69", HOT: "HOT321", RM: "RM68", SK: "SK69", ACE: "ACE33" };
-function TelegramImport({ viewTeam = "B" }) {
+export const TG_SHORT = { LPK: "LPK777", BM: "BM69", HOT: "HOT321", RM: "RM68", SK: "SK69", ACE: "ACE33" };
+export function TelegramImport({ viewTeam = "B" }) {
   const [text, setText] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3755,7 +3776,7 @@ function TelegramImport({ viewTeam = "B" }) {
   );
 }
 
-function Settings({ me, viewTeam = "B" }) {
+export function Settings({ me, viewTeam = "B", hideLog = false, hideAccounts = false, hidePassword = false }) {
   const [users, setUsers] = useState([]);
   const [drafts, setDrafts] = useState({});   // id -> { role, can_edit, can_delete, on_leaderboard, manage_users }
   const [nu, setNu] = useState(""); const [np, setNp] = useState("");
@@ -3790,7 +3811,7 @@ function Settings({ me, viewTeam = "B" }) {
       setCp(""); setCn(""); setMsg("Password updated."); } catch (e) { setMsg(e.message); } }
   return (
     <div className="settings">
-      {canManage && (
+      {canManage && !hideAccounts && (
         <div className="set-card set-accounts">
           <h3>Team accounts
             <InfoTip>Pick a role to auto-set the boxes, then tick/untick any. <b>Edit</b> = write the queue · <b>Delete</b> = clear a contact/note · <b>Leaderboard</b> = scored CS agent · <b>Manage</b> = this account panel. The last Manage account can't be removed.</InfoTip>
@@ -3812,14 +3833,14 @@ function Settings({ me, viewTeam = "B" }) {
                   {open && (
                     <div className="perm-editor">
                       <label className="perm-field">Role
-                        <select className="perm-role" value={d.role || "viewer"} onChange={(e) => pickRole(u.id, e.target.value)}>
-                          <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></select>
+                        <NativeSelect className="perm-role" value={d.role || "viewer"} onChange={(e) => pickRole(u.id, e.target.value)}>
+                          <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></NativeSelect>
                       </label>
                       <label className="perm-field">Team
-                        <select className="perm-role" value={d.team || ""} onChange={(e) => setDraft(u.id, { team: e.target.value || null })}>
+                        <NativeSelect className="perm-role" value={d.team || ""} onChange={(e) => setDraft(u.id, { team: e.target.value || null })}>
                           <option value="">— none —</option>
                           {TEAM_KEYS.map((t) => <option key={t} value={t}>Team {t}</option>)}
-                        </select>
+                        </NativeSelect>
                       </label>
                       <div className="perm-boxes">
                         {PERM_KEYS.map(([k, l]) => (
@@ -3836,25 +3857,25 @@ function Settings({ me, viewTeam = "B" }) {
           <div className="form-row perm-new">
             <input placeholder="New username" value={nu} onChange={(e) => setNu(e.target.value)} />
             <input placeholder="Password" type="password" value={np} onChange={(e) => setNp(e.target.value)} />
-            <select value={nrole} onChange={(e) => pickNewRole(e.target.value)}>
-              <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></select>
-            <select value={nteam} onChange={(e) => setNteam(e.target.value)} title="Which team this account sees">
+            <NativeSelect value={nrole} onChange={(e) => pickNewRole(e.target.value)}>
+              <option value="admin">Admin</option><option value="agent">Agent</option><option value="viewer">Viewer</option></NativeSelect>
+            <NativeSelect value={nteam} onChange={(e) => setNteam(e.target.value)} title="Which team this account sees">
               {TEAM_KEYS.map((t) => <option key={t} value={t}>Team {t}</option>)}
-            </select>
+            </NativeSelect>
             <button className="btn-gold" disabled={!nu || !np} onClick={addUser}>Add user</button>
           </div>
           <div className="hint">New accounts start as <b>Viewer</b> (lowest access). Pick a role to set defaults, then fine-tune the boxes. CS reps log in with their own account — "My queue" and the action log track them by name.</div>
         </div>)}
-      <div className="set-card set-password">
+      {!hidePassword && <div className="set-card set-password">
         <h3>Change my password</h3>
         <div className="form-row">
           <input placeholder="Current password" type="password" value={cp} onChange={(e) => setCp(e.target.value)} />
           <input placeholder="New password" type="password" value={cn} onChange={(e) => setCn(e.target.value)} />
           <button className="btn-gold" disabled={!cp || !cn} onClick={changePw}>Update</button>
         </div>
-      </div>
+      </div>}
       {canManage && <TelegramImport viewTeam={viewTeam} />}
-      {canManage && <ActivityLog viewTeam={viewTeam} />}
+      {canManage && !hideLog && <ActivityLog viewTeam={viewTeam} />}
       {msg && <div className="set-msg">{msg}</div>}
     </div>
   );
@@ -3862,10 +3883,10 @@ function Settings({ me, viewTeam = "B" }) {
 
 /* ════════════════════════ APP ════════════════════════ */
 /* ════════════════════════ DELTA — "what changed since yesterday" ════════════════════════ */
-const DL_COLD = ["BLOCKED", "DSLD30", "DSLD14", "DSLD7", "WATCH"];        // cold/cooling classes
-const DL_SEV = { WATCH: 1, DSLD7: 2, BLOCKED: 2, DSLD14: 3, DSLD30: 4 }; // coldness severity
-const tierNum = (t) => { const m = String(t || "").match(/(\d+)/); return m ? +m[1] : null; };
-const isHV = (p) => p._whale || p.tier_segment === "V";   // high-value: whale or Tier V
+export const DL_COLD = ["BLOCKED", "DSLD30", "DSLD14", "DSLD7", "WATCH"];        // cold/cooling classes
+export const DL_SEV = { WATCH: 1, DSLD7: 2, BLOCKED: 2, DSLD14: 3, DSLD30: 4 }; // coldness severity
+export const tierNum = (t) => { const m = String(t || "").match(/(\d+)/); return m ? +m[1] : null; };
+export const isHV = (p) => p._whale || p.tier_segment === "V";   // high-value: whale or Tier V
 
 /* ════════════════════════ MOVEMENT — brand × date grid (Changes tab) ════════════════════════
    The daily numbers the team used to keep in a spreadsheet: one row per day, one column per
@@ -3879,20 +3900,20 @@ const isHV = (p) => p._whale || p.tier_segment === "V";   // high-value: whale o
    • Deposits have a weekly rhythm, so the default comparison is the SAME WEEKDAY last week.
      Comparing Sunday to Monday produced fake -24% days.
    Data comes from the daily_brand_stats rollup — see schema_v22. */
-const MV_METRICS = [
+export const MV_METRICS = [
   { k: "dep", label: "Deposit", kind: "money" },
   { k: "net", label: "Net", kind: "money" },
   { k: "act", label: "Active VIP", kind: "count" },
   { k: "ret", label: "Retention", kind: "pct" },
 ];
-const MV_TIERS = [{ k: "ALL", label: "All tiers" }, { k: "3", label: "Tier 3" }, { k: "V", label: "Tier V" }];
-const MV_BASES = [{ k: "dow", label: "Same weekday" }, { k: "prev", label: "Previous day" }, { k: "avg", label: "Month average" }];
-const MV_TARGET = { "3": 92, V: 94.5, ALL: 92 };
-const MV_NEUTRAL = 2;   // a move smaller than this is flat, not "up" — stops every cell being coloured
-const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const mvMonLabel = (m) => MON3[+m.slice(5, 7) - 1] + " " + m.slice(0, 4);
+export const MV_TIERS = [{ k: "ALL", label: "All tiers" }, { k: "3", label: "Tier 3" }, { k: "V", label: "Tier V" }];
+export const MV_BASES = [{ k: "dow", label: "Same weekday" }, { k: "prev", label: "Previous day" }, { k: "avg", label: "Month average" }];
+export const MV_TARGET = { "3": 92, V: 94.5, ALL: 92 };
+export const MV_NEUTRAL = 2;   // a move smaller than this is flat, not "up" — stops every cell being coloured
+export const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const mvMonLabel = (m) => MON3[+m.slice(5, 7) - 1] + " " + m.slice(0, 4);
 
-function Movement({ viewTeam }) {
+export function Movement({ viewTeam }) {
   const [data, setData] = useState(null);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState("");
@@ -4109,7 +4130,7 @@ function Movement({ viewTeam }) {
   );
 }
 
-function MvLegend({ tier, base, onClose }) {
+export function MvLegend({ tier, base, onClose }) {
   return (
     <div className="mv-ov" onClick={(e) => { if (e.target.classList.contains("mv-ov")) onClose(); }}>
       <div className="mv-modal">
@@ -4164,7 +4185,7 @@ function MvLegend({ tier, base, onClose }) {
   );
 }
 
-function MvStyle() {
+export function MvStyle() {
   return (<style>{`
     .mv{padding:2px 0 30px}
     .mv-head{margin-bottom:13px}
@@ -4227,7 +4248,7 @@ function MvStyle() {
   `}</style>);
 }
 
-function Delta({ data, brandOrder = BRAND_ORDER, snap, dates, contacts, me, team, viewTeam, onSaveContact, onClearContact, readOnly }) {
+export function Delta({ data, brandOrder = BRAND_ORDER, snap, dates, contacts, me, team, viewTeam, onSaveContact, onClearContact, readOnly }) {
   const [dView, setDView] = useState("changes");   // 'changes' = player movers · 'movement' = brand grid
   const [yData, setYData] = useState(null);            // yesterday's classified rows
   const [prevDate, setPrevDate] = useState(undefined); // undefined = resolving · null = none available
@@ -4546,13 +4567,13 @@ function Delta({ data, brandOrder = BRAND_ORDER, snap, dates, contacts, me, team
      dw = withdraw <= deposit (matches the SPV/Excel colouring; needs a deposit that day)
      wl = game win_loss < 0 (also catches losses played from an existing balance)
    Previous snapshot = the day before in our data; SPV's date is one day earlier still. */
-const LG_RULES = {
+export const LG_RULES = {
   dw: { label: "Withdraw ≤ deposit", lost: (y) => (y.daily_deposit || 0) > 0 && (y.daily_withdraw || 0) <= (y.daily_deposit || 0),
         amt: (y) => (y.daily_deposit || 0) - (y.daily_withdraw || 0), desc: "withdrew no more than they deposited" },
   wl: { label: "Game win/loss", lost: (y) => (y.win_loss ?? 0) < 0,
         amt: (y) => -(y.win_loss || 0), desc: "game win/loss below 0" },
 };
-function LostGone({ data, yData, snap, prevDate, brandOrder, contacts, contactMap, me, team, onSaveContact, onClearContact, readOnly }) {
+export function LostGone({ data, yData, snap, prevDate, brandOrder, contacts, contactMap, me, team, onSaveContact, onClearContact, readOnly }) {
   const [rule, setRule] = useState("dw");
   const [fBrand, setFBrand] = useState(null);
   const [fTier, setFTier] = useState("ALL");
@@ -4844,7 +4865,7 @@ function LostGone({ data, yData, snap, prevDate, brandOrder, contacts, contactMa
 }
 
 /* Notification bell — event/exception alerts only (no standing metrics). Dismissible, per-day. */
-function NotifBell({ notices, snap, onGo }) {
+export function NotifBell({ notices, snap, onGo }) {
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState(() => { try { return JSON.parse(localStorage.getItem("notif_dismissed") || "{}"); } catch (e) { return {}; } });
   const dkey = (id) => `${snap}:${id}`;
@@ -4881,14 +4902,14 @@ function NotifBell({ notices, snap, onGo }) {
 // Reads the Worker's deal (GET /api/rtn/auto-assign) and enriches each player from the live
 // classified board rows — real UID (dispName), churn risk (_cool2), TG link, today's status.
 // Row → the existing Drawer. Read-only preview (Phase 1): assignments are shown, not written.
-const AA_BANDC = { cooling: "var(--cool)", whale: "var(--gold)", "7-13d": "var(--pos)", "14-29d": "var(--pos)", "3-6d": "var(--dim)", "2d": "var(--dim)", "30d+": "var(--dim)" };
-const AA_TAGL = { cooling: "COOLING", whale: "WHALE", "7-13d": "REACTIVATE", "14-29d": "REACTIVATE", "3-6d": "WATCH", "2d": "WATCH", "30d+": "CHURN" };
-const AA_SC = { New: "var(--dim)", Contacted: ST_COLOR.CONTACTED, Recovered: "var(--pos)" };
+export const AA_BANDC = { cooling: "var(--cool)", whale: "var(--gold)", "7-13d": "var(--pos)", "14-29d": "var(--pos)", "3-6d": "var(--dim)", "2d": "var(--dim)", "30d+": "var(--dim)" };
+export const AA_TAGL = { cooling: "COOLING", whale: "WHALE", "7-13d": "REACTIVATE", "14-29d": "REACTIVATE", "3-6d": "WATCH", "2d": "WATCH", "30d+": "CHURN" };
+export const AA_SC = { New: "var(--dim)", Contacted: ST_COLOR.CONTACTED, Recovered: "var(--pos)" };
 /* Contact parity — the month's standing position against the department target.
    Counts each reachable player ONCE, so the bar only moves on a first touch. The milestone
    ladder reopens at the next rung as soon as one is cleared, which is why the label reads
    "next" rather than "target" once 52 is behind us. */
-function ParityBar({ d, onDupes }) {
+export function ParityBar({ d, onDupes }) {
   if (!d || !d.reachable) return null;
   const pct = d.rate, ms = d.milestone, done = pct >= ms;
   const pace = d.today_new >= d.need_per_day;
@@ -4941,7 +4962,7 @@ function ParityBar({ d, onDupes }) {
 /* Over-contact guard. Two agents messaging the same VIP inside a week is bad for the player
    and inflates nobody's numbers — parity counts the person once however many times they were
    contacted. Listing them is the honest version: it shows the waste instead of hiding it. */
-function DupeCard({ rows, total, onClose }) {
+export function DupeCard({ rows, total, onClose }) {
   return (
     <div className="aa-dry">
       <div className="aa-dryh">
@@ -4968,7 +4989,7 @@ function DupeCard({ rows, total, onClose }) {
   );
 }
 
-function AssignedView({ rows, contactMap, contacts, team, viewTeam, me, snap, dates, setViewDate, onSaveContact, onClearContact, readOnly }) {
+export function AssignedView({ rows, contactMap, contacts, team, viewTeam, me, snap, dates, setViewDate, onSaveContact, onClearContact, readOnly }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(true);
@@ -5218,7 +5239,7 @@ function AssignedView({ rows, contactMap, contacts, team, viewTeam, me, snap, da
   );
 }
 
-function AALegend({ onClose }) {
+export function AALegend({ onClose }) {
   return (
     <div className="aa-ov" onClick={(e) => { if (e.target.classList.contains("aa-ov")) onClose(); }}>
       <div className="aa-modal">
@@ -5252,7 +5273,7 @@ function AALegend({ onClose }) {
 
 /* Dry-run result (managers). Shows what the daily writer WOULD do, per team.
    `written` only appears on a real run; a dry run reports `dealt` and saves nothing. */
-function DryRunCard({ dry, onClose }) {
+export function DryRunCard({ dry, onClose }) {
   const teams = (dry && dry.teams) || {};
   const keys = Object.keys(teams);
   const total = keys.reduce((n, t) => n + (teams[t].dealt || 0), 0);
@@ -5291,7 +5312,7 @@ function DryRunCard({ dry, onClose }) {
   );
 }
 
-function AAStyle() {
+export function AAStyle() {
   return (<style>{`
     /* ── contact parity bar ── */
     .pb{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 16px;margin-bottom:14px}
@@ -5411,14 +5432,14 @@ function AAStyle() {
    the Grace ladder applied to the bonus in the SW Check text; deposits = the console's own daily feed (one day behind).
    The requirement is met by ONE day's deposit (not accumulative across days).
    A claim never expires, so a row stays until Lark says Claimed. Read-only. */
-const GT_STATUS = {
+export const GT_STATUS = {
   reloaded:     { label: "RELOADED · NOT CLAIMED", color: "var(--pos)" },
   same_day:     { label: "SAME-DAY RELOAD · CHECK TIME", color: "#E8C547" },
   in_progress:  { label: "WINDOW OPEN", color: "#E8C547" },
   not_reloaded: { label: "DID NOT RELOAD", color: "var(--dim)" },
   unknown:      { label: "NO AMOUNT IN LARK", color: "var(--dim)" },
 };
-function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearContact, readOnly }) {
+export function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearContact, readOnly }) {
   const [res, setRes] = useState(null);       // null = loading, { rows, notes } or { error }
   const [filter, setFilter] = useState("reloaded");
   const [open, setOpen] = useState(null);     // { list, index } — the player drawer
@@ -5489,18 +5510,18 @@ function GraceTasks({ data, snap, me, team, contactMap, onSaveContact, onClearCo
   );
 }
 
-const lcStatusColor = (g) => {
+export const lcStatusColor = (g) => {
   const s = String(g || "");
   if (s.startsWith("Active")) return "var(--pos)";
   if (s.startsWith("Reactivated")) return "var(--info)";
   if (s === "Churn") return "var(--neg)";
   return "var(--dim)";
 };
-function LcBox({ on, onClick, disabled }) {
+export function LcBox({ on, onClick, disabled }) {
   return <button className={"lc-box" + (on ? " on" : "")} onClick={onClick} disabled={disabled}
     aria-pressed={!!on} title={on ? "Checked — click to clear" : "Click to check"}>{on ? "✓" : ""}</button>;
 }
-function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
+export function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
   const manager = !!me?.manage_users;
   const readOnly = !me?.can_edit;
   const date = viewDate || "";                                                // driven by the shared top date picker
@@ -5676,10 +5697,10 @@ function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
                   <td className="mono">{pid(u)}</td>
                   <td style={{ color: lcStatusColor(u.group_name) }}>{u.group_name || "—"}</td>
                   <td className="r mono">{u.ingest_deposit != null ? fmtRM(u.ingest_deposit) : "—"}</td>
-                  <td><select className="team-pick" defaultValue="" onChange={(e) => assign(u.player_key, e.target.value)}>
+                  <td><NativeSelect className="team-pick" defaultValue="" onChange={(e) => assign(u.player_key, e.target.value)}>
                     <option value="" disabled>Pick agent…</option>
                     {agentNames.map((ag) => <option key={ag} value={ag}>{ag}</option>)}
-                  </select></td>
+                  </NativeSelect></td>
                 </tr>))}
             </tbody>
           </table></div>
@@ -5689,32 +5710,60 @@ function LoginCheck({ me, team, viewDate, viewTeam = "B" }) {
   );
 }
 
+/* The revamped console (docs/design/BUILD-CONTRACT.md section 8) is LIVE: on by default for everyone.
+   ?revamp=0 takes this browser back to the old console and is remembered; ?revamp=1 or ?flags=reset puts it back. See src/flags.js. */
+const readRevampFlag = () => readFlag("revamp");
+
 export default function App() {
+  const [rv] = useState(readRevampFlag);                 // revamped shell on/off (fixed for the page's lifetime)
+  const [rvTab, setRvTab] = useState(() => { try { return sessionStorage.getItem("rv_tab") || ""; } catch (e) { return ""; } });
   const [me, setMe] = useState(null);
   const [tab, setTab] = useState("dash");
   const [drill, setDrill] = useState(null); // KPI → Daily deep-link: { brand, tier }
   const [board, setBoard] = useState(null);
+  const contactStamp = useRef("");
   const [loading, setLoading] = useState(false);
   const [loadErr, setLoadErr] = useState("");
   const [dates, setDates] = useState([]);         // available snapshot dates, newest first
   const [viewDate, setViewDate] = useState(null); // null = latest/today (the only actionable day)
-  const [viewTeam, setViewTeam] = useState("B");  // manager logo switcher; non-managers are pinned to their own team
+  const [viewTeam, setViewTeam] = useState(rv ? "A" : "B");  // revamp: everyone starts on their own team (Team A when they have none); managers can switch with the logo switcher, others are pinned
+  const teamStart = useRef(null);
 
   useEffect(() => {
     const t = localStorage.getItem("session_token");
     if (t) api("/api/me").then(setMe).catch(() => localStorage.removeItem("session_token"));
   }, []);
 
-  async function loadBoard(date) {
-    setLoading(true); setLoadErr("");
-    try { setBoard(await api("/api/rtn/board" + (date ? `?date=${date}` : ""))); }
-    catch (e) { setLoadErr(e.message); }
-    setLoading(false);
+  async function loadBoard(date, quiet) {
+    if (!quiet) setLoading(true);
+    setLoadErr("");
+    try { const b = await api("/api/rtn/board" + (date ? `?date=${date}` : "")); contactStamp.current = newestStamp(b.contacts); setBoard(b); }
+    catch (e) { if (!quiet) setLoadErr(e.message); }
+    if (!quiet) setLoading(false);
   }
   useEffect(() => { if (me) api("/api/rtn/dates").then(setDates).catch(() => setDates([])); }, [me]);
   useEffect(() => { if (me) loadBoard(viewDate); }, [me, viewDate]);
   // Non-managers are pinned to their own team; managers may switch and default to B.
-  useEffect(() => { if (me && !me.manage_users && me.team) setViewTeam(me.team); }, [me]);
+  useEffect(() => {
+    if (!me) return;
+    if (!rv) { if (!me.manage_users && me.team) setViewTeam(me.team); return; }          // flag off: unchanged behaviour
+    const canAll = canDo(me, "teams.all");
+    const mine = TEAM_KEYS.includes(me.team) ? me.team : (canAll ? "ALL" : "A");        // no team: no filter (All teams)
+    if (!canAll) setViewTeam(mine);                                                    // pinned to their own team
+    else if (teamStart.current !== me.username) { teamStart.current = me.username; setViewTeam(mine); }   // someone who sees every team starts on their own team (or All), then may switch
+  }, [me]);
+
+  // ---- live: the account's own permissions, who owns which player, and new data ----
+  useLive(["me"], () => { if (me) api("/api/me").then((m) => setMe((cur) => (cur && JSON.stringify(cur) === JSON.stringify(m) ? cur : m))).catch(() => {}); });
+  useLive(["contact"], () => { if (me && board?.snapshot_date && !isPast) refreshContacts(viewDate || undefined); });
+  useLive(["contactreset"], () => { if (me && board?.snapshot_date && !isPast) refreshContacts(viewDate || undefined, true); });   // rows removed, or written without a stamp
+  const feedTimer = useRef(null);
+  useLive(["feed"], () => {                                  // new data landed: reload the board once things settle (a feed posts several times)
+    if (!me || isPast) return;
+    clearTimeout(feedTimer.current);
+    feedTimer.current = setTimeout(() => { loadBoard(viewDate, true); api("/api/rtn/dates").then(setDates).catch(() => {}); }, 30000);
+  });
+  useEffect(() => () => clearTimeout(feedTimer.current), []);
 
   async function saveContact(payload) {
     await api("/api/rtn/contact", { method: "POST", body: JSON.stringify(payload) });
@@ -5724,6 +5773,27 @@ export default function App() {
         c.player_key === payload.player_key && c.brand === payload.brand && c.tier_segment === payload.tier_segment));
       return { ...b, contacts: [...others, { ...payload, updated_at: new Date().toISOString().replace("T", " ").slice(0, 19) }] };
     });
+  }
+
+  // Pull just the contact rows again (who owns which player) and swap them into the board. Used by pages that refresh by themselves.
+  // Pull the contact rows again (who owns which player, and its status). With the newest stamp we already have it only asks for what changed since;
+  // without one (or after rows were removed) it takes the full list.
+  async function refreshContacts(date, full) {
+    try {
+      const since = full ? "" : contactStamp.current;
+      const qs = new URLSearchParams(); if (date) qs.set("date", date); if (since) qs.set("since", since);
+      const r = await api("/api/rtn/board-contacts" + (qs.toString() ? `?${qs}` : ""));
+      const key = (c) => `${c.snapshot_date}|${c.player_key}|${c.brand}|${c.tier_segment}`;
+      if (!r.partial) {
+        contactStamp.current = newestStamp(r.contacts);
+        setBoard((b) => (b ? { ...b, contacts: r.contacts || [] } : b));
+        return;
+      }
+      const changed = new Map((r.contacts || []).map((c) => [key(c), c]));
+      if (!changed.size) return;
+      contactStamp.current = newestStamp(r.contacts) || contactStamp.current;
+      setBoard((b) => (b ? { ...b, contacts: [...b.contacts.filter((c) => !changed.has(key(c))), ...changed.values()] } : b));
+    } catch { /* keep what is on screen */ }
   }
 
   async function clearContact(payload) {
@@ -5781,6 +5851,20 @@ export default function App() {
 
   if (!me) return (<><Style /><Login onLogin={setMe} /></>);
 
+  if (rv) {
+    const signOut = () => { api("/api/logout", { method: "POST" }).catch(() => {}); localStorage.removeItem("session_token"); setMe(null); };
+    const goto = (key, params) => {
+      setDrill(params && Object.keys(params).length ? params : null);   // e.g. goto("queue", { brand }) → Contact filtered to that brand
+      setRvTab(key); try { sessionStorage.setItem("rv_tab", key); } catch (e) { /* private mode */ }
+    };
+    const ctx = {
+      me, viewTeam, board, data, teamData, teamBrands, contacts: board?.contacts || [], dates, viewDate, setViewDate, isPast,
+      readOnly: queueRO, saveContact, clearContact, loadBoard, refreshContacts, drill, setDrill, goto,
+      setViewTeam, teamKeys: canDo(me, "teams.all") ? ["ALL", ...TEAM_KEYS] : TEAM_KEYS, team: scopeTeam(board?.team, viewTeam, me), health: board?.health || [], snap: board?.snapshot_date || null, loading,
+    };
+    return (<><Style scope /><RevampShell ctx={ctx} tab={rvTab || (me.manage_users ? "dash" : "home")} notices={notices} loading={loading} loadErr={loadErr} onSignOut={signOut} /></>);
+  }
+
   return (
     <>
       <Style />
@@ -5788,7 +5872,7 @@ export default function App() {
         <header className="top">
           <div className="top-brand"><span className="mark">♠</span>
             <div><div className="t1">{me?.manage_users
-              ? <>TEAM <select className="team-pick" value={viewTeam} onChange={(e) => setViewTeam(e.target.value)} title="Switch team view">{TEAM_KEYS.map((t) => <option key={t} value={t}>{t}</option>)}</select> · VIP RTN</>
+              ? <>TEAM <NativeSelect className="team-pick" value={viewTeam} onChange={(e) => setViewTeam(e.target.value)} title="Switch team view">{TEAM_KEYS.map((t) => <option key={t} value={t}>{t}</option>)}</NativeSelect> · VIP RTN</>
               : `TEAM ${me?.team || "B"} · VIP RTN`}</div><div className="t2">Daily action console</div></div></div>
           <nav className="tabs">
             <button className={tab === "dash" ? "on" : ""} onClick={() => setTab("dash")}>Dashboard</button>
@@ -5849,7 +5933,7 @@ export default function App() {
    Split config — the twin of CODE_BANDS in worker/index.js. Amounts are NOT
    here: they differ per brand and are entered per event. Reverting to 4 bands
    (8/12/15/18 @ 40/30/20/10) means editing BOTH copies.                     */
-const CODE_BANDS = [
+export const CODE_BANDS = [
   { label: "A", share: 0.5 },
   { label: "B", share: 0.5 },
 ];
@@ -5860,17 +5944,17 @@ const CODE_BANDS = [
    1 Sunday, 4 Zyra Tier V days and 2 Zyra Tier 3 days. Friday is rest.
    Tier is NOT chosen — it falls out of the weekday.
    KEEP IN SYNC with the same block in worker/index.js.                     */
-const CAMPAIGN_ANCHOR = "2026-07-26";                 // a Sunday = rotation week 1
-const CAMPAIGN_SLOTS = [["Sun", "Wed"], ["Mon", "Thu"], ["Tue", "Sat"]];
-const CAMPAIGN_TEAMS = ["A", "B", "C"];
-const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export const CAMPAIGN_ANCHOR = "2026-07-26";                 // a Sunday = rotation week 1
+export const CAMPAIGN_SLOTS = [["Sun", "Wed"], ["Mon", "Thu"], ["Tue", "Sat"]];
+export const CAMPAIGN_TEAMS = ["A", "B", "C"];
+export const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // Hand-made July + August schedule (team per date). Neither month follows the clean
 // rotation, so both are stored verbatim and win over the computed pattern. From
 // September onward there is no override → falls through to the generated rotation. Tier
 // stays computed (the Sun-Wed=V, Thu/Sat=3 rule held on every sheet row).
 // KEEP IN SYNC with the copy in worker/index.js.
-const SCHEDULE_OVERRIDE = {
+export const SCHEDULE_OVERRIDE = {
   "2026-07-01": "C", "2026-07-02": "A", "2026-07-04": "C", "2026-07-05": "B",
   "2026-07-06": "C", "2026-07-07": "A", "2026-07-08": "B", "2026-07-09": "C",
   "2026-07-11": "A", "2026-07-12": "C", "2026-07-13": "A", "2026-07-14": "B",
@@ -5888,7 +5972,7 @@ const SCHEDULE_OVERRIDE = {
   "2026-08-29": "B", "2026-08-30": "A", "2026-08-31": "B",
 };
 
-function campaignDay(iso) {
+export function campaignDay(iso) {
   const d = new Date(iso + "T00:00:00Z");
   if (isNaN(d)) return null;
   const day = DOW[d.getUTCDay()];
@@ -5904,10 +5988,10 @@ function campaignDay(iso) {
   const slot = CAMPAIGN_SLOTS.findIndex((s) => s.includes(day));
   return { ...base, week: w + 1, slot, team: CAMPAIGN_TEAMS[(slot + w) % 3], source: "rotation" };
 }
-const shiftDate = (iso, n) =>
+export const shiftDate = (iso, n) =>
   new Date(new Date(iso + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
 // Next date this team is up — used by the strip when it isn't their day.
-function nextDayForTeam(fromIso, team) {
+export function nextDayForTeam(fromIso, team) {
   for (let i = 1; i <= 21; i++) {
     const p = campaignDay(shiftDate(fromIso, i));
     if (p && !p.rest && p.team === team) return p;
@@ -5917,12 +6001,12 @@ function nextDayForTeam(fromIso, team) {
 // Fallback only, used before /campaign/day answers. The REAL eligibility test is
 // uid coverage returned by the worker — the prov tag lies (OMG67 is tagged ZY but
 // ships no uid), and BO's audience upload keys on user_id.
-const campaignBrands = (team) => (TEAMS[team] || []).filter((b) => BRANDS[b]?.prov === "ZY");
+export const campaignBrands = (team) => (TEAMS[team] || []).filter((b) => BRANDS[b]?.prov === "ZY");
 
-const todayMYT = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+export const todayMYT = () => new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 // Codes sit in the manager table in plain sight, so mask them: an agent must
 // click Release (which records who + when) to get a usable code.
-const maskCode = (c) => (!c ? "—" : c.length <= 4 ? "••••" : c.slice(0, c.length - 4) + "••••");
+export const maskCode = (c) => (!c ? "—" : c.length <= 4 ? "••••" : c.slice(0, c.length - 4) + "••••");
 
 /* Same markup + classes as the Daily pager, so it looks and behaves identically.
    The eligible pager drives BOTH columns at once: A and B are near-equal halves
@@ -5930,7 +6014,7 @@ const maskCode = (c) => (!c ? "—" : c.length <= 4 ? "••••" : c.slice(0
    Defined at module scope on purpose — declaring it inside Campaigns() made it a
    brand-new component type on every render, so React unmounted and remounted it
    and the "Show per page" select dropped focus mid-interaction. */
-function CampPager({ total, page, setPage, label, perPage, onSize }) {
+export function CampPager({ total, page, setPage, label, perPage, onSize }) {
   const pages = Math.max(1, Math.ceil(total / perPage));
   const cur = Math.min(page, pages);
   const start = (cur - 1) * perPage;
@@ -5945,10 +6029,10 @@ function CampPager({ total, page, setPage, label, perPage, onSize }) {
   return (
     <div className="pager">
       <label className="pager-size">Show per page
-        <select value={perPage} onChange={(e) => onSize(Number(e.target.value))}>
+        <NativeSelect value={perPage} onChange={(e) => onSize(Number(e.target.value))}>
           {[20, 50, 100, 200].map((n) => <option key={n} value={n}>{n}</option>)}
           <option value={100000}>All</option>
-        </select>
+        </NativeSelect>
       </label>
       <span className="pager-info">Showing {total ? start + 1 : 0}–{Math.min(start + perPage, total)} of {fmt(total)} {label}</span>
       <div className="pager-nav">
@@ -5964,7 +6048,7 @@ function CampPager({ total, page, setPage, label, perPage, onSize }) {
   );
 }
 
-function Campaigns({ me, viewTeam }) {
+export function Campaigns({ me, viewTeam }) {
   const isMgr = !!me?.manage_users;
   const canEdit = !!me?.can_edit || isMgr;
   // Managers switch teams in the header; agents are pinned to their own team.
@@ -5999,6 +6083,7 @@ function Campaigns({ me, viewTeam }) {
     dismissed.current = false;   // a new team gets its default table back
     setOpenEvent(null); setBandEdit(null); setReport(null);
   }, [team]);
+  useLive(["campaign"], () => { loadDay(); });                  // someone released, blocked or exported: the day reloads on its own
 
   const loadDay = async (d = day, t = team) => {
     try {
@@ -6176,15 +6261,17 @@ function Campaigns({ me, viewTeam }) {
   const closeTables = () => { dismissed.current = true; setOpenEvent(null); };
   // Rows follow whichever event is open — including the one auto-opened by
   // loadDay when there's only a single event for the day.
+  const rowsTick = useLiveTick(["campaign", "contact"]), rowsSeen = useRef(0);
   useEffect(() => {
+    const quiet = rowsSeen.current !== rowsTick; rowsSeen.current = rowsTick;
     if (!openEvent || !isMgr) { setRows([]); return; }
     let dead = false;
     api(`/api/rtn/campaign/assignments?event_id=${openEvent.id}&view=all`)
-      .then((r) => { if (!dead) { setRows(r.rows || []); setPgEl(1); setPgCl(1); } })
+      .then((r) => { if (!dead) { setRows(r.rows || []); if (!quiet) { setPgEl(1); setPgCl(1); } } })
       .catch((e) => { if (!dead) setMsg({ bad: true, t: e.message }); });
     return () => { dead = true; };
     /* eslint-disable-next-line */
-  }, [openEvent?.id, isMgr]);
+  }, [openEvent?.id, isMgr, rowsTick]);
   const loadReport = async () => {
     setOpenEvent(null);
     try { setReport(await api(`/api/rtn/campaign/report?date=${day}&team=${team}`)); }
@@ -6403,8 +6490,8 @@ function Campaigns({ me, viewTeam }) {
           <div className="camp-card">
             <div className="dsec" style={{ marginTop: 0 }}>New event</div>
             <div className="camp-new">
-              <select value={newEv.brand} onChange={(e) => setNewEv({ ...newEv, brand: e.target.value })}>
-                {eligibleBrands.map((b) => <option key={b}>{b}</option>)}</select>
+              <NativeSelect value={newEv.brand} onChange={(e) => setNewEv({ ...newEv, brand: e.target.value })}>
+                {eligibleBrands.map((b) => <option key={b}>{b}</option>)}</NativeSelect>
               <span className="camp-tierlock" title="Set by the rotation calendar for this date">
                 Tier {newEv.tier} <span className="dim">🔒</span></span>
               {CODE_BANDS.map((cfg) => (
@@ -6592,9 +6679,8 @@ function Campaigns({ me, viewTeam }) {
 }
 
 /* ════════════════════════ STYLES ════════════════════════ */
-function Style() {
-  return (
-    <style>{`
+export function Style({ scope = false } = {}) {   // scope: revamp shell on → live CSS applies only inside .rv-live
+  const css = `
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 :root{--bg:#0B0E13;--panel:#12161E;--panel2:#171C26;--line:#232A37;--txt:#E7EAF0;--dim:#8B94A7;--gold:#D4AF37;--neg:#F2727F;--pos:#4CC38A;
   --top-hi:#10141C;--login-hi:#141A26;--line-soft:#1B2130;--hover:#161C28;--hover-2:#1B2230;--line-hover:#2A3344;--line-strong:#3A4356;--line-zone:#2B3342;--off:#39414F;--faint:#4A5366;--mute:#5F6B7E;--slate:#94A3B8;--zone-c-line:#6F6A52;--on-accent:#FFF;--gold-line-2:#5A4A1E;--amber:#FCD34D;--amber-bg:#2A1F07;--amber-line:#7C5A12;--on-amber:#2A1907;--lc-line:#4A3D12;--lc-bg:#241D06;--warn:#FBBF24;--amber-deep:#F59E0B;--stale:#FDBA74;--stale-line:#7C2D12;--stale-bg:#2A1206;--hook-warn:#FCD9A8;--hook-warn-bg:#2A1A0B;--hook-warn-line:#7C4A12;--hook-warn-bg-hi:#33200D;--hook-warn-line-hi:#9A5F1A;--neg-soft:#FCA5A5;--neg-softer:#FECACA;--neg-strong:#EF4444;--neg-line:#7F1D1D;--neg-line-hi:#B91C1C;--bad-line:#7A2530;--neg-bg:#2A0F0F;--neg-bg-2:#240C0C;--pos-soft:#86EFAC;--pos-soft-2:#7FE7A6;--pos-muted:#86C7A0;--pos-line:#2F6B43;--pos-line-2:#14532D;--pos-bg:#0C2416;--info:#38BDF8;--info-soft:#7FD3F2;--blue-soft:#93C5FD;--blue-line:#1E40AF;--blue-line-2:#1E3A8A;--blue-bg:#10243A;--blue-bg-2:#0F1A33;--cool:#7DD3FC;--cool-line:#0C4A6E;--cool-bg:#082032;--tg:#2AABEE;--tg-lo:#1E96D4;--frag:#F9A8D4;--frag-line:#9D2463;--frag-bg:#2A0F1E;--teal:#2DD4BF;--violet:#A78BFA;
@@ -6608,6 +6694,10 @@ body{background:var(--bg);color:var(--txt);font-family:'IBM Plex Sans',system-ui
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
 .mono{font-family:'IBM Plex Mono',monospace}.dim{color:var(--dim)}
 button{cursor:pointer;font-family:inherit}input,select,textarea{font-family:inherit}
+/* Custom dropdown trigger (NativeSelect replaces every native <select>); the menu is styled by revamp.css in #rv-portal */
+.live-csb{display:inline-flex;align-items:center;justify-content:space-between;gap:8px;max-width:100%;font:inherit;font-size:13px;line-height:1.3;text-align:left;color:var(--txt);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+.live-csb:hover{border-color:var(--dim)}.live-csb:disabled{opacity:.6;cursor:not-allowed}
+.live-csb .csl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live-csb .csa{color:var(--dim);font-size:11px;flex:none}
 .shell{min-height:100vh;display:flex;flex-direction:column}
 .top{display:flex;align-items:center;flex-wrap:wrap;gap:24px;row-gap:10px;padding:14px 22px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--top-hi),var(--bg))}
 .top-brand{display:flex;align-items:center;gap:12px}.mark{font-size:26px;color:var(--gold)}
@@ -6648,7 +6738,7 @@ button{cursor:pointer;font-family:inherit}input,select,textarea{font-family:inhe
 .cal-range{font-size:10.5px;color:var(--dim)}
 .cal-link{background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;font-weight:600}
 .ro-banner{background:var(--blue-bg);border:1px solid var(--blue-line);color:var(--blue-soft);padding:10px 14px;border-radius:10px;font-size:13px;margin-bottom:14px}
-.wf-row select:disabled,.wf-note[readonly]{opacity:.65;cursor:default}
+.wf-row select:disabled,.wf-note[readonly],.wf-row .live-csb:disabled{opacity:.65;cursor:default}
 .st-btn:disabled{opacity:.4;cursor:default}
 .btn-ghost{background:none;border:1px solid var(--line);color:var(--dim);padding:7px 12px;border-radius:8px;font-size:12px}
 .btn-ghost:hover{color:var(--txt);border-color:var(--line-strong)}
@@ -6722,7 +6812,7 @@ td{padding:9px 8px;vertical-align:middle}
 .more{padding:12px;text-align:center}
 .pager{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font-size:13px}
 .pager-size{display:flex;align-items:center;gap:8px;color:var(--dim)}
-.pager-size select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:5px 8px;border-radius:7px;font-size:13px;cursor:pointer}
+.pager-size select,.pager-size .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:5px 8px;border-radius:7px;font-size:13px;cursor:pointer}
 .pager-info{color:var(--dim)}
 .pager-nav{margin-left:auto;display:flex;align-items:center;gap:4px}
 .pager-nav button{min-width:30px;height:30px;padding:0 8px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;font-size:13px;cursor:pointer}
@@ -6929,7 +7019,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .ch-who{font-size:11px;color:var(--dim)}
 .ch-note{font-size:12px;color:var(--txt);line-height:1.45;margin-top:4px;white-space:pre-wrap;word-break:break-word}
 .tmpl{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px;font-size:13px;line-height:1.6;white-space:pre-wrap}
-.wf-row select{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
+.wf-row select,.wf-row .live-csb{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
 .wf-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:10px}
 .seg-st{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--panel2)}
 .seg-st .st-btn{border:none;border-radius:0;border-right:1px solid var(--line);padding:9px 14px;font-size:11.5px}
@@ -7221,7 +7311,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .perm-box input{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
 .perm-new{margin-top:12px}
 .act-filters{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}
-.act-filters input,.act-filters select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
+.act-filters input,.act-filters select,.act-filters .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
 .act-filters input[type=date]{color-scheme:dark}
 .act-wrap{flex:1;min-height:260px;max-height:72vh;overflow:auto}
 .act-tbl{font-size:12.5px}
@@ -7324,7 +7414,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .lb-add .btn-ghost{flex-shrink:0;font-size:12px;padding:7px 12px}
 /* Mistake log */
 .mk-form{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
-.mk-form select,.mk-form input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
+.mk-form select,.mk-form input,.mk-form .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:8px 10px;border-radius:8px;font-size:13px}
 .mk-pts{width:64px;text-align:right}
 .mk-note{flex:1;min-width:160px}
 .mk-tally{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
@@ -7341,7 +7431,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .urow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:14px}
 .urow em{color:var(--dim);font-size:11px;margin-left:8px}
 .form-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
-.form-row input,.form-row select{flex:1;min-width:110px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
+.form-row input,.form-row select,.form-row .live-csb{flex:1;min-width:110px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:8px;font-size:13px}
 .hint{margin-top:10px;color:var(--dim);font-size:11px}
 .set-msg{grid-column:1/-1;color:var(--accent);font-size:13px}
 .bigmsg{padding:60px 20px;text-align:center;color:var(--dim);font-size:14px}.bigmsg.err{color:var(--neg-soft)}
@@ -7426,7 +7516,7 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .camp-ev-r .btn-ghost{padding:5px 10px}
 .btn-ghost.danger:hover{color:var(--neg);border-color:var(--neg-line)}
 .camp-new{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.camp-new select,.camp-new input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+.camp-new select,.camp-new input,.camp-new .live-csb{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
   border-radius:8px;padding:8px 10px;font-size:12.5px;font-family:inherit}
 .camp-newband{display:flex;align-items:center;gap:6px}
 .camp-note{font-size:11.5px;color:var(--dim);margin-top:9px;line-height:1.6}
@@ -7464,6 +7554,6 @@ a.tg-cell:hover{filter:brightness(1.2)}
 .camp-modal-btns button{flex:1;min-width:118px}
 .camp-modal-cancel{width:100%;margin-top:8px}
 @media (max-width:640px){.camp-ev{flex-direction:column;align-items:flex-start}}
-`}</style>
-  );
+`;
+  return <style>{scope ? scopeLiveCss(css) : css}</style>;
 }
