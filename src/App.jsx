@@ -1134,12 +1134,20 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
     if (onTg) r = r.filter((x) => !!x._tg);
     if (noTgOnly) r = r.filter((x) => !x._tg);
     if (openOnly) r = r.filter((x) => !cooldownSet.has(ckey(x)));  // only players outside the 3-day contact cooldown
+    // Table = the Telegram broadcast list. Tier V TG players with DSLD 1-6 belong to the Assigned
+    // manual-approach list, so they are hidden here — no player gets a personal message AND a blast.
+    // Mirrors the Assigned pool in computeAutoAssign (worker), which only deals TG players.
+    if (view === "table") r = r.filter((x) => !(x.tier_segment === "V" && x._tg && x._dsld >= 1 && x._dsld <= 6));
     if (q) {
       const s = q.toLowerCase();
       r = r.filter((x) => (x.username || "").toLowerCase().includes(s) ||
         (x.uid || "").toLowerCase().includes(s) || (x.addressing || "").toLowerCase().includes(s));
     }
     return [...r].sort((a, b) => {
+      if (view === "table") {                      // Table: players still open to contact first, 48h cooldown always last
+        const ca = cooldownSet.has(ckey(a)), cb = cooldownSet.has(ckey(b));
+        if (ca !== cb) return ca ? 1 : -1;
+      }
       if (graceWatch) return (a._graceDays ?? 999) - (b._graceDays ?? 999);
       if (sorts.length) {                          // multi-column sort: each column in order, biggest first by default
         for (const s of sorts) {
@@ -1156,7 +1164,21 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
       if (a.tier_segment !== b.tier_segment) return a.tier_segment === "V" ? -1 : 1;
       return (a.pnl ?? 0) - (b.pnl ?? 0);
     });
-  }, [data, brands, tier, classes, q, mine, graceWatch, zeroDep, onTg, noTgOnly, openOnly, cooldownSet, focusKeys, sorts, contactMap, me]);
+  }, [data, brands, tier, classes, q, mine, graceWatch, zeroDep, onTg, noTgOnly, openOnly, cooldownSet, focusKeys, sorts, contactMap, me, view]);
+  // Drop ticked players a filter/view change has hidden, so Copy / Mark only ever act on what is on screen.
+  useEffect(() => {
+    setSel((s) => {
+      if (!s.size) return s;
+      const vis = new Set(filtered.map(ckey));
+      const n = new Set([...s].filter((k) => vis.has(k)));
+      return n.size === s.size ? s : n;
+    });
+  }, [filtered]);
+  // Table select-all: every open-to-contact player ON TELEGRAM in the filtered list, across all pages
+  // (cooldown and no-link players skipped — a Telegram blast can't reach a player without a link).
+  const openKeys = useMemo(() => filtered.filter((x) => x._tg && !cooldownSet.has(ckey(x))).map(ckey), [filtered, cooldownSet]);
+  const allOpenSel = openKeys.length > 0 && openKeys.every((k) => sel.has(k));
+  const toggleSelAll = () => setSel(allOpenSel ? new Set() : new Set(openKeys));
 
   const counts = useMemo(() => {
     const base = brands.size ? data.filter((x) => brands.has(x.brand)) : data;
@@ -1472,7 +1494,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
 
       {sel.size > 0 && (
         <div className="sel-bar">
-          <span className="sel-n">{sel.size} selected</span>
+          <span className="sel-n">{sel.size} selected{view === "table" && allOpenSel ? " · all pages" : ""}</span>
           <button className="btn-gold sel-copy" onClick={copySelectedUsernames}>{copiedSel === "ok" ? "✓ Copied" : copiedSel === "fail" ? "Copy blocked — open in Chrome" : "Copy usernames"}</button>
           {!readOnly && <button className="btn-mark" onClick={markSelectedContacted} disabled={markBusy}>{markBusy ? "Marking…" : "✓ Mark contacted"}</button>}
           <button className="btn-ghost" onClick={() => setSel(new Set())}>Clear</button>
@@ -1484,11 +1506,13 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
       ) : view === "assigned" ? (
         <AssignedView rows={data} contactMap={contactMap} contacts={contacts} team={team} viewTeam={viewTeam} me={me} snap={snap}
           dates={dates} setViewDate={setViewDate} onSaveContact={onSaveContact} onClearContact={onClearContact} readOnly={readOnly} />
-      ) : view === "table" ? (
+      ) : view === "table" ? (<>
+      <div className="tbl-note">Broadcast list. Tier V players on Telegram with DSLD 1-6 are not here — they are in <b>Assigned</b> for manual approach.</div>
       <div className="tbl-wrap">
         <table>
           <thead><tr>
-            <th className="tcheck"></th><th>Class</th><th>Player</th><th>Brand</th><th>Tier</th>
+            <th className="tcheck"><input type="checkbox" className="wl-check" checked={allOpenSel} onChange={toggleSelAll}
+              disabled={!openKeys.length} title={`Select all ${openKeys.length} players on Telegram and open to contact (all pages; cooldown and no-link skipped)`} /></th><th>Class</th><th>Player</th><th>Brand</th><th>Tier</th>
             <Th k="_tgrank"><span title="Telegram — available players sort to the top">✈ TG</span></Th>
             <Th k="_dsld" right>DSLD</Th>
             <Th k="daily_deposit" right>Deposit today</Th>
@@ -1538,7 +1562,7 @@ function Queue({ data, brandOrder = BRAND_ORDER, snap, me, team, viewTeam, conta
         </table>
         {pager}
       </div>
-      ) : view === "contacted" ? (
+      </>) : view === "contacted" ? (
       <div className="tbl-wrap ct-wrap">
         <div className="ct-head">
           <div className="ct-pulse">
@@ -6523,6 +6547,8 @@ td{padding:9px 8px;vertical-align:middle}
 .btn-mark{background:color-mix(in srgb,var(--pos) 18%,var(--panel2));border:1px solid var(--pos);color:var(--pos);font-weight:700;font-size:13px;padding:7px 13px;border-radius:9px;cursor:pointer}
 .btn-mark:disabled{opacity:.5;cursor:default}
 td.tcheck{width:32px;text-align:center}
+.tbl-note{font-size:12px;color:var(--dim);margin:0 0 8px}
+.tbl-note b{color:var(--txt)}
 td.tname{cursor:text;user-select:text}
 tbody tr.sel{background:color-mix(in srgb,var(--accent) 9%,transparent)}
 tbody tr.sel:hover{background:color-mix(in srgb,var(--accent) 13%,transparent)}

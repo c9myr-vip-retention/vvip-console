@@ -783,6 +783,9 @@ async function computeAutoAssign(env, opts = {}) {
   const players = rows
     .filter((r) => (r.strikes || 0) < AA_GIVEUP)                                        // 3-strike give-up
     .filter((r) => !r.last_touch || Date.parse(r.last_touch + "T00:00:00Z") < restMs)   // 3-day rest
+    // Assigned = manual approach: Tier V only, DSLD 1-6 (aged dsld 2-7). Everyone else is left to
+    // the Table's Telegram broadcast, which hides exactly this set so nobody gets both.
+    .filter((r) => r.tier_segment === "V" && r.dsld <= 7)
     .map((r) => ({ ...r, tier: tierOf(r), fresh: !(r.mtd > 0) }))
     .filter((r) => r.tier > 0)
     .sort(cmpDeal);
@@ -2173,29 +2176,6 @@ export default {
       }
       log(user, "telegram", `Bulk Telegram import · ${saved} links`);
       return ok({ saved });
-    }
-
-    // GET /api/rtn/engagement?date=YYYY-MM-DD — Livechat/Telegram chat counts per brand for one MYT day.
-    if (path === "/api/rtn/engagement" && method === "GET") {
-      const day = url.searchParams.get("date");
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day || "")) return err("date=YYYY-MM-DD required", 400);
-      const sc = scopeAnd("brand");
-      const r = await env.DB.prepare(
-        `SELECT brand, livechat, telegram, updated_at FROM engagement_daily WHERE chat_date = ?${sc.s} ORDER BY brand`
-      ).bind(day, ...sc.b).all();
-      return ok({ date: day, rows: r.results || [] });
-    }
-
-    // POST /api/rtn/engagement-sync?date=YYYY-MM-DD — run the Lark engagement count now (managers).
-    // &dry=1 → count only, writes nothing.
-    if (path === "/api/rtn/engagement-sync" && method === "POST") {
-      if (!canManage) return err("Managers only", 403);
-      const dryRun = url.searchParams.get("dry") === "1";
-      try {
-        const r = await larkEngagementSync(env, { date: url.searchParams.get("date"), dryRun });
-        if (!dryRun && r.saved != null) log(user, "feed", `Engagement sync ${r.day} · ${r.saved} brands`);
-        return ok(r);
-      } catch (e) { return err("engagement sync: " + ((e && e.message) || e), 500); }
     }
 
     // POST /api/rtn/feeders/run — start every brand's feeder now, same as the 12:15 cron (managers).
