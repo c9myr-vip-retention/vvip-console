@@ -3,7 +3,7 @@
 **Status: not built.** Prepared so it can be wired quickly once the Imessage Console side is ready.
 Nothing in the retention console depends on this — the campaign runs manually without it.
 
-**Owner (our side):** Aldo · groupb-tracker retention console
+**Owner (our side):** ATL · groupb-tracker retention console
 **Owner (their side):** AI Team · Imessage Console
 
 ---
@@ -73,7 +73,7 @@ Content-Type: application/json
   "promo":     "vvip-code",
   "event_date":"2026-07-26",
   "tier":      "V",
-  "members":   [ { "uid": "27400526" }, { "uid": "27415560" } ]
+  "members":   [ { "uid": "10000001" }, { "uid": "10000002" } ]
 }
 ```
 
@@ -104,7 +104,7 @@ Authorization: Bearer {token we issue you}
   "tier":       "V",
   "promo":      "vvip-code",
   "count":      149,
-  "uids":       ["27400526", "27415560", "..."]
+  "uids":       ["10000001", "10000002", "..."]
 }
 ```
 
@@ -122,7 +122,7 @@ live data:
 
 | Brand | uid length | Example |
 |---|---|---|
-| BM69 | 8 | `27400526` |
+| BM69 | 8 | `10000001` |
 | HOT321 | 5–6 | `100180` |
 | RM68 | 5–6 | `114629` |
 | SK69 | 5–6 | `131470` |

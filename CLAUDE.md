@@ -10,14 +10,14 @@ This system is **LIVE in production**. The D1 database receives real player data
 2. **Never weaken the `player_days` unique constraint** `(player_key, snapshot_date, brand, tier_segment)`. A previous schema missing `brand` caused silent cross-brand data corruption.
 3. **`--remote` is mandatory** on every `wrangler d1` command. Without it, wrangler hits a local simulation, not production — results will be misleading.
 4. **Surgical, in-place edits over rewrites.** Modify existing files; don't regenerate whole files unless asked.
-5. **Environment is Windows + PowerShell** (not WSL). Quote paths. Aldo's copy lives at `C:\Dev\vvip-console-shared`; others clone wherever they like.
+5. **Environment is Windows + PowerShell** (not WSL). Quote paths. Clone the repo wherever you like.
 6. **Style:** direct, concise, production-ready. Flag flaws proactively; no filler.
 
 **`docs/HANDOFF.md` is the deep reference** — full domain model, strategy layer, backlog, and known limitations. Read it when you need context beyond what's below. This file holds only what every session must see by default.
 
 ## Session summary note (Obsidian brain)
 
-At the end of a work session, write a short summary note so decisions are not lost and enter the Obsidian graph (the vault is `C:\Dev`, all repos).
+At the end of a work session, write a short summary note so decisions are not lost and enter the Obsidian graph.
 
 - Location: `docs/sessions/YYYY-MM-DD-<topic>.md` (create the folder if missing).
 - Contents: what we worked on, decisions settled (rules, numbers, choices), open items, and files touched. Keep it short. Markdown only.
@@ -27,8 +27,8 @@ At the end of a work session, write a short summary note so decisions are not lo
 
 ## Who works here and how to talk to them
 
-- **Aldo** (owner, 1st PIC): new to coding. Explain in short, simple sentences with small words. No jargon. One step at a time. Confirm before doing anything.
-- **Mexha** (developer, 2nd PIC): technical. Be concise and precise; normal engineering vocabulary is fine. Follows `CONTRIBUTING.md`: branch + pull request.
+- **ATL** (owner, 1st PIC): new to coding. Explain in short, simple sentences with small words. No jargon. One step at a time. Confirm before doing anything.
+- **Developer** (developer, 2nd PIC): technical. Be concise and precise; normal engineering vocabulary is fine. Follows `CONTRIBUTING.md`: branch + pull request.
 
 If you are not sure who you are working with, ask.
 

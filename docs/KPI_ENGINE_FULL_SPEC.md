@@ -63,7 +63,7 @@ Deposit Growth (MoM):
 
 ### STAGE 2 — PER-AGENT BREAKDOWN  (build when mistake-log + contact-log live in site)
 - Requires: (a) mistake logging moved into the tracker, (b) contact-log/reactivation ownership live.
-- Then split metrics per CS (Raven, Skylar, Brix, Jason, Trevor):
+- Then split metrics per CS (the Team B agents):
   each agent's T3/TV/Growth (shared team values) + own FRT + own Discipline → BaseKPI per agent.
 - Output: per-agent BaseKPI table (like the May sheet).
 

@@ -2,7 +2,7 @@
 -- Every such permission now comes as a pair: "their own ..." and "any ... / others'". Before this change the single permission meant "any",
 -- so anyone who had it switched OFF (on a role or personally) must also get the "own" one switched off, or they would suddenly be able
 -- to work their own records. This only copies existing OFF switches over. Nothing is dropped or rewritten.
--- ADDITIVE and safe to run twice. Run (production, Aldo only, BEFORE deploying the Worker that reads the new permissions):
+-- ADDITIVE and safe to run twice. Run (production, ATL only, BEFORE deploying the Worker that reads the new permissions):
 --   wrangler d1 execute groupb-tracker-db --remote --file=./schema/schema_v32_own_permissions.sql
 
 -- roles

@@ -40,7 +40,7 @@ Already on the base branch (do not rewrite; extend only if you own it): `worker/
 - **Flows, Analytics, Recycle bin, Team workload, Assignments, Settings**: admin only (403 for others).
 - **Projects**: admin creates/edits/archives; agent sees only projects they are a member of.
 - **Schedule**: everyone reads; only admin creates/edits/deletes items and types; an agent may request a swap on a shift they are on.
-- **Campaigns** tab: **hide it from the new navigation. Do NOT delete the Campaigns code, routes or tables** (the live console still has the VVIP redeem-code tool; Aldo will decide separately).
+- **Campaigns** tab: **hide it from the new navigation. Do NOT delete the Campaigns code, routes or tables** (the live console still has the VVIP redeem-code tool; ATL will decide separately).
 
 ## 3. API contract (`/api/work/*`, all authenticated, JSON, errors `{error}` with a real HTTP status)
 
@@ -86,7 +86,7 @@ Dates `YYYY-MM-DD` (Malaysia time, GMT+8); timestamps UTC `YYYY-MM-DD HH:MM:SS`.
 - Local Worker (backend agents): `npx wrangler dev --local` with a throwaway local D1; apply `schema/schema.sql` then the other `schema_v*.sql` files in version order, then `schema_v25_work.sql`, **all with `--local`**. Seed a local admin and 3 agents via `POST /api/users/init` and `POST /api/users`.
 - `npm run build` must pass. There is no linter or test suite; add focused tests only if cheap (plain Node scripts in `scripts/`).
 
-## 5. Style rules (Aldo's, non-negotiable)
+## 5. Style rules (ATL's, non-negotiable)
 
 - Keep the live console's colours and **the brand colours everywhere** (brand identity). Layout is what changes.
 - **No pill/chip filter rows.** Use dropdowns, segmented switches, or checklist menus with colour dots. Every dropdown is custom and searchable (use the kit).
@@ -112,4 +112,4 @@ Reuse their logic and props; re-house and re-layout them. If an existing compone
 
 ## 8. Rollout flag (shell-ui)
 
-The new shell must be **off by default** in production until Aldo approves: enable with `?revamp=1` in the URL (remember in `localStorage.revamp_ui = "1"`; `?revamp=0` turns it off). With the flag off, `App.jsx` behaves exactly as today (old tab bar, old pages). This makes the final cut-over a one-line change and keeps the live console safe.
+The new shell must be **off by default** in production until ATL approves: enable with `?revamp=1` in the URL (remember in `localStorage.revamp_ui = "1"`; `?revamp=0` turns it off). With the flag off, `App.jsx` behaves exactly as today (old tab bar, old pages). This makes the final cut-over a one-line change and keeps the live console safe.

@@ -1,5 +1,5 @@
 # SESSION HANDOFF — 2026-06-19
-For continuing in the **Claude Code Desktop App**. Open the project at `C:\Dev\groupb-tracker`.
+For continuing in the **Claude Code Desktop App**.
 This is just "where we left off" — full context lives in CLAUDE.md, HANDOFF.md, IDEAS.md, EXECUTED_IDEAS.md, KPI_ENGINE_FULL_SPEC.md.
 
 ## Where we are
@@ -12,7 +12,7 @@ drawer redesign, Changes tab.
 Reactivation + Growth + Discipline + FRT bonuses (unlock at BaseKPI > 75) → AddMarks →
 **FinalKPI = BaseKPI + AddMarks**, per agent. Spec: `KPI_ENGINE_FULL_SPEC.md`.
 
-Aldo hadn't yet picked the exact slice. Options on the table:
+ATL hadn't yet picked the exact slice. Options on the table:
 1. **Bonus Track → FinalKPI** — the main missing piece; mostly frontend. (Recommended next.)
 2. **Auto reactivation count** from contact-log (anti-gaming: contact logged BEFORE redeposit).
 3. **Polish the manual Team Challenge board.**
@@ -32,7 +32,7 @@ Current code: `ManualBoard` component in `src/App.jsx` (~line 1491), endpoint `/
 ## Reminders for the next session
 - This is **LIVE production**. Get approval before destructive SQL or any `wrangler deploy`.
 - `--remote` on every `wrangler d1` command. Pages deploy → `--branch=production`.
-- Talk to Aldo in plain English, concise, one step at a time, confirm before doing anything.
+- Talk to ATL in plain English, concise, one step at a time, confirm before doing anything.
 
 ## Related
 

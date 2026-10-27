@@ -2,13 +2,13 @@
 
 Long session (5–17 Oct). Main result: the Dashboard **Daily report** button now builds the full ATL report by itself, and the Livechat/Telegram table fills from Lark. Also: Telegram pool numbers for Aug/Sep, and a Table/Assigned split that was shipped and rolled back.
 
-## Today in short (Aldo's summary)
+## Today in short (ATL's summary)
 1. Updated the daily alignment template with the comparison tables and analysis bullet points (Top Deposit Movers back too).
 2. Auto sync of the engagement table (Livechat & Telegram).
 3. Auto analyzer built in, with a phrase book covering the many situations and variables the report can meet. It checks its own numbers and says "check manually" when they don't add up.
 4. Faster copy: about 3 s instead of 10 s.
 
-## Shipped (all deployed with Aldo's approval)
+## Shipped (all deployed with ATL's approval)
 | Commit | What |
 |---|---|
 | a332a09 | **ATL report template** in the clipboard: sections 1–5, section 1 fully automatic. |
@@ -23,7 +23,7 @@ Report order now: `<date> - Leader Reporting` → comparison tables (Deposit, Ac
 
 ## Decisions
 - Report analysis is **rules, not AI** (free, checkable). AI writing (Claude API, about $0.06–0.08 per report on Opus 5.5) parked as a possible step 2.
-- No ✏️ draft marks in the copy (Aldo's call); they can come back via `D` in `buildDailyReport`.
+- No ✏️ draft marks in the copy (ATL's call); they can come back via `D` in `buildDailyReport`.
 - "Auto learning" = new situations print a plain fallback and are listed in section 5; a human adds wordings.
 - Engagement source is the small Lark "Engagement" table (always yesterday MYT), not the 12k-row monthly "Customer approaching" tables. Our Lark app already had access. NOW32 is skipped (not in `TEAM_BRANDS`).
 - Telegram pool: count only links Lark still had at the time (link `updated_at` ≥ the day). Sep 30 matched Lark within 6 (3,061 vs 3,067). August is an upper bound, because links added later in the month also count.

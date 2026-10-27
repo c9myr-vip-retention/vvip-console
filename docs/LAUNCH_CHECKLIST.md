@@ -1,6 +1,6 @@
 # LAUNCH CHECKLIST — groupb-tracker
 Everything to verify BEFORE officially launching the tracker to the team.
-Owner: Aldo · Keep in repo root. Check items off as done.
+Owner: ATL · Keep in repo root. Check items off as done.
 
 ---
 
@@ -37,7 +37,7 @@ Owner: Aldo · Keep in repo root. Check items off as done.
 - [ ] Mobile / small-laptop check: table and worklist usable at smaller widths
 
 ## 4. Accounts & access
-- [ ] CS accounts created (Raven, Skylar, Brix, Jason, Trevor) as role=member, each tested login
+- [ ] CS accounts created (the Team B agents) as role=member, each tested login
 - [ ] Each CS changed their starter password
 - [ ] Settings (user management) hidden from members, visible to admin only
 - [ ] PARKED: per-account edit permissions (IDEAS.md) — revisit when juniors onboard
@@ -59,7 +59,7 @@ Owner: Aldo · Keep in repo root. Check items off as done.
 ## 7. Launch day
 - [ ] Morning-of: run the 3 health-check queries (section 1)
 - [ ] Announce in team channel with the live URL + login reminders
-- [ ] First week: Aldo reviews Performance tab daily — checks logging discipline and early save-rate signal
+- [ ] First week: ATL reviews Performance tab daily — checks logging discipline and early save-rate signal
 
 ## Related
 

@@ -20,11 +20,11 @@ Related: [[BUILD-CONTRACT]] · [[HANDOFF]] · [[DEPLOY]]
 - API tests on a fresh local D1: work-setup 64/64, tasks 101/101, schedule 65/65. Run each suite on its own fresh database (they share test users).
 
 ## Open items
-- Native browser dropdowns remain inside live components reused by the revamp (Settings accounts form, Performance mistake log, Dashboard retention select, player drawer date). Fixing them changes live code: needs Aldo's decision.
+- Native browser dropdowns remain inside live components reused by the revamp (Settings accounts form, Performance mistake log, Dashboard retention select, player drawer date). Fixing them changes live code: needs ATL's decision.
 - "Daily lists per agent" (live `AssignedView`) still has a chip row for picking agents.
 - Not yet verified against real production data or the real Lark widget (`WIDGET_LARK`).
-- GitHub push from cloud sessions returns 403 (the Claude GitHub App is not installed on the org). Aldo pushes from his PC.
-- Before going live: Aldo approves, run `schema/schema_v25_work.sql` on production, deploy Worker and Pages. Only with Aldo's explicit approval.
+- GitHub push from cloud sessions returns 403 (the Claude GitHub App is not installed on the org). ATL pushes from his PC.
+- Before going live: ATL approves, run `schema/schema_v25_work.sql` on production, deploy Worker and Pages. Only with ATL's explicit approval.
 
 ## Files touched
 `src/App.jsx` (flag, scoped styles, `Settings hideLog`), `src/revamp/**`, `worker/work/{tasks,schedule,projects}.js`, `schema/schema_v25_work.sql` (additive `deleted_by`), `scripts/test-{setup,tasks,schedule}-api.mjs`, `scripts/revamp-shell-check.cjs`.

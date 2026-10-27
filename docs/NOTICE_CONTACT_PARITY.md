@@ -1,6 +1,6 @@
 # NOTICE — Assigned list update: fresh names first
 
-**To:** All CS · Teams A, B and C · **From:** Aldo · **Date:** 11 September 2026 · **Status:** Live now
+**To:** All CS · Teams A, B and C · **From:** ATL · **Date:** 11 September 2026 · **Status:** Live now
 
 ---
 

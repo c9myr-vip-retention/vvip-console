@@ -18,7 +18,7 @@
 | Priority order | **Whales/cooling first, then by KPI value (7–29 day idle), then shallow, churn last (light touch).** |
 | Daily capacity | **~10 per PIC per day** (tunable). |
 | Re-contact rhythm | After a contact, the player **rests 3 days**, then returns to the top if still quiet. |
-| PICs | brix, jason, raven, skylar, trevor (5). Admins (aldo, c9myr) manage, no pile. |
+| PICs | Agent E, Agent C, Agent A, Agent B, Agent D (5). Admins (ATL, c9myr) manage, no pile. |
 
 ---
 

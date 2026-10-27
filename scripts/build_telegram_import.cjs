@@ -1,4 +1,5 @@
 // One-off: convert telegram_list_template.csv -> telegram_import.sql (upserts).
+// The CSV held player data and was removed from the repo before the AI Department handover.
 // Maps short brand codes to the full brand names the app uses. Run with: node scripts/build_telegram_import.cjs
 const fs = require("fs");
 const path = require("path");

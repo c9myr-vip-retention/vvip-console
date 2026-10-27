@@ -1,6 +1,6 @@
 # NOTICE — Your new "Assigned" list is live
 
-**To:** All CS · Teams A, B and C · **From:** Aldo · **Date:** 11 August 2026 · **Status:** Live now
+**To:** All CS · Teams A, B and C · **From:** ATL · **Date:** 11 August 2026 · **Status:** Live now
 
 ---
 

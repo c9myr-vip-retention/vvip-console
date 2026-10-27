@@ -2,7 +2,7 @@
 -- ADDITIVE: two new tables, three seed rows, and ONE nullable column on users. Nothing existing is changed or dropped.
 -- Every current account keeps role_key = NULL, which means "behave exactly as today" (the old flags decide). An account only moves
 -- onto this system when an admin gives it a role in Settings.
--- Run (production, Aldo only, BEFORE deploying the Worker that uses it):
+-- Run (production, ATL only, BEFORE deploying the Worker that uses it):
 --   wrangler d1 execute groupb-tracker-db --remote --file=./schema/schema_v27_roles.sql
 
 CREATE TABLE IF NOT EXISTS roles (

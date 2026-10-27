@@ -1,6 +1,6 @@
 # HANDOFF.md — groupb-tracker · VIP RTN Console
 **Audience:** Claude Code (and any engineer joining this project)
-**Owner:** Aldo — Assistant Team Leader, Team B, C9MYR VIP Retention (Malaysian online casino market)
+**Owner:** ATL — Assistant Team Leader, Team B, C9MYR VIP Retention (Malaysian online casino market)
 **Status:** LIVE in production with real daily data. Handle with care.
 **Last updated:** 2026-06-12
 
@@ -10,11 +10,11 @@
 
 ## 0. Operating rules (read first)
 
-1. **This system is LIVE.** The D1 database receives real player data daily at 15:00 MYT. Never run destructive SQL (`DELETE`, `DROP`, schema rewrites) or `wrangler deploy` without explicit approval from Aldo.
+1. **This system is LIVE.** The D1 database receives real player data daily at 15:00 MYT. Never run destructive SQL (`DELETE`, `DROP`, schema rewrites) or `wrangler deploy` without explicit approval from ATL.
 2. **Never weaken the unique constraint** on `player_days` — `(player_key, snapshot_date, brand, tier_segment)`. A previous schema lacking `brand` caused silent cross-brand data corruption.
 3. **Surgical edits over rewrites.** Modify existing files in place; do not regenerate whole files unless asked.
-4. **Aldo's style:** direct, concise, production-ready deliverables, honest critical feedback. Flag flaws proactively. No filler.
-5. Environment: **Windows + PowerShell** (not WSL), wrangler v4.x, project at `C:\Dev\groupb-tracker` (recently moved out of OneDrive to avoid sync locks). Always quote paths. For `wrangler d1` commands against production, `--remote` is mandatory — without it wrangler hits a local simulation.
+4. **ATL's style:** direct, concise, production-ready deliverables, honest critical feedback. Flag flaws proactively. No filler.
+5. Environment: **Windows + PowerShell** (not WSL), wrangler v4.x. Always quote paths. For `wrangler d1` commands against production, `--remote` is mandatory — without it wrangler hits a local simulation.
 
 ---
 
@@ -57,7 +57,7 @@ Cloudflare Pages (React/Vite SPA)  ──  https://groupb-tracker.pages.dev   [s
 
 ### Repo layout
 ```
-C:\Dev\groupb-tracker\
+vvip-console/
 ├─ worker\index.js          # the entire API (single file)
 ├─ src\App.jsx              # the entire frontend (single file) + main.jsx
 ├─ schema.sql               # original v1 schema (users + legacy tables)
@@ -101,7 +101,7 @@ Key columns: `snapshot_date, player_key, brand, tier_segment, uid, username, ent
 `UNIQUE (snapshot_date, player_key, brand, tier_segment)`; fields: `class, assigned_to, status, note, updated_by, updated_at`.
 Status flow: `ASSIGNED → CONTACTED → RESPONDED / RECOVERED / NO_RESPONSE / SKIPPED`. Save rate = RECOVERED ÷ actioned (contacted+responded+recovered+no_response).
 
-**Ownership rule (shipped 2026-07-10, `d7c4389`).** Clicking a status button in the Drawer falls back to the **logged-in agent** (`me.username`) when no assignee was picked, so a contact can never be saved unowned. It never overwrites an assignee a manager chose on purpose, and saving a *note alone* does not assign. Why it matters: the reactivation bonus only counts a RECOVERED row that has an `assigned_to` — before this, an agent who forgot the dropdown silently lost the point. (One-off backfill of the 21 pre-existing unowned July rows: mexha 18, skylar 2, jason 1.)
+**Ownership rule (shipped 2026-07-10, `d7c4389`).** Clicking a status button in the Drawer falls back to the **logged-in agent** (`me.username`) when no assignee was picked, so a contact can never be saved unowned. It never overwrites an assignee a manager chose on purpose, and saving a *note alone* does not assign. Why it matters: the reactivation bonus only counts a RECOVERED row that has an `assigned_to` — before this, an agent who forgot the dropdown silently lost the point. (One-off backfill of the 21 pre-existing unowned July rows: Agent H 18, Agent B 2, Agent C 1.)
 
 **Attribution trap.** `updated_by` looks like "who did it", but `autoOutcomes` **overwrites it with `'auto'`** whenever it flips a row. So for NO_RESPONSE/RECOVERED rows the original agent is gone from that column. To attribute an old row, query `activity_log` where `action='contact' AND detail LIKE 'Status CONTACTED%' AND detail LIKE '%<player_key> (<brand>)'`, and pick the entry whose timestamp lines up with that row's `snapshot_date` — "most recent action for that player" is **wrong** (agents touch the same player across different snapshot rows). `updated_by` IS authoritative when it isn't `'auto'`.
 
@@ -118,7 +118,7 @@ Two rules, **RECOVERED evaluated first** so a deposit always beats a stale-timeo
 **Reactivation KPI bonus has no window of its own** — it is simply `COUNT(DISTINCT player_key)` of `status='RECOVERED'` per `assigned_to` for the current month (`GET /api/rtn/kpi` → `reactivation`). It requires a non-null `assigned_to`, hence the ownership rule above.
 
 ### `users` — dashboard logins
-`username, password_hash (SHA-256 + env salt), role ('admin' | 'member')`. Admin = ATL; member = CS reps (Raven, Skylar, Brix, Jason, Trevor).
+`username, password_hash (SHA-256 + env salt), role ('admin' | 'member')`. Admin = ATL; member = CS reps (the Team B agents).
 
 ---
 
@@ -139,7 +139,7 @@ Auth: session token (login) for dashboard routes; `Bearer INGEST_TOKEN` for `/ap
 | `POST /api/rtn/lark-sync` | pull Telegram links from the Lark P&L1 table → `player_telegram` (managers). `?dry=1` = count + sample only, writes nothing. Also runs daily via cron. See §5.1 |
 | `GET /api/rtn/lark-debug` | manager peek at the Lark Base: table list, `?table=<id>` lists that table's views, `&view=<id>&n=<N>` samples N rows |
 
-`INGEST_TOKEN` is a wrangler secret. Current value is known to Aldo; rotation is queued (see backlog).
+`INGEST_TOKEN` is a wrangler secret. Current value is known to ATL; rotation is queued (see backlog).
 
 ---
 
@@ -161,7 +161,7 @@ Fills each player's Telegram/LiveChat link automatically from a Lark Base, repla
 
 **Where it reads**
 - Base **"Telegram Approaching"** (`LARK.BASE = Hstmbhe1Wakn2zs9HSelYFq1gig`), table **P&L1** (`tbl2cAhlR75Kr3iI`), reading **only the Team A / Team B / Team C views** (`vewMADSF1q` / `vewToNmnfj` / `vewcZg2cfc`). The **Overview** view is skipped on purpose — it contains blank-telegram rows.
-- Auth: the shared **`LARK_APP_ID` / `LARK_APP_SECRET`** Worker secrets (Teddy's "Google Drive" app, `cli_aaad54186e785ed2`). The app needs *Can view* on P&L1 via that table's **Advanced Permissions** (base-level sharing alone is ignored while advanced perms are on).
+- Auth: the shared **`LARK_APP_ID` / `LARK_APP_SECRET`** Worker secrets (the Team A ATL's "Google Drive" app, `cli_aaad54186e785ed2`). The app needs *Can view* on P&L1 via that table's **Advanced Permissions** (base-level sharing alone is ignored while advanced perms are on).
 
 **Per-row logic** (~1,972 rows/run)
 1. `Username` → `player_key`. Empty → skip (`noKey`).
@@ -218,7 +218,7 @@ Nav: **Dashboard · Today · Performance · Settings** (+ login screen, role-awa
 
 ## 9. Backlog (priority order)
 
-1. **Feed DR/standby tabs** — unlock the cold/dormant population (needs tab-name + layout confirmation from Aldo, then feeder CONFIG extension; consider `source_tab` column).
+1. **Feed DR/standby tabs** — unlock the cold/dormant population (needs tab-name + layout confirmation from ATL, then feeder CONFIG extension; consider `source_tab` column).
 2. **Players history view** — search any player across snapshots; behavior timeline; worth building once ~7+ days of history exist.
 3. **Phase-2 sequence engine** — scheduled Worker (cron) computing day-codes/streaks/gaps/baselines → `behavior_class` table → surface BC cards in UI.
 4. **Deposit drop/rise alerts** vs each player's own baseline (needs history).
@@ -228,7 +228,7 @@ Nav: **Dashboard · Today · Performance · Settings** (+ login screen, role-awa
 8. 中文/BM translations of approach templates (Zyra Internal Mail requires EN/中文/BM).
 9. **Telegram-link auto-cleanup** — the Lark sync (§5.1) never deletes, so a link stays after a player leaves the Lark sheet. Optional: prune `player_telegram` rows (`updated_by='lark'`) no longer present in the latest sync.
 
-**Open product question (Aldo to decide):** internal floor tool vs sellable corporate product — flips the priority of #7 vs #1–3.
+**Open product question (ATL to decide):** internal floor tool vs sellable corporate product — flips the priority of #7 vs #1–3.
 
 ---
 

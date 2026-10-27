@@ -6,8 +6,8 @@ Welcome. This is the shared copy of the VVIP Tracker console. It's **live**: age
 
 | Person | Role | Can do | Never does |
 |---|---|---|---|
-| Aldo | Owner (1st PIC) | Approves and merges changes, deploys, runs database commands | |
-| Mexha | Developer (2nd PIC) | Reads the code, runs it locally, builds features and fixes on a branch, opens pull requests, writes docs, logs bugs | Pushes straight to `main`, handles secrets |
+| ATL | Owner (1st PIC) | Approves and merges changes, deploys, runs database commands | |
+| Developer | Developer (2nd PIC) | Reads the code, runs it locally, builds features and fixes on a branch, opens pull requests, writes docs, logs bugs | Pushes straight to `main`, handles secrets |
 
 ## One-time setup
 
@@ -20,14 +20,14 @@ Welcome. This is the shared copy of the VVIP Tracker console. It's **live**: age
    ```
 4. Open the address Vite prints (usually http://localhost:5173) and log in with **your own console account**.
 
-**Important:** the local app talks to the **live** API. Anything you save locally (status buttons, notes, assignments, Mark contacted) writes real data that agents see. When testing, look and click around, but don't save on real players. If you need to test a write, ask Aldo first.
+**Important:** the local app talks to the **live** API. Anything you save locally (status buttons, notes, assignments, Mark contacted) writes real data that agents see. When testing, look and click around, but don't save on real players. If you need to test a write, ask ATL first.
 
 Your login only shows the brands your account is scoped to. That's expected.
 
 ## How to make a change
 
 1. Get the latest code: `git checkout main` then `git pull`.
-2. Make a branch per task: `git checkout -b mexha/<short-task-name>` (for example `mexha/bundle-split`).
+2. Make a branch per task: `git checkout -b dev/<short-task-name>` (for example `dev/bundle-split`).
 3. Make the change. Keep it small: one task per branch.
 4. Check it builds: `npm run build` must pass.
 5. Check it in the browser, including phone width (375 px) if you touched layout.
@@ -36,8 +36,8 @@ Your login only shows the brands your account is scoped to. That's expected.
    - **What** changed
    - **Why**
    - **How you tested it** (and a screenshot if it's visual)
-   - **Needs deploy?** Worker, Pages, or both, and any database change Aldo has to run
-8. Aldo reviews, merges and deploys. Please don't merge your own pull request.
+   - **Needs deploy?** Worker, Pages, or both, and any database change ATL has to run
+8. ATL reviews, merges and deploys. Please don't merge your own pull request.
 
 ## Never
 
@@ -48,7 +48,7 @@ Your login only shows the brands your account is scoped to. That's expected.
 ## Code rules
 
 - **Surgical edits.** Change what the task needs. Don't reformat or rewrite whole files.
-- **Business rules are product rules.** `classifyAll` (classes and precedence), auto-assign, KPI and reactivation logic encode how the team works. Don't change their behaviour without Aldo agreeing in the pull request.
+- **Business rules are product rules.** `classifyAll` (classes and precedence), auto-assign, KPI and reactivation logic encode how the team works. Don't change their behaviour without ATL agreeing in the pull request.
 - **Colours come from tokens.** Use `var(--token)` from the `:root` block in `App.jsx`. Don't add new hex colours. Each colour has one meaning (see `docs/design/console-design-pass.html`).
 - **Keyboard and phone.** Clickable rows and cards use the `tap()` helper. Layout must fit 375 px with no sideways page scroll.
 - **No new packages** without asking in the pull request first.
@@ -60,7 +60,7 @@ Pick one, one branch each:
 
 1. **Split the bundle.** The build is over 500 kB and loads slowly on phones. Load Dashboard and Campaigns only when they're opened (`React.lazy` or dynamic `import()`).
 2. **Add tests and a linter.** There are none today. Start with unit tests for `classifyAll`, the core business logic.
-3. **Upgrade wrangler** from 3.x to 4.x and check `npm run build` still works. Deploy testing stays with Aldo.
+3. **Upgrade wrangler** from 3.x to 4.x and check `npm run build` still works. Deploy testing stays with ATL.
 4. **Copy consistency.** Instruction text still says things like "Whale quiet 6d" while the amount column says "6 days". Make day counts consistent.
 5. **Split `App.jsx`** (about 7,100 lines) into one file per tab. Only after task 2, so the tests catch breakage.
 
@@ -73,4 +73,4 @@ Pick one, one branch each:
 
 ## Bugs and questions
 
-Log bugs as **GitHub Issues**: what you did, what you expected, what happened, and a screenshot. For anything about how the team works (classes, KPI, who gets which player), ask Aldo.
+Log bugs as **GitHub Issues**: what you did, what you expected, what happened, and a screenshot. For anything about how the team works (classes, KPI, who gets which player), ask ATL.

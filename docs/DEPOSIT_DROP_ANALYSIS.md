@@ -48,31 +48,31 @@ Cyclical = normal between-deposit gaps (day-over-day is noisy). Riding winnings 
 ### Heavy loss — tapped out (churn risk, handle gently)
 | Brand·Tier | Player | Dep 1→2 Aug | Win/Loss | Withdrew | Still betting |
 |---|---|---|---|---|---|
-| LPK777·V | kcallison | 18,699 → 2,386 | −2,511 | 0 | 18,363 |
-| MY36·V | kader007 | 6,970 → 2,750 | −1,637 | 700 | 49,187 |
-| BM69·V | 27396235 | 7,208 → 300 | −1,169 | 0 | 206,730 |
-| LPK777·V | kuala80 | 6,198 → 1,598 | −1,149 | 450 | 6,885 |
+| LPK777·V | (removed) | 18,699 → 2,386 | −2,511 | 0 | 18,363 |
+| MY36·V | (removed) | 6,970 → 2,750 | −1,637 | 700 | 49,187 |
+| BM69·V | (removed) | 7,208 → 300 | −1,169 | 0 | 206,730 |
+| LPK777·V | (removed) | 6,198 → 1,598 | −1,149 | 450 | 6,885 |
 
 ### Cashed out (withdrew — watch for return)
 | Brand·Tier | Player | Dep 1→2 Aug | Win/Loss | Withdrew | Still betting |
 |---|---|---|---|---|---|
-| MY36·V | sjunior | 35,140 → 16,590 | +6,536 | 23,500 | 114,896 |
-| SK69·V | 97250 | 18,890 → 12,000 | +40,126 | 33,500 | 112,321 |
-| LPK777·V | afiqhakimi | 8,400 → 2,000 | +7,950 | 9,998 | 8,436 |
+| MY36·V | (removed) | 35,140 → 16,590 | +6,536 | 23,500 | 114,896 |
+| SK69·V | (removed) | 18,890 → 12,000 | +40,126 | 33,500 | 112,321 |
+| LPK777·V | (removed) | 8,400 → 2,000 | +7,950 | 9,998 | 8,436 |
 
 ### Playing on balance — not funding (the recoverable middle)
 | Brand·Tier | Player | Dep 1→2 Aug | Win/Loss | Withdrew | Still betting |
 |---|---|---|---|---|---|
-| SK69·V | 100341 | 15,700 → 0 | −381 | 0 | 1,048 |
-| LPK777·V | thomas0529 | 10,300 → 100 | −96 | 0 | 270 |
-| MY36·3 | haaraz | 7,520 → 120 | −121 | 0 | 712 |
+| SK69·V | (removed) | 15,700 → 0 | −381 | 0 | 1,048 |
+| LPK777·V | (removed) | 10,300 → 100 | −96 | 0 | 270 |
+| MY36·3 | (removed) | 7,520 → 120 | −121 | 0 | 712 |
 
 ---
 
 ## Method
 - **1 Aug** = daily_deposit on snapshot 08-02; **2 Aug** = snapshot 08-03. A player "dropped" if 2 Aug < 70% of 1 Aug.
 - 2-Aug state (win_loss, withdraw, valid_bet) drives the reason label, in priority: left-tier → heavy loss (≤ −1,000) → cashed out (withdrew ≥ half prior deposit) → riding winnings (won ≥ 500, still betting) → playing-on-balance (still betting) → cold (7+ days) → cyclical.
-- Full top-80 list with every field: `DEPOSIT_DROP_TOP_PLAYERS.csv`.
+- The full top-80 player list was removed from the repo before the AI Department handover (player data).
 
 **Caveat:** day-over-day is inherently noisy (many players don't deposit daily), so "cyclical" is real slack, not loss. The reason labels are rule-based estimates; the player numbers are exact.
 

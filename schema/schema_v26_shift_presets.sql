@@ -1,6 +1,6 @@
 -- v26: admin-managed shift times for the Schedule page (the "Quick fill a shift" list).
 -- Additive only: one new table + three seed rows. Touches no existing table.
--- Run (production, Aldo only): wrangler d1 execute groupb-tracker-db --remote --file=./schema/schema_v26_shift_presets.sql
+-- Run (production, ATL only): wrangler d1 execute groupb-tracker-db --remote --file=./schema/schema_v26_shift_presets.sql
 CREATE TABLE IF NOT EXISTS schedule_shift_presets (
   key        TEXT PRIMARY KEY,                    -- slug, e.g. 'am', 'mid-2'
   name       TEXT NOT NULL,                       -- what the shift is called on the board, e.g. 'Morning'

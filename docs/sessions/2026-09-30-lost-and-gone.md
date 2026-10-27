@@ -2,8 +2,8 @@
 
 ## What we worked on
 - Counted open-to-contact players (29 Sep): 9,212 all teams; Team B with Telegram, outside the 48h cooldown = 185.
-- Split the 185 across agents (Skylar 30%, Brix 20%, Trevor 18%, Raven 17%, Jason 15%) as a CSV. Jason's share was then moved to Trevor.
-- Logged 68 Brix/Raven players as CONTACTED on 29 Sep (Aldo confirmed they had messaged them). 32 of them had already been logged by Skylar/Trevor that evening and were moved to Brix/Raven on Aldo's instruction. Activity log rows are tagged `bulk-log via Claude for Aldo`.
+- Split the 185 across agents (Agent B 30%, Agent E 20%, Agent D 18%, Agent A 17%, Agent C 15%) as a CSV. Agent C's share was then moved to Agent D.
+- Logged 68 Agent E/Agent A players as CONTACTED on 29 Sep (ATL confirmed they had messaged them). 32 of them had already been logged by Agent B/Agent D that evening and were moved to Agent E/Agent A on ATL's instruction. Activity log rows are tagged `bulk-log via Claude for ATL`.
 - Team B vs C engagement comparison for Sep MTD.
 - Built and deployed the Lost & gone panel, 30-day grid export, and drawer money calendar (see [[EXECUTED_IDEAS]]).
 
@@ -25,6 +25,6 @@
 
 ## Files touched
 - `src/App.jsx`, `package.json`, `package-lock.json` (added `xlsx-js-style`), `docs/EXECUTED_IDEAS.md`.
-- Production data: `contact_log` + `activity_log` rows for 68 Brix/Raven contacts on 2026-09-29.
+- Production data: `contact_log` + `activity_log` rows for 68 Agent E/Agent A contacts on 2026-09-29.
 
 Related: [[HANDOFF]] · [[EXECUTED_IDEAS]] · [[DEPLOY]]

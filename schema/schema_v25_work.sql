@@ -1,7 +1,7 @@
 -- ============================================================
 -- groupb-tracker · Schema v25 · work management (tasks, projects, flows, templates, schedule)
 -- ADDITIVE ONLY: every statement is CREATE ... IF NOT EXISTS. Touches no existing table.
--- NOT YET RUN ON PRODUCTION. Run only after Aldo approves:
+-- NOT YET RUN ON PRODUCTION. Run only after ATL approves:
 --   wrangler d1 execute groupb-tracker-db --remote --file=./schema/schema_v25_work.sql
 -- (agents: use --local against a throwaway local D1 only, never --remote)
 -- Usernames (users.username) identify people. Dates are 'YYYY-MM-DD' in Malaysia time (GMT+8);

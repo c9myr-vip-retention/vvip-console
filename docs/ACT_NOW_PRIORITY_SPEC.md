@@ -1,6 +1,6 @@
 # ACT NOW — Priority Spec
 
-**Status: SHIPPED 2026-07-12.** Aldo chose **days 5–6** (§5 option b). Cooling whales now flag as `_cooling` and sort to the TOP of ACT NOW, with a ❄ COOLING tag, a "gentle check-in, no deposit push" message, and the RESTRAINT guard suppressed. The filter-relative top-10 loss rule and the flat RM 2,000 threshold were **left as-is** (not removed) — revisit if desired.
+**Status: SHIPPED 2026-07-12.** ATL chose **days 5–6** (§5 option b). Cooling whales now flag as `_cooling` and sort to the TOP of ACT NOW, with a ❄ COOLING tag, a "gentle check-in, no deposit push" message, and the RESTRAINT guard suppressed. The filter-relative top-10 loss rule and the flat RM 2,000 threshold were **left as-is** (not removed) — revisit if desired.
 **Date:** 2026-07-10 · Baseline snapshot: `2026-07-10` (Team B, 3,404 players)
 
 ---
@@ -75,7 +75,7 @@ unknown and must be measured (§7).
    never appears in PRIORITY at all.
 2. **A missed working day.** If nobody clears the list that day, the window closes permanently.
 
-**Mitigation options (Aldo to choose):**
+**Mitigation options (ATL to choose):**
 - **(a) Keep `dsld === 6`.** Purest rule. Accepts both risks. Requires the notification bell to alert.
 - **(b) `dsld IN (5,6)`.** Same intent ("last chance before cold"), survives a one-day lag. Today: 14 players.
 - **(c) `dsld === 6 OR (dsld === 7 AND never contacted while cooling)`.** Catches lag-skips, but blurs
@@ -132,7 +132,7 @@ PRIORITY should move earlier and this spec's core number changes.
 
 ---
 
-## 9. Open questions for Aldo
+## 9. Open questions for ATL
 
 1. §5 — pick (a) strict day 6, (b) days 5–6 *(recommended)*, or (c) lag-catching variant.
 2. Should PRIORITY respect the team wall (an agent sees only his brands), or is it team-wide?

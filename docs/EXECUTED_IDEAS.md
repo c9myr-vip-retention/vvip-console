@@ -157,7 +157,7 @@ Last updated: 2026-09-30
    players. To feed (c), `/api/rtn/performance` now returns the reactivation data **per recovered player**
    `{agent, player_key, brand, tier_segment, tier}` (was per-agent aggregates); the frontend folds it into the
    per-agent Score + band counts AND a per-player tier map. Verified the per-player rows re-aggregate to the
-   same scores (jason 8.45, trevor 5.50). *Deployed (worker + pages).*
+   same scores (Agent C 8.45, Agent D 5.50). *Deployed (worker + pages).*
 
 ---
 
@@ -167,12 +167,12 @@ Last updated: 2026-09-30
 1. **Reactivation scoring switched from return-anchored to recovered-anchored** (worker `/api/rtn/kpi`
    `reactStmt` + `/api/rtn/performance`, both to identical logic). The first weighted build credited the
    most-recent contact of ANY status (`CONTACTED/RESPONDED/NO_RESPONSE/RECOVERED`) before a player's return
-   — which credited **skylar 0.10 while she had 0 RECOVERED** (traced to a NO_RESPONSE contact on a
+   — which credited **Agent B 0.10 while she had 0 RECOVERED** (traced to a NO_RESPONSE contact on a
    1-2-day-idle player who self-returned). **Now:** score = the agent's `status='RECOVERED'` players (by
    `contacted_at` month), each weighted by comeback depth (deepest "Reactivated X Days" band): 1-6d=0.10,
    7-13d=0.50, 14-29d=0.75, 30+d=1.00. Only recoveries count, so bands sum to the Recovered column and
-   **0 recovered = 0 score** (skylar/raven drop to no-score). `no_band` fallback = shallow 0.10 (0 cases in
-   Aug). New Aug numbers: jason 7.55→**8.45** (bands 17/12/1/0 = 30 recovered), trevor 6.75→**5.50**. July
+   **0 recovered = 0 score** (Agent B/Agent A drop to no-score). `no_band` fallback = shallow 0.10 (0 cases in
+   Aug). New Aug numbers: Agent C 7.55→**8.45** (bands 17/12/1/0 = 30 recovered), Agent D 6.75→**5.50**. July
    still frozen flat. *Deployed (worker only — frontend shape unchanged).*
 
 ---
@@ -186,7 +186,7 @@ Last updated: 2026-09-30
    depth-weighted logic as the KPI `reactStmt` — credited to the most recent same-month contact, one count
    per player), and expanding a row shows the split: `1–6d ×0.10 · 7–13d ×0.50 · 14–29d ×0.75 · 30+d ×1.00
    = total`, with the letter grade held until month-end. Score is opt-in per table (a `react` prop), so By
-   Class / By Brand are untouched. Verified live: jason 7.55, trevor 6.75. *Deployed (worker + pages).*
+   Class / By Brand are untouched. Verified live: Agent C 7.55, Agent D 6.75. *Deployed (worker + pages).*
    - **Recovered vs Score sit side by side and measure differently** — Recovered is the old auto-flip status
      count, Score is the new return-anchored weighting. Both labeled so agents aren't confused. This is the
      first place the weighted reactivation number surfaces on-screen (the old Base/Bonus scorecard stays off).
@@ -214,13 +214,13 @@ Last updated: 2026-09-30
 ### 🟠 High — a reactivation is scored by how cold the player was when they returned, not a flat 1
 1. **Weighted reactivation score, cutover 2026-08** (worker `/api/rtn/kpi`, `reactStmt`). The old metric
    counted every recovered player as **1**, so nudging a 1-day-idle player who'd have returned anyway scored
-   the same as winning back a 40-day churn. Proof from July: jason logged **184** "reactivations", but **52%**
-   of all team recoveries were players idle ≤6 days; raven did the most genuine deep-churn work (80 of 85) yet
+   the same as winning back a 40-day churn. Proof from July: Agent C logged **184** "reactivations", but **52%**
+   of all team recoveries were players idle ≤6 days; Agent A did the most genuine deep-churn work (80 of 85) yet
    ranked 3rd on the flat board. **The fix:** each recovered player is weighted by idle-days **at return** (the
    feeder's "Reactivated X Days" band): 1–6d = **0.10**, 7–13d = **0.50**, 14–29d = **0.75**, 30+d = **1.00**.
    Credit needs a documented contact BEFORE the redeposit inside a depth window (**3 days** for 1–6d returns,
    **7 days** for 7d+), most recent qualifying contact wins, each player counts once (deepest return).
-   Re-weighted July: jason 184 → ~44, raven rises to co-top, edwin's 208-save volume exposed at 40.6.
+   Re-weighted July: Agent C 184 → ~44, Agent A rises to co-top, Agent G's 208-save volume exposed at 40.6.
    *Deployed (worker only).*
    - **July is frozen:** date-guarded (`month >= "2026-08"`) — July and earlier keep the original flat count
      byte-for-byte, so those numbers never move.
@@ -248,7 +248,7 @@ Last updated: 2026-09-30
    `snapshot_date` for pre-migration rows. Verified end-to-end: a contact on the 08-01 board saved 08-03
    reads **08-03**, and survives a cron NO_RESPONSE flip. *Deployed (D1 + worker + pages).*
    - **Backfill:** 37 pre-fix rows that a **human** last touched were set from `date(updated_at,'+8h')` —
-     their real save day — fixing history too (jason's earlier morning contacts moved forward a day where
+     their real save day — fixing history too (Agent C's earlier morning contacts moved forward a day where
      they'd been off). **2,764 auto-resolved rows left as-is:** the cron had overwritten their human
      contact time, so it's unrecoverable; they keep the `snapshot_date` fallback. Credit timing is
      unaffected — month attribution keys on `snapshot_date`, so recoveries still count in the right month.
@@ -256,8 +256,8 @@ Last updated: 2026-09-30
 ### 🟠 High — Performance counts one calendar month, not a rolling 30 days
 2. **Save-rate tables switched from `snapshot_date >= now-30d` to a hard calendar month** (defaults to the
    current MYT month; `?month=YYYY-MM` to review a past one). On the 2nd of a month the rolling window was
-   ~99% last month's work — jason showed 184 recovered / 574 actioned when his real August figures were
-   6 / 51. This enforces the reactivation-credit rule Aldo confirmed: **a recovery counts in the month it
+   ~99% last month's work — Agent C showed 184 recovered / 574 actioned when his real August figures were
+   6 / 51. This enforces the reactivation-credit rule ATL confirmed: **a recovery counts in the month it
    happened** (a July recovery must not count in August, even under the 14-day condition). Added a **month
    picker** (last 6 months) on the Performance tab and an **Export contacts CSV** button (raw log behind the
    tables: date, agent, player, brand, tier, class, status). *Deployed (worker + pages).*
@@ -346,7 +346,7 @@ CS verifies a RM100+ deposit (cumulative over the day), then releases one of two
 
 ### 🔴 Critical — data integrity: a contact can no longer be saved unowned
 0. **Status click always leaves an owner** — clicking **Assigned / Contacted / Responded** in the Drawer now falls back to the **logged-in agent** when the "Assign to…" dropdown was never touched. It never overwrites an assignee a manager chose on purpose; saving a *note alone* still doesn't assign. **Why it's critical:** the reactivation bonus only counts a `RECOVERED` row that carries an `assigned_to` — an agent who forgot the dropdown was silently losing the KPI point, and their failures pooled into an anonymous "—" row in Performance (inflating their Save %). *Deployed (pages) + `d7c4389`.*
-   - **Backfill:** 21 unowned July rows re-attributed → mexha 18, skylar 2, jason 1; orphans now 0. All 21 were failures (19 NO_RESPONSE, 1 RESPONDED, 1 blank), so **no reactivation points moved** — only Save % denominators, which correctly *lowered* mexha's and skylar's rates.
+   - **Backfill:** 21 unowned July rows re-attributed → Agent H 18, Agent B 2, Agent C 1; orphans now 0. All 21 were failures (19 NO_RESPONSE, 1 RESPONDED, 1 blank), so **no reactivation points moved** — only Save % denominators, which correctly *lowered* Agent H's and Agent B's rates.
    - **Attribution trap (documented in HANDOFF §3):** `updated_by` is rewritten to `'auto'` by the cron, so it can't identify the agent on NO_RESPONSE/RECOVERED rows. Use `activity_log` filtered to `detail LIKE 'Status CONTACTED%'` **and matched to the row's `snapshot_date`** — "most recent action for that player" gives the wrong agent.
 
 ### 🔴 Critical — new capability: automated Telegram-link feed
@@ -367,7 +367,7 @@ CS verifies a RM100+ deposit (cumulative over the day), then releases one of two
 ## ✅ Shipped 2026-06-21 → 06-27 — Access control + Activity log + Dashboard rebuild + Notification bell + Telegram self-serve
 
 ### 🔴 Critical — new capabilities: access control + audit trail
-1. **Access control — per-account roles + permissions** — 3 roles (Admin / Agent / Viewer) as presets over 4 flags (`can_edit`, `can_delete`, `on_leaderboard`, `manage_users`), set in Settings (collapsible per-user editor). **Enforced server-side** on every write route (contact / notes / CRM / Telegram / KPI) — viewers are rejected, not just hidden. `manage_users` is the single source of truth (dropped the legacy role shortcut). Guards: last-manager + self-delete protection, **8-char password minimum**. KPI leaderboard / Base-Score / mistake-log filtered to `on_leaderboard` agents. Migration `schema_v15_user_permissions.sql` (additive; aldo=Admin, raven/skylar=Agent, rest=Viewer). *Deployed (D1 + worker + pages).*
+1. **Access control — per-account roles + permissions** — 3 roles (Admin / Agent / Viewer) as presets over 4 flags (`can_edit`, `can_delete`, `on_leaderboard`, `manage_users`), set in Settings (collapsible per-user editor). **Enforced server-side** on every write route (contact / notes / CRM / Telegram / KPI) — viewers are rejected, not just hidden. `manage_users` is the single source of truth (dropped the legacy role shortcut). Guards: last-manager + self-delete protection, **8-char password minimum**. KPI leaderboard / Base-Score / mistake-log filtered to `on_leaderboard` agents. Migration `schema_v15_user_permissions.sql` (additive; ATL=Admin, Agent A/Agent B=Agent, rest=Viewer). *Deployed (D1 + worker + pages).*
 2. **Activity log — append-only audit trail** — `schema_v16_activity_log.sql`. Worker records every meaningful action with **who · when (MYT) · IP**: sign in/out, contact saves, RECOVERED, clears, notes, Telegram edits, KPI saves, mistakes, permission + user changes. Logging is fire-and-forget (`ctx.waitUntil`). `GET /api/activity` (managers-only, username/action/date filters); `POST /api/logout`. Viewer lives in Settings. *Deployed (D1 + worker + pages).*
 
 ### 🟠 High — Dashboard rebuilt (retention-first) + notification bell + Telegram self-serve
@@ -478,7 +478,7 @@ CS verifies a RM100+ deposit (cumulative over the day), then releases one of two
 
 ## ✅ Infrastructure / process
 - Migrated dev to **Claude Code** (native Windows install) with CLAUDE.md + HANDOFF.md context.
-- Moved project out of OneDrive to `C:\Dev\groupb-tracker` (sync-lock fix).
+- Moved project out of OneDrive to a local folder (sync-lock fix).
 - Git baseline + working commits as rollback points.
 - Confirmed daily pipeline healthy: history stacking, all 6 brands × 2 tiers feeding, zero .0 artifacts.
 - Established working rhythm: plan in chat → prompt Claude Code → review diff → deploy → commit.

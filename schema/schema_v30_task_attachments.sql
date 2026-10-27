@@ -2,7 +2,7 @@
 -- ADDITIVE: one new table and two indexes. Nothing existing is changed or dropped.
 -- Files are kept in the database as base64 text (one row each, at most about 1.2 MB of file per row). The list endpoints never read the data
 -- column, only id/name/type/size; the file itself is fetched one at a time, with the person's sign-in, from GET /api/work/attachments/:id.
--- Run (production, Aldo only, BEFORE deploying the Worker that uses it; safe to run twice):
+-- Run (production, ATL only, BEFORE deploying the Worker that uses it; safe to run twice):
 --   wrangler d1 execute groupb-tracker-db --remote --file=./schema/schema_v30_task_attachments.sql
 
 CREATE TABLE IF NOT EXISTS task_attachments (
