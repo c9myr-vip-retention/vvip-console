@@ -6,20 +6,24 @@ import { http } from "./api/work.js";
 
 const EVERY = 10000;
 const subs = new Map();                                   // area -> Set of callbacks
-let seen = null, timer = null, busy = false, bound = false;
+let seen = null, timer = null, busy = false, bound = false, hiddenN = 0;
 
 const mock = () => { try { return localStorage.getItem("revamp_mock") === "1"; } catch { return false; } };
 const total = () => { let n = 0; subs.forEach((s) => { n += s.size; }); return n; };
 
 async function poll() {
-  if (busy || (typeof document !== "undefined" && document.hidden) || !total() || mock()) return;
+  if (busy || !total() || mock()) return;
+  // A tab in the background keeps listening, but only for new messages ("notif"), and a third as often: so the bell can still ring.
+  // The pages' own data waits until the tab is back on screen (wake() polls again at once).
+  const hidden = typeof document !== "undefined" && document.hidden;
+  if (hidden) { if (!subs.get("notif")?.size || !seen || ++hiddenN % 3) return; } else hiddenN = 0;
   try { if (!localStorage.getItem("session_token")) return; } catch { return; }          // signed out: nothing to ask
   busy = true;
   try {
     const next = (await http("/api/work/pulse")).areas || {};
     const prev = seen;
-    seen = { ...(prev || {}), ...next };
-    if (prev) for (const a of Object.keys(next)) if (prev[a] !== next[a]) (subs.get(a) || []).forEach((f) => { try { f(); } catch { /* a page must not stop the poller */ } });
+    seen = hidden ? { ...prev, notif: next.notif } : { ...(prev || {}), ...next };
+    if (prev) for (const a of Object.keys(next)) if (prev[a] !== next[a] && (!hidden || a === "notif")) (subs.get(a) || []).forEach((f) => { try { f(); } catch { /* a page must not stop the poller */ } });
   } catch { /* offline or signed out: try again next time */ }
   busy = false;
 }

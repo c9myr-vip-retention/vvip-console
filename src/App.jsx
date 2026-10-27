@@ -3907,7 +3907,7 @@ export const MV_METRICS = [
   { k: "ret", label: "Retention", kind: "pct" },
 ];
 export const MV_TIERS = [{ k: "ALL", label: "All tiers" }, { k: "3", label: "Tier 3" }, { k: "V", label: "Tier V" }];
-export const MV_BASES = [{ k: "dow", label: "Same weekday" }, { k: "prev", label: "Previous day" }, { k: "avg", label: "Month average" }];
+export const MV_BASES = [{ k: "prev", label: "Previous day" }, { k: "dow", label: "Same weekday" }, { k: "avg", label: "Month average" }];
 export const MV_TARGET = { "3": 92, V: 94.5, ALL: 92 };
 export const MV_NEUTRAL = 2;   // a move smaller than this is flat, not "up" — stops every cell being coloured
 export const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -3920,7 +3920,7 @@ export function Movement({ viewTeam }) {
   const [month, setMonth] = useState(null);
   const [metric, setMetric] = useState("dep");
   const [tier, setTier] = useState("ALL");
-  const [base, setBase] = useState("dow");
+  const [base, setBase] = useState("prev");   // colour = up / down against the day before (what people read first); same weekday and month average are one click away
   const [pin, setPin] = useState(null);
   const [legend, setLegend] = useState(false);
 

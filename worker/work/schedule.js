@@ -6,6 +6,8 @@
 // An agent may ask for a swap only on a shift they are on. Repeats are stored once (repeat = 'daily' | 'weekly');
 // the client expands them, so GET returns every repeating item whose first date is on or before `to`.
 
+import { notify, notifyCount, usersWith } from "./chat.js";
+
 const MAX_PER_CALL = 500;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -20,6 +22,14 @@ const realDate = (s) => { if (typeof s !== "string" || !DATE_RE.test(s)) return 
 const strList = (v, max, n) => (Array.isArray(v) ? uniq(v.filter((x) => typeof x === "string").map((x) => x.trim().slice(0, max)).filter(Boolean)).slice(0, n) : []);
 
 async function body(c) { try { const b = await c.request.json(); return b && typeof b === "object" ? b : {}; } catch { return {}; } }
+
+/** Tell everyone named on these schedule items that their schedule changed: one counted message per person ("3 items"). lists = who lists. */
+async function tellSchedule(db, actor, lists) {
+  const n = new Map();
+  for (const who of lists) for (const u of new Set(who)) n.set(u, (n.get(u) || 0) + 1);
+  for (const [u, k] of n) await notifyCount(db, u, { kind: "schedule", actor, text: "item" }, k);
+}
+const when = (r) => `${r.date}${r.start_time ? " " + r.start_time : ""}`;
 
 const itemOut = (r) => ({
   id: r.id, type_key: r.type_key, date: r.date, title: r.title, start_time: r.start_time || null, end_time: r.end_time || null,
@@ -135,6 +145,7 @@ export async function handleSchedule(c) {
       await db.batch(rows.slice(i, i + 50).map((r) => ins.bind(r.type_key, r.date, r.title, r.start, r.end, JSON.stringify(r.brands), JSON.stringify(r.who), r.note, r.repeat, r.off, me)));
     }
     c.log(c.user, "schedule", `Added ${rows.length} schedule item${rows.length === 1 ? "" : "s"}`);
+    await tellSchedule(db, me, rows.map((r) => r.who));
     return c.ok({ created: rows.length }, 201);
   }
 
@@ -155,8 +166,10 @@ export async function handleSchedule(c) {
     const sum = await db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(repeat != 'none'), 0) AS rep FROM schedule_items WHERE ${where.join(" AND ")}`).bind(...binds).first();
     if (b.preview) return c.ok({ count: sum.n, repeating: sum.rep });
     if (!sum.n) return c.ok({ deleted: 0 });
+    const gone = (await db.prepare(`SELECT who FROM schedule_items WHERE ${where.join(" AND ")}`).bind(...binds).all()).results || [];
     await db.prepare(`UPDATE schedule_items SET deleted_at = datetime('now') WHERE ${where.join(" AND ")}`).bind(...binds).run();
     c.log(c.user, "schedule", `Deleted ${sum.n} schedule item${sum.n === 1 ? "" : "s"}${type ? ` (type ${type})` : ""}${from || to ? ` from ${from || "start"} to ${to || "end"}` : " (all dates)"}`);
+    await tellSchedule(db, me, gone.map((r) => parseList(r.who)));
     return c.ok({ deleted: sum.n });
   }
 
@@ -173,6 +186,7 @@ export async function handleSchedule(c) {
     if (act === "delete") {
       await db.prepare("UPDATE schedule_items SET deleted_at = datetime('now') WHERE id = ?").bind(id).run();
       c.log(c.user, "schedule", `Deleted schedule item #${id} "${cur.title}"`);
+      await tellSchedule(db, me, [parseList(cur.who)]);
       return c.ok({ ok: true });
     }
 
@@ -192,6 +206,7 @@ export async function handleSchedule(c) {
       await db.prepare("UPDATE schedule_items SET type_key=?, date=?, title=?, start_time=?, end_time=?, brands=?, who=?, note=?, repeat=?, off=? WHERE id=?")
         .bind(x.type_key, x.date, x.title, x.start, x.end, JSON.stringify(x.brands), JSON.stringify(x.who), x.note, x.repeat, x.off, id).run();
       c.log(c.user, "schedule", `Edited schedule item #${id} "${x.title}"`);
+      await tellSchedule(db, me, [[...parseList(cur.who), ...x.who]]);   // people taken off it and people put on it
       const row = await db.prepare("SELECT id, type_key, date, title, start_time, end_time, brands, who, note, repeat, off, created_by FROM schedule_items WHERE id = ?").bind(id).first();
       return c.ok({ item: itemOut(row) });
     }
@@ -205,6 +220,7 @@ export async function handleSchedule(c) {
     const b = await body(c);
     const res = await db.prepare("INSERT INTO schedule_swaps (item_id, from_user, note) VALUES (?,?,?)").bind(id, me, str(b.note, 500)).run();
     c.log(c.user, "schedule", `Requested a swap on shift #${id} "${cur.title}"`);
+    await notify(db, await usersWith(db, "schedule.swaps", c.user.team), { kind: "swap_request", actor: me, text: `${cur.title} · ${when(cur)}${str(b.note, 500) ? " · " + str(b.note, 500) : ""}` });
     const swap = await db.prepare("SELECT id, item_id, from_user, note, status, created_at FROM schedule_swaps WHERE id = ?").bind(res.meta.last_row_id).first();
     return c.ok({ swap }, 201);
   }
@@ -324,6 +340,8 @@ export async function handleSchedule(c) {
     if (!cur) return c.err("Swap request not found", 404);
     if (cur.status !== "open") return c.err(`This request was already ${cur.status}`, 409);
     await db.prepare("UPDATE schedule_swaps SET status = ? WHERE id = ?").bind(b.status, id).run();
+    const it = await db.prepare("SELECT title, date, start_time FROM schedule_items WHERE id = ?").bind(cur.item_id).first();
+    await notify(db, [cur.from_user], { kind: b.status === "approved" ? "swap_ok" : "swap_no", actor: me, text: it ? `${it.title} · ${when(it)}` : "" });
     c.log(c.user, "schedule", `${b.status === "approved" ? "Approved" : "Declined"} swap #${id} (${cur.from_user}, shift #${cur.item_id})`);
     return c.ok({ swap: { ...cur, status: b.status } });
   }

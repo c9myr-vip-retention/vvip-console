@@ -7,6 +7,7 @@
 import { handleWork } from "./work/index.js";
 import { handleRoles } from "./roles.js";
 import { liveBump, bumpArea } from "./work/pulse.js";
+import { notify, notifyCount, taskReminders } from "./work/chat.js";
 import { loadRoles, resolvePerms, rolePerms, legacyColumns, filterPeople } from "./perms.js";
 
 function corsFor(request) {
@@ -1303,11 +1304,14 @@ async function runAutoAssign(env, opts = {}) {
         AND (contact_log.status IS NULL OR contact_log.status = 'ASSIGNED')
     `);
     let written = 0;
+    const got = new Map();                                 // agent -> players actually written (a human's row is left alone)
     for (let i = 0; i < rows.length; i += 25) {
-      const res = await env.DB.batch(rows.slice(i, i + 25).map((r) =>
+      const part = rows.slice(i, i + 25);
+      const res = await env.DB.batch(part.map((r) =>
         stmt.bind(deal.snapshot, r.p.player_key, r.p.brand, r.p.tier_segment, r.pic)));
-      written += res.reduce((n, x) => n + ((x.meta && x.meta.changes) || 0), 0);
+      res.forEach((x, j) => { const n = (x.meta && x.meta.changes) || 0; written += n; if (n) got.set(part[j].pic, (got.get(part[j].pic) || 0) + n); });
     }
+    for (const [pic, n] of got) await notifyCount(env.DB, pic, { kind: "players", actor: "auto-assign", text: "player" }, n);
     out.teams[team].written = written;
     out.teams[team].untouched = rows.length - written;   // rows a human already owns
   }
@@ -1788,11 +1792,11 @@ async function autoAssignOneRoster(env, brand, tier, assignedBy) {
   const players = (un.results || []).map((r) => r.player_key);
   if (!players.length) return { assigned: 0, load };
 
-  const stmts = [];
+  const stmts = [], got = {};
   for (const pk of players) {
     let pick = agents[0];
     for (const a of agents) if (load[a] < load[pick]) pick = a;   // least-loaded, tie-break by name
-    load[pick]++;
+    load[pick]++; got[pick] = (got[pick] || 0) + 1;
     stmts.push(env.DB.prepare(`
       INSERT INTO player_assignment (brand, tier_segment, player_key, agent, active, assigned_by, assigned_at)
       VALUES (?, ?, ?, ?, 1, ?, datetime('now'))
@@ -1801,6 +1805,7 @@ async function autoAssignOneRoster(env, brand, tier, assignedBy) {
     `).bind(brand, tier, pk, pick, assignedBy));
   }
   await env.DB.batch(stmts);
+  for (const [a, n] of Object.entries(got)) await notifyCount(env.DB, a, { kind: "roster", actor: assignedBy === "cron" ? "auto-assign" : assignedBy, text: "player" }, n);
   return { assigned: players.length, load };
 }
 
@@ -2273,6 +2278,11 @@ const worker = {
         if (owner && owner !== user.username) return OWNONLY();
         if (b.assigned_to && b.assigned_to !== user.username) return err("You can only assign players to yourself", 403);
       }
+      // Handing a player to somebody else tells them (one counted message per burst: "30 players"). Only a real change of owner counts.
+      const handed = b.assigned_to && b.assigned_to !== user.username
+        ? await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
+            .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first().then((r) => !r || r.assigned_to !== b.assigned_to)
+        : false;
       // contacted_at = the real MYT calendar day the agent acted (date('now','+8 hours')),
       // NOT snapshot_date (the data day, which lags before the 15:00 feed). Set on the
       // first human write; COALESCE keeps that first-touch day on later status changes,
@@ -2288,6 +2298,7 @@ const worker = {
       `).bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment,
               b.class || null, b.assigned_to || null, b.status || null,
               b.note || null, user.username).run();
+      if (handed) await notifyCount(env.DB, b.assigned_to, { kind: "players", actor: user.username, text: "player" });
       if (b.status === "RECOVERED") log(user, "recovered", `Marked RECOVERED · ${b.player_key} (${b.brand})`);
       else log(user, "contact", `${b.status ? "Status " + b.status : (b.assigned_to ? "Assigned to " + b.assigned_to : "Updated")} · ${b.player_key} (${b.brand})`);
       return ok({ saved: true });
@@ -2410,6 +2421,7 @@ const worker = {
       const brand = b.brand || "SK69", tier = b.tier_segment || "V";
       if (!b.player_key || !b.agent) return err("Missing player_key or agent");
       const active = b.active === 0 ? 0 : 1;
+      const was = await env.DB.prepare("SELECT agent, active FROM player_assignment WHERE brand = ? AND tier_segment = ? AND player_key = ?").bind(brand, tier, b.player_key).first();
       await env.DB.prepare(`
         INSERT INTO player_assignment (brand, tier_segment, player_key, agent, active, assigned_by, assigned_at)
         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
@@ -2418,6 +2430,7 @@ const worker = {
           assigned_by = excluded.assigned_by, assigned_at = datetime('now')
       `).bind(brand, tier, b.player_key, b.agent, active, user.username).run();
       log(user, "assign", `${b.player_key} (${brand}) → ${b.agent}${active ? "" : " [retired]"}`);
+      if (active && (!was || was.agent !== b.agent || !was.active)) await notifyCount(env.DB, b.agent, { kind: "roster", actor: user.username, text: "player" });
       return ok({ saved: true });
     }
 
@@ -3700,6 +3713,7 @@ const worker = {
          VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
       ).bind(b.month, b.agent, b.category, pts, b.note || null, b.brand || null, user.username).run();
       log(user, "mistake", `Logged mistake (${b.category}, ${pts}pts) · ${b.agent}`);
+      await notify(env.DB, [b.agent], { kind: "mistake", actor: user.username, text: `${b.category} · ${pts} pt${pts === 1 ? "" : "s"}${b.note ? " · " + b.note : ""}` });
       return ok({ saved: true });
     }
 
@@ -3956,6 +3970,11 @@ const worker = {
     ctx.waitUntil(autoOutcomes(env).then(
       (r) => console.log("autoOutcomes:", JSON.stringify(r)),
       (e) => console.error("autoOutcomes failed:", e && e.message)
+    ));
+    // Task deadlines: "due soon" and "overdue" messages in the bell. Hourly, isolated like the others.
+    ctx.waitUntil(taskReminders(env.DB).then(
+      (r) => console.log("taskReminders:", JSON.stringify(r)),
+      (e) => console.error("taskReminders failed:", e && e.message)
     ));
     // Lark P&L1 → player_telegram: once a day at 00:00 MYT (16:00 UTC). Cron fires hourly,
     // so gate on the hour. try/catch isolation keeps a Lark hiccup from touching autoOutcomes.

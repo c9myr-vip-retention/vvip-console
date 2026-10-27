@@ -10,7 +10,7 @@
 //  - started_at is set only while status='progress'; spent_seconds accumulates elapsed time.
 //  - delete is soft (deleted_at/deleted_by); an ongoing task becomes 'pending' first so a later restore cannot clash.
 import { filterPeople, resolvePerms, loadRoles } from "../perms.js";
-import { REACTIONS, mentionsIn, taggable, notify, reactionsOf } from "./chat.js";
+import { REACTIONS, mentionsIn, taggable, notify, reactionsOf, accountsWithPerms } from "./chat.js";
 import { hiddenFor } from "./scope.js";
 
 
@@ -163,14 +163,6 @@ async function checkFields(c, b, keys) {
 const cleanTags = (v) => uniq((Array.isArray(v) ? v : []).map((x) => str(x, 40)).filter(Boolean)).slice(0, 20);
 
 // ── GET /people ───────────────────────────────────────────────────────────────────────────────
-// Every account with the columns resolvePerms needs (older databases lack the newer ones).
-async function accountsWithPerms(db) {
-  for (const cols of ["username, role, role_key, team, on_leaderboard, can_edit, manage_users, perm_overrides", "username, role, role_key, team, on_leaderboard, can_edit, manage_users", "username, role, team, on_leaderboard, can_edit, manage_users"]) {
-    try { return (await db.prepare(`SELECT ${cols} FROM users ORDER BY username COLLATE NOCASE`).all()).results || []; } catch { /* older schema: fewer columns */ }
-  }
-  return [];
-}
-
 // The roles, even when the person asking is on old settings (the request only loads them for accounts that have a role).
 const allRoles = async (c) => c.roles || c._allRoles || (c._allRoles = await loadRoles(c.env.DB));
 
@@ -288,6 +280,7 @@ async function create(c) {
   ]);
   c.log(c.user, "task", `Created task #${id} "${title}"${assignee !== me ? ` for ${assignee}` : ""}`);
   await notify(db, [assignee], { kind: "assigned", task_id: id, actor: me, text: title });
+  await notify(db, observers, { kind: "added", task_id: id, actor: me, text: title });
   return c.ok({ task: await loadTask(db, id) }, 201);
 }
 
@@ -304,6 +297,7 @@ async function update(c, id) {
   if (!canEditTask(c, t)) return c.err("Only the assignee, owner or an admin can edit this task", 403);
 
   const sets = [], binds = [], changed = [], extra = [];
+  let addedObs = [];                                         // people newly made observers by this edit (they are told)
 
   if (has(b, "assignee") && !blank(b.assignee) && String(b.assignee).trim() !== t.assignee) {
     if (!c.can("tasks.assign_others")) return c.err("Only an admin can reassign a task", 403);
@@ -330,6 +324,7 @@ async function update(c, id) {
   }
   if (has(b, "observers")) {
     const obs = (await existingUsers(db, b.observers)).filter((u) => u !== (sets.includes("assignee = ?") ? binds[sets.indexOf("assignee = ?")] : t.assignee)).slice(0, 30);
+    addedObs = obs.filter((u) => !(t.observers || []).includes(u));
     extra.push(db.prepare("DELETE FROM task_observers WHERE task_id = ?").bind(id));
     for (const u of obs) extra.push(db.prepare("INSERT OR IGNORE INTO task_observers (task_id, username) VALUES (?, ?)").bind(id, u));
     changed.push("observers");
@@ -342,7 +337,15 @@ async function update(c, id) {
   if (changed.length) stmts.push(act(db, id, me, `Edited ${uniq(changed.map((k) => FIELD_LABEL[k] || k)).join(", ")}`));
   try { await db.batch(stmts); }
   catch (e) { if (isUnique(e)) return ongoingClash(c, sets.includes("assignee = ?") ? binds[sets.indexOf("assignee = ?")] : t.assignee); throw e; }
-  if (sets.includes("assignee = ?")) { const to = binds[sets.indexOf("assignee = ?")]; if (to && to !== t.assignee) await notify(db, [to], { kind: "assigned", task_id: id, actor: me, text: t.title }); }
+  const to = sets.includes("assignee = ?") ? binds[sets.indexOf("assignee = ?")] : null;
+  if (to && to !== t.assignee) {
+    await notify(db, [to], { kind: "assigned", task_id: id, actor: me, text: t.title });
+    await notify(db, [t.assignee], { kind: "unassigned", task_id: id, actor: me, text: t.title });   // the person it was taken from
+  }
+  await notify(db, addedObs, { kind: "added", task_id: id, actor: me, text: t.title });
+  // The things worth a ping when somebody else changes them: what the task is, when it is due, how urgent. Not tags, estimates or links.
+  const told = ["title", "description", "due_date", "due_time", "high_priority"].filter((k) => changed.includes(k));
+  if (told.length) await notify(db, [to && to !== t.assignee ? null : t.assignee, t.owner], { kind: "edited", task_id: id, actor: me, text: `${t.title}: ${told.map((k) => FIELD_LABEL[k]).join(", ")}` });
   return c.ok({ task: await loadTask(db, id) });
 }
 
@@ -396,6 +399,8 @@ async function status(c, id) {
   if (!r.meta.changes) return c.err("The task changed while you were doing that — refresh and try again", 409);
   await act(db, id, me, text).run();
   if (action === "complete" || action === "defer" || action === "reopen") c.log(c.user, "task", `${text.replace(" the task", "")} task #${id} "${t.title}"`);
+  const kind = { complete: "done", defer: "deferred", reopen: "reopened" }[action];     // start / pause are the assignee's own flow: no ping
+  if (kind) await notify(db, [t.owner, t.assignee, ...(t.observers || [])], { kind, task_id: id, actor: me, text: t.title });
   return c.ok({ task: await loadTask(db, id) });
 }
 
@@ -480,15 +485,17 @@ async function react(c, commentId) {
   if (!canEditAny(c)) return noEdit(c);
   const db = c.env.DB, b = await body(c), emoji = String(b.emoji || "");
   if (!REACTIONS.includes(emoji)) return c.err("That reaction is not available", 400);
-  const cm = await db.prepare("SELECT id, task_id FROM task_comments WHERE id = ?").bind(commentId).first();
+  const cm = await db.prepare("SELECT id, task_id, author FROM task_comments WHERE id = ?").bind(commentId).first();
   if (!cm) return c.err("Comment not found", 404);
   const v = await getVisible(c, cm.task_id);
   if (v.res) return v.res;
+  let added = false;
   try {
     const mine = await db.prepare("SELECT 1 AS x FROM task_reactions WHERE comment_id = ? AND emoji = ? AND username = ?").bind(commentId, emoji, c.user.username).first();
     if (mine) await db.prepare("DELETE FROM task_reactions WHERE comment_id = ? AND emoji = ? AND username = ?").bind(commentId, emoji, c.user.username).run();
-    else await db.prepare("INSERT INTO task_reactions (comment_id, emoji, username, task_id) VALUES (?,?,?,?)").bind(commentId, emoji, c.user.username, cm.task_id).run();
+    else { await db.prepare("INSERT INTO task_reactions (comment_id, emoji, username, task_id) VALUES (?,?,?,?)").bind(commentId, emoji, c.user.username, cm.task_id).run(); added = true; }
   } catch { return c.err("Reactions are not set up yet (schema_v34 has not been run)", 503); }
+  if (added) await notify(db, [cm.author], { kind: "reaction", task_id: cm.task_id, comment_id: commentId, actor: c.user.username, text: emoji });   // taking one back is silent
   return c.ok({ comments: await commentsOf(db, cm.task_id) });
 }
 
@@ -530,6 +537,7 @@ async function remove(c, id) {
     act(db, id, me, "Deleted the task"),
   ]);
   c.log(c.user, "task", `Deleted task #${id} "${t.title}"`);
+  await notify(db, [t.assignee, t.owner, ...(t.observers || [])], { kind: "deleted", actor: me, text: t.title });   // no task_id: there is nothing left to open
   return c.ok({ ok: true });
 }
 
