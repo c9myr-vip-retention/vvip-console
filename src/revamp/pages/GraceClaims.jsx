@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Seg, Select, toast } from "../ui";
 import { api, Drawer, GT_STATUS, BRANDS, ckey, fmt, tap, dispName, looksNumeric } from "../../App.jsx";
-import { useDailyBase } from "../daily/hooks.js";
+import { useDailyBase, useBulkContact } from "../daily/hooks.js";
 import { sortRows, contactedPayload, isActioned } from "../daily/logic.js";
 import { Banners, SearchBox, BrandMenu, ClassPill, StatusTag, GraceTag, PlayerName, bcolor } from "../daily/widgets.jsx";
 import { Head, Empty, PCell } from "../daily2/common.jsx";
@@ -68,6 +68,18 @@ export default function GraceClaims({ ctx }) {
   const gCount = (k) => gpool.filter((r) => { const g = graceOf(r); return k === "all" ? true : g && (k === "act" ? g.a === 1 : g.a === 0); }).length;
   const gBrandCount = (b) => gpool.filter((r) => r.brand === b).length;
 
+  /* ---------- tick, mark contacted, undo (both lists) ---------- */
+  const [sel, setSel] = useState(() => new Set());     // ckeys ticked
+  const toggleSel = (k) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const { busy: bulkBusy, canUndo, markSel, undoSel } = useBulkContact(base, () => [...sel].map((k) => byKey[k]).filter(Boolean), setSel);
+  const tickable = view === "claims" ? panelList : grows;                 // what the header box ticks: every player on screen, all rows
+  const allSel = tickable.length > 0 && tickable.every((r) => sel.has(ckey(r)));
+  const someSel = tickable.some((r) => sel.has(ckey(r)));
+  const tickAll = () => setSel((s) => { const n = new Set(s); tickable.forEach((r) => (allSel ? n.delete(ckey(r)) : n.add(ckey(r)))); return n; });
+  const headBox = (
+    <input type="checkbox" className="chk sq" title={`Tick all ${tickable.length} players on screen`} checked={allSel} disabled={!tickable.length}
+      ref={(el) => { if (el) el.indeterminate = someSel && !allSel; }} onChange={tickAll} />);
+
   const [busy, setBusy] = useState(null);
   const mark = async (r) => {
     if (readOnly || busy) return;
@@ -85,11 +97,20 @@ export default function GraceClaims({ ctx }) {
   return (
     <>
       <Head title="Grace claims" sub="Players who reached the required deposit in one day and haven't claimed their bonus yet.">
-        <Seg value={view} options={viewOpts} onChange={(v) => { setView(v); setDr(null); }} />
+        <Seg value={view} options={viewOpts} onChange={(v) => { setView(v); setDr(null); setSel(new Set()); }} />
         <button className={"btn sm" + (note ? " on" : "")} onClick={() => setNote((n) => !n)}>ⓘ How it works</button>
         {view === "claims" && <button className="btn sm" onClick={loadClaims}>Refresh</button>}
       </Head>
       <Banners base={base} />
+      {sel.size > 0 && (
+        <div className="dl-sel">
+          <b>{sel.size} selected</b>
+          {!readOnly && <button className="btn sm pri" disabled={bulkBusy} onClick={markSel}>{bulkBusy ? "Working…" : "✓ Mark contacted"}</button>}
+          {canUndo && <button className="btn sm" disabled={bulkBusy} onClick={undoSel} title="Take back the contact for every ticked player that has one">↩ Undo contacted</button>}
+          <span style={{ flex: 1 }} />
+          <button className="btn sm" onClick={() => setSel(new Set())}>Clear</button>
+        </div>
+      )}
       {note && (
         <div className="card" style={{ marginBottom: 12 }}><div className="body d2-note">
           Window = the <b>activated date</b> to the <b>expiry date</b>, both read from the Lark Grace table. The required deposit must be reached <b>in one single day</b>; days are never added together (RM50 + RM50 on two days does not count). Only days <b>after the activation day</b> count; a deposit on the activation day itself (dashed cell) could be before the activation time, so it is shown separately as "same day, check time". The required deposit follows from the bonus (Tier 3: 100→18, 200→28, 300→38, 500→58 · Tier V: 600→68 … 1000→108).
@@ -117,12 +138,13 @@ export default function GraceClaims({ ctx }) {
           {res && !res.error && (
             <div className="card"><div className="tw">
               <table className="d2-tbl">
-                <thead><tr><th>Player</th><th>Window</th><th>Deposit per day</th><th className="r">Best day</th><th className="r">Required</th><th className="r">Bonus</th><th>Status</th></tr></thead>
+                <thead><tr><th style={{ width: 34 }}>{headBox}</th><th>Player</th><th>Window</th><th>Deposit per day</th><th className="r">Best day</th><th className="r">Required</th><th className="r">Bonus</th><th>Status</th></tr></thead>
                 <tbody>
                   {shown.map((t, i) => {
                     const p = players[i], st = GT_STATUS[t.status];
                     return (
-                      <tr key={`${t.player_key}|${t.brand}|${t.end}`} className="br" style={{ "--b": bcolor(t.brand) }} {...(p ? tap(() => setDr({ list: panelList, index: players.slice(0, i).filter(Boolean).length }), null) : {})}>
+                      <tr key={`${t.player_key}|${t.brand}|${t.end}`} className={"br" + (p && sel.has(ckey(p)) ? " sel" : "")} style={{ "--b": bcolor(t.brand) }} {...(p ? tap(() => setDr({ list: panelList, index: players.slice(0, i).filter(Boolean).length }), null) : {})}>
+                        <td onClick={(e) => e.stopPropagation()}>{p && <input type="checkbox" className="chk sq" checked={sel.has(ckey(p))} onChange={() => toggleSel(ckey(p))} title="Select" />}</td>
                         <td>{p
                           ? <PCell id={dispName(p)} brand={t.brand} tier={t.tier_segment} name={!looksNumeric(p.addressing) ? p.addressing : ""} extra={p._tg ? <span className="tgf"> ✈</span> : null} />
                           : <span title="Not in the current board, so there is no player panel"><PCell id={t.player_key} brand={t.brand} tier={t.tier_segment} name="" /></span>}</td>
@@ -134,7 +156,7 @@ export default function GraceClaims({ ctx }) {
                         <td><span className="pill np" style={{ "--c": st.color }} title={t.text}>{st.label}</span></td>
                       </tr>);
                   })}
-                  {shown.length === 0 && <tr><td colSpan="7" className="dim" style={{ padding: 30, textAlign: "center", cursor: "default" }}>Nothing in this group.</td></tr>}
+                  {shown.length === 0 && <tr><td colSpan="8" className="dim" style={{ padding: 30, textAlign: "center", cursor: "default" }}>Nothing in this group.</td></tr>}
                 </tbody>
               </table>
             </div></div>
@@ -157,12 +179,13 @@ export default function GraceClaims({ ctx }) {
           {gerr && <div className="dl-note">Grace activation state unavailable: {gerr}. The list still works; the activated / not activated split is hidden until the Grace table can be read.</div>}
           <div className="card"><div className="tw">
             <table className="d2-tbl">
-              <thead><tr><th>Player</th><th>Class</th><th className="r">Days left</th><th>Activation</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th style={{ width: 34 }}>{headBox}</th><th>Player</th><th>Class</th><th className="r">Days left</th><th>Activation</th><th>Status</th><th></th></tr></thead>
               <tbody>
                 {grows.map((r, i) => {
                   const g = gst ? graceOf(r) : null, con = contactMap[ckey(r)], done = isActioned(con);
                   return (
-                    <tr key={ckey(r)} className="br" style={{ "--b": bcolor(r.brand), opacity: done ? 0.6 : 1 }} {...tap(() => setDr({ list: grows, index: i }), null)}>
+                    <tr key={ckey(r)} className={"br" + (sel.has(ckey(r)) ? " sel" : "")} style={{ "--b": bcolor(r.brand), opacity: done ? 0.6 : 1 }} {...tap(() => setDr({ list: grows, index: i }), null)}>
+                      <td onClick={(e) => e.stopPropagation()}><input type="checkbox" className="chk sq" checked={sel.has(ckey(r))} onChange={() => toggleSel(ckey(r))} title="Select" /></td>
                       <td><PCell id={<PlayerName r={r} />} brand={r.brand} tier={r.tier_segment} name={!looksNumeric(r.addressing) ? r.addressing : ""} /></td>
                       <td><ClassPill k={r._cls} /></td>
                       <td className="r mono">{r._graceDays != null ? `${r._graceDays}d` : "—"}</td>
@@ -173,7 +196,7 @@ export default function GraceClaims({ ctx }) {
                       </td>
                     </tr>);
                 })}
-                {grows.length === 0 && <tr><td colSpan="6" className="dim" style={{ padding: 30, textAlign: "center", cursor: "default" }}>No Grace players match.</td></tr>}
+                {grows.length === 0 && <tr><td colSpan="7" className="dim" style={{ padding: 30, textAlign: "center", cursor: "default" }}>No Grace players match.</td></tr>}
               </tbody>
             </table>
           </div></div>

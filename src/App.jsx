@@ -5806,6 +5806,35 @@ export default function App() {
     });
   }
 
+  // Bulk save / clear for a ticked list. The writes go out a few at a time and the board is updated ONCE at the end,
+  // so every row flips together instead of one by one. Returns { done, failed } (the payloads that did / did not save).
+  const pkey = (c) => `${c.snapshot_date}|${c.player_key}|${c.brand}|${c.tier_segment}`;
+  async function sendMany(payloads, send) {
+    const done = [], failed = [];
+    for (let i = 0; i < payloads.length; i += 8) {
+      const part = payloads.slice(i, i + 8);
+      const res = await Promise.allSettled(part.map(send));
+      res.forEach((r, j) => (r.status === "fulfilled" ? done : failed).push(part[j]));
+    }
+    return { done, failed };
+  }
+  async function saveContacts(payloads) {
+    const r = await sendMany(payloads, (p) => api("/api/rtn/contact", { method: "POST", body: JSON.stringify(p) }));
+    if (r.done.length) {
+      const stamp = new Date().toISOString().replace("T", " ").slice(0, 19), hit = new Map(r.done.map((p) => [pkey(p), p]));
+      setBoard((b) => (b ? { ...b, contacts: [...b.contacts.filter((c) => !hit.has(pkey(c))), ...r.done.map((p) => ({ ...p, updated_at: stamp }))] } : b));
+    }
+    return r;
+  }
+  async function clearContacts(payloads) {
+    const r = await sendMany(payloads, (p) => api("/api/rtn/contact", { method: "POST", body: JSON.stringify({ ...p, clear: true }) }));
+    if (r.done.length) {
+      const gone = new Set(r.done.map(pkey));
+      setBoard((b) => (b ? { ...b, contacts: b.contacts.filter((c) => !gone.has(pkey(c))) } : b));
+    }
+    return r;
+  }
+
   const data = useMemo(() => {
     if (!board?.snapshot_date) return [];
     const rows = classifyAll(board.rows, board.snapshot_date);
@@ -5859,7 +5888,7 @@ export default function App() {
     };
     const ctx = {
       me, viewTeam, board, data, teamData, teamBrands, contacts: board?.contacts || [], dates, viewDate, setViewDate, isPast,
-      readOnly: queueRO, saveContact, clearContact, loadBoard, refreshContacts, drill, setDrill, goto,
+      readOnly: queueRO, saveContact, clearContact, saveContacts, clearContacts, loadBoard, refreshContacts, drill, setDrill, goto,
       setViewTeam, teamKeys: canDo(me, "teams.all") ? ["ALL", ...TEAM_KEYS] : TEAM_KEYS, team: scopeTeam(board?.team, viewTeam, me), health: board?.health || [], snap: board?.snapshot_date || null, loading,
     };
     return (<><Style scope /><RevampShell ctx={ctx} tab={rvTab || (me.manage_users ? "dash" : "home")} notices={notices} loading={loading} loadErr={loadErr} onSignOut={signOut} /></>);
