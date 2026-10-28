@@ -15,9 +15,9 @@ This system is **LIVE in production**. The D1 database receives real player data
 
 **`docs/HANDOFF.md` is the deep reference** — full domain model, strategy layer, backlog, and known limitations. Read it when you need context beyond what's below. This file holds only what every session must see by default.
 
-## Session summary note (Obsidian brain)
+## Session summary note
 
-At the end of a work session, write a short summary note so decisions are not lost and enter the Obsidian graph.
+At the end of a work session, write a short summary note so decisions are not lost.
 
 - Location: `docs/sessions/YYYY-MM-DD-<topic>.md` (create the folder if missing).
 - Contents: what we worked on, decisions settled (rules, numbers, choices), open items, and files touched. Keep it short. Markdown only.
@@ -25,12 +25,11 @@ At the end of a work session, write a short summary note so decisions are not lo
 - Additive, and never restate an unconfirmed item as fact.
 - The note is a doc, safe to commit with your clean doc changes. Do not bundle unfinished code, and deploys or destructive SQL still need explicit approval (operating rule #1).
 
-## Who works here and how to talk to them
+## Roles
 
-- **ATL** (owner, 1st PIC): new to coding. Explain in short, simple sentences with small words. No jargon. One step at a time. Confirm before doing anything.
-- **Developer** (developer, 2nd PIC): technical. Be concise and precise; normal engineering vocabulary is fine. Follows `CONTRIBUTING.md`: branch + pull request.
-
-If you are not sure who you are working with, ask.
+- **Owner:** approves merges, deploys and database commands.
+- **Developers:** work on a branch and open a pull request, as set out in `CONTRIBUTING.md`.
+- **Business rules** (classes, KPI, reactivation, auto-assign) belong to VIP Retention. Don't change their behaviour without its approval.
 
 ## What this is
 

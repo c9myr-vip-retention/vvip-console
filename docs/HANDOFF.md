@@ -13,7 +13,7 @@
 1. **This system is LIVE.** The D1 database receives real player data daily at 15:00 MYT. Never run destructive SQL (`DELETE`, `DROP`, schema rewrites) or `wrangler deploy` without explicit approval from ATL.
 2. **Never weaken the unique constraint** on `player_days` — `(player_key, snapshot_date, brand, tier_segment)`. A previous schema lacking `brand` caused silent cross-brand data corruption.
 3. **Surgical edits over rewrites.** Modify existing files in place; do not regenerate whole files unless asked.
-4. **ATL's style:** direct, concise, production-ready deliverables, honest critical feedback. Flag flaws proactively. No filler.
+4. **Style:** direct, concise, production-ready deliverables, honest critical feedback. Flag flaws proactively. No filler.
 5. Environment: **Windows + PowerShell** (not WSL), wrangler v4.x. Always quote paths. For `wrangler d1` commands against production, `--remote` is mandatory — without it wrangler hits a local simulation.
 
 ---
