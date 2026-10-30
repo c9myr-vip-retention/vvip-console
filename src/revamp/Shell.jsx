@@ -8,6 +8,7 @@ import { can, navFor } from "./perms.js";
 import { Select, DatePick, ToastHost, Avatar, Seg } from "./ui/index.jsx";
 import { work } from "./api/work.js";
 import { useLive } from "./live.js";
+import { armSound, ding, soundOn, setSoundOn } from "./sound.js";
 import { contactTodo } from "./shellHelpers.js";
 
 /** Ingest timestamps are UTC 'YYYY-MM-DD HH:MM:SS'; show the clock in Malaysia time (GMT+8). */
@@ -42,10 +43,25 @@ class PageBoundary extends React.Component {
 }
 
 /** Alerts bell. Dismissals share the live console's localStorage key so both shells agree. */
-const KIND = { mention: ["@", "tagged you"], comment: ["💬", "commented"], assigned: ["📌", "gave you a task"] };
+// kind -> [icon, what happened (reads before the task name), show the preview line under it]
+const KIND = {
+  mention: ["@", "tagged you in", true], comment: ["💬", "commented on", true], assigned: ["📌", "gave you the task", false],
+  unassigned: ["↪", "took you off", false], done: ["✅", "completed", false], deferred: ["⏸", "deferred", false], reopened: ["↺", "reopened", false],
+  edited: ["✎", "changed", true], added: ["👀", "added you to", false], reaction: ["🙂", "reacted to your message in", true], deleted: ["🗑", "deleted", false],
+  due_soon: ["⏰", "Due soon:", true], overdue: ["⚠", "Overdue:", true],
+  swap_request: ["🔁", "asked to swap a shift", true], swap_ok: ["🔁", "approved your shift swap", true], swap_no: ["🔁", "declined your shift swap", true],
+  schedule: ["📅", "changed your schedule", true], players: ["👥", "gave you players", true], roster: ["👥", "added players to your check-in list", true],
+  mistake: ["❗", "logged a mistake for you", true],
+};
+// Messages that are not about a task open this page instead.
+const KIND_PAGE = { swap_request: "sched", swap_ok: "sched", swap_no: "sched", schedule: "sched", players: "queue", roster: "checkin", mistake: "mine" };
+// Counted messages (one per burst): comment_id is the count, text the thing counted.
+const COUNTED = new Set(["schedule", "players", "roster"]);
+const msgText = (m) => (COUNTED.has(m.kind) ? `${m.comment_id || 1} ${m.text || "item"}${(m.comment_id || 1) === 1 ? "" : "s"}` : m.text);
 
-function Bell({ notices, snap, onGo, inbox, onOpenTask, onRead }) {
+function Bell({ notices, snap, onGo, inbox, onOpenTask, onOpenPage, onRead, onOpen }) {
   const [open, setOpen] = useState(false);
+  const [snd, setSnd] = useState(soundOn);
   const ref = useRef(null);
   const [gone, setGone] = useState(() => { try { return JSON.parse(localStorage.getItem("notif_dismissed") || "{}"); } catch (e) { return {}; } });
   const k = (id) => `${snap}:${id}`;
@@ -65,18 +81,21 @@ function Bell({ notices, snap, onGo, inbox, onOpenTask, onRead }) {
   }, [open]);
   return (
     <div className="bellwrap" ref={ref}>
-      <button className="bell" title="Alerts and messages" aria-label="Alerts and messages" onClick={() => setOpen((o) => !o)}>🔔{vis.length + unread > 0 && <b>{vis.length + unread}</b>}</button>
+      <button className="bell" title="Alerts and messages" aria-label="Alerts and messages" onClick={() => { if (!open) onOpen(); setOpen((o) => !o); }}>🔔{vis.length + unread > 0 && <b>{vis.length + unread}</b>}</button>
       {open && (
         <div className="pop">
+          <div className="ph">Sound<button className="dim" title="Play a short sound when a new message arrives"
+            onClick={() => { const on = !snd; setSnd(on); setSoundOn(on); if (on) ding(); }}>{snd ? "on · tap to mute" : "off · tap to turn on"}</button></div>
           {msgs.length > 0 && (
             <>
               <div className="ph">Messages{unread > 0 && <button className="dim" onClick={() => onRead({ all: true })}>mark all read</button>}</div>
               {msgs.slice(0, 12).map((m) => {
-                const [ico, verb] = KIND[m.kind] || ["💬", "wrote"];
+                const [ico, verb, preview] = KIND[m.kind] || ["💬", "wrote in", true];
+                const title = m.task_title || (m.kind === "deleted" ? m.text : null), text = msgText(m);
                 return (
-                  <div key={m.id} className={"pi" + (m.read ? "" : " unread")} onClick={() => { if (!m.read) onRead({ ids: [m.id] }); if (m.task_id) onOpenTask(m.task_id); setOpen(false); }}>
+                  <div key={m.id} className={"pi" + (m.read ? "" : " unread")} onClick={() => { if (!m.read) onRead({ ids: [m.id] }); if (m.task_id) onOpenTask(m.task_id); else if (KIND_PAGE[m.kind]) onOpenPage(KIND_PAGE[m.kind]); setOpen(false); }}>
                     <span>{ico}</span>
-                    <div><b>{m.actor}</b> {verb}{m.task_title ? <> in <b>{m.task_title}</b></> : null}{m.text && m.kind !== "assigned" && <><br /><span className="dim">{m.text.length > 90 ? m.text.slice(0, 90) + "…" : m.text}</span></>}</div>
+                    <div>{m.actor && <><b>{m.actor}</b> </>}{verb}{title ? <> <b>{title}</b></> : null}{preview && text && <><br /><span className="dim">{text.length > 90 ? text.slice(0, 90) + "…" : text}</span></>}</div>
                     {!m.read && <span className="udot" title="Unread" />}
                   </div>
                 );
@@ -137,9 +156,24 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
     [snap, ctx.contacts, ctx.teamData, isAdmin, me.username]);
   // Messages for me: tags, new comments and new tasks. Reloaded when the live counter for my notifications moves.
   const [inbox, setInbox] = useState({ items: [], unread: 0 });
-  const loadInbox = () => { if (localStorage.getItem("revamp_mock") === "1") return; work.notifications().then(setInbox).catch(() => {}); };
-  useEffect(() => { loadInbox(); }, [me.username]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // A sound plays when an unread message newer than any seen before arrives (never on the first load, never for messages already read).
+  const topSeen = useRef(null);
+  const loadInbox = () => {
+    if (localStorage.getItem("revamp_mock") === "1") return;
+    work.notifications().then((d) => {
+      setInbox(d);
+      const top = Math.max(0, ...(d.items || []).filter((m) => !m.read).map((m) => m.id));
+      if (topSeen.current !== null && top > topSeen.current && soundOn()) ding();
+      topSeen.current = top;
+    }).catch(() => {});
+  };
+  useEffect(() => { armSound(); loadInbox(); }, [me.username]);   // eslint-disable-line react-hooks/exhaustive-deps
   useLive(["notif"], loadInbox);
+  // The tab title carries the unread count, so a message shows even when this tab is not the one on screen.
+  useEffect(() => {
+    const base = document.title.replace(/^\(\d+\)\s*/, "");
+    document.title = inbox.unread > 0 ? `(${inbox.unread}) ${base}` : base;
+  }, [inbox.unread]);
   const readInbox = (b) => { work.readNotifications(b).then(loadInbox).catch(() => {}); };
   const openTask = (id) => {                            // go to Tasks and open that task (the Tasks page picks the request up)
     try { sessionStorage.setItem("rv_open_task", String(id)); } catch (e) { /* private mode */ }
@@ -202,7 +236,7 @@ export default function Shell({ ctx, tab, notices, loading, loadErr, onSignOut }
             </span>
             <span className="dim">Daily action console</span>
             <span className="grow" />
-            <Bell notices={snap ? notices : []} snap={snap || "none"} onGo={(n) => ctx.goto(n.tab, n.keys ? { keys: n.keys, label: n.focusLabel } : null)} inbox={inbox} onOpenTask={openTask} onRead={readInbox} />
+            <Bell notices={snap ? notices : []} snap={snap || "none"} onGo={(n) => ctx.goto(n.tab, n.keys ? { keys: n.keys, label: n.focusLabel } : null)} inbox={inbox} onOpenTask={openTask} onOpenPage={(k) => ctx.goto(k)} onRead={readInbox} onOpen={loadInbox} />
             <button className="btn sm" onClick={() => ctx.loadBoard(ctx.viewDate)}>{loading ? "…" : "Refresh"}</button>
             <button className="btn sm" onClick={onSignOut}>{me.username} · Sign out</button>
           </header>

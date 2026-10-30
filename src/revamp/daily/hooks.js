@@ -4,7 +4,8 @@ import { can } from "../perms.js";
 import { useLiveTick } from "../live.js";
 import { useEffect, useMemo, useState } from "react";
 import { api, ckey, BRAND_ORDER } from "../../App.jsx";
-import { emptyFilters, filterRows } from "./logic.js";
+import { toast } from "../ui";
+import { emptyFilters, filterRows, contactedPayload } from "./logic.js";
 
 export function useDailyBase(ctx) {
   const snap = ctx.board?.snapshot_date || "";
@@ -40,7 +41,48 @@ export function useDailyBase(ctx) {
 
   const saveContact = (p) => ctx.saveContact(p);
   const clearContact = (p) => ctx.clearContact(p);
-  return { ctx, snap, data, contacts, health, team, me, isAdmin, readOnly, isPast: !!ctx.isPast, brandOrder, contactMap, cooldownSet, staleBrands, lagBrands, saveContact, clearContact };
+  const saveContacts = (ps) => ctx.saveContacts(ps);
+  const clearContacts = (ps) => ctx.clearContacts(ps);
+  return { ctx, snap, data, contacts, health, team, me, isAdmin, readOnly, isPast: !!ctx.isPast, brandOrder, contactMap, cooldownSet, staleBrands, lagBrands, saveContact, clearContact, saveContacts, clearContacts };
+}
+
+/** Bulk actions for a ticked list (Players, Grace claims): save many at once, mark contacted, undo.
+ *  getRows() = the ticked players; onDone(failedKeys) lets the page keep only the ones that did not save ticked. */
+export function useBulkContact(base, getRows, onDone) {
+  const { snap, me, readOnly, contactMap, saveContacts, clearContacts } = base;
+  const [busy, setBusy] = useState(false);
+  const mayClear = can(me, "contact.delete") || can(me, "contact.delete_own");   // same rule as the Worker: either version of the permission
+  const canUndo = !readOnly;                                            // always shown when editing; the click says why if the account may not clear
+  const editAny = can(me, "contact.edit");                              // "Own only" accounts may not touch players assigned to somebody else
+  const finish = (r, verb, skipped = 0) => {
+    setBusy(false);
+    onDone(new Set(r.failed.map((p) => `${p.player_key}|${p.brand}|${p.tier_segment}`)));
+    const parts = [`${r.done.length} ${verb}`];
+    if (r.failed.length) parts.push(`${r.failed.length} could not be saved${r.error ? ` (${r.error})` : ""}`);
+    if (skipped) parts.push(`${skipped} skipped, assigned to someone else`);
+    toast(parts.join(", "));
+  };
+  const saveMany = async (label, build) => {
+    const all = getRows();
+    if (readOnly || busy || !all.length) return;
+    const list = editAny ? all : all.filter((r) => { const o = contactMap[ckey(r)]?.assigned_to; return !o || o === me.username; });
+    const skipped = all.length - list.length;
+    if (!list.length) { toast(`All ${skipped} ticked player${skipped > 1 ? "s are" : " is"} assigned to someone else. Your account can only work on its own players.`); return; }
+    if (!window.confirm(`${label} ${list.length} player${list.length > 1 ? "s" : ""}? This is logged for each.${skipped ? ` ${skipped} assigned to someone else will be skipped.` : ""}`)) return;
+    setBusy(true);
+    finish(await saveContacts(list.map(build)), "saved", skipped);
+  };
+  const markSel = () => saveMany("Mark as CONTACTED today:", (r) => contactedPayload(r, snap, contactMap[ckey(r)], me));
+  const undoSel = async () => {
+    const list = getRows().filter((r) => contactMap[ckey(r)]);          // only players that have a contact to take back
+    if (!canUndo || busy) return;
+    if (!mayClear) { toast("Your account is not allowed to undo contacts. Ask an admin to turn on “Clear contacts and notes” for you."); return; }
+    if (!list.length) { toast("None of the ticked players has a contact to undo"); return; }
+    if (!window.confirm(`Undo the contact for ${list.length} player${list.length > 1 ? "s" : ""}? This removes the assignment, status and note, and they drop out of Performance counts. It cannot be undone.`)) return;
+    setBusy(true);
+    finish(await clearContacts(list.map((r) => ({ snapshot_date: snap, player_key: r.player_key, brand: r.brand, tier_segment: r.tier_segment }))), "undone");
+  };
+  return { busy, canUndo, saveMany, markSel, undoSel };
 }
 
 /** Filter state + the Grace activation lookup (loaded only when a view needs it, same endpoint as the live Queue). */

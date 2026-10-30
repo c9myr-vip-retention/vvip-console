@@ -1,14 +1,14 @@
 // Players: search and browse everyone. Re-houses the live Queue table view (paste list, multi-sort, row selection, bulk mark/assign, export).
 import React, { Fragment, useEffect, useMemo, useState } from "react";
-import { Select, BrandBadge, toast } from "../ui";
+import { Select, BrandBadge } from "../ui";
 import { Drawer, exportQueue, parsePasteList, copyText, ckey, dispId, dispName, looksNumeric, tap, fmt } from "../../App.jsx";
-import { useDailyBase, useDailyFilters } from "../daily/hooks.js";
-import { sortRows, contactedPayload, assignPayload } from "../daily/logic.js";
+import { useDailyBase, useDailyFilters, useBulkContact } from "../daily/hooks.js";
+import { sortRows, assignPayload } from "../daily/logic.js";
 import { Banners, PageHead, SearchBox, AgentSelect, BrandMenu, FilterMenu, BrandCards, ClassPill, StatusTag, GraceTag, PlayerName, bcolor } from "../daily/widgets.jsx";
 
 export default function Page({ ctx }) {
   const base = useDailyBase(ctx);
-  const { snap, data, me, isAdmin, readOnly, team, brandOrder, contactMap, cooldownSet, saveContact } = base;
+  const { snap, data, me, isAdmin, readOnly, team, brandOrder, contactMap, cooldownSet } = base;
   const F = useDailyFilters(base, { stage: null, mine: false });
   const { f, setF, patch, setTog, clearAll, graceTag, graceOf, graceSt, graceErr, graceNeeded, env, poolNoBrand } = F;
 
@@ -21,7 +21,6 @@ export default function Page({ ctx }) {
   const [pasteText, setPasteText] = useState("");
   const [pasteMsg, setPasteMsg] = useState(null);
   const [copied, setCopied] = useState("");
-  const [busy, setBusy] = useState(false);
   const [assignTo, setAssignTo] = useState("");
 
   const rows = useMemo(() => sortRows(F.rows, sorts, { cooldownSet, graceWatch: f.tg.gwatch, graceOf, graceSt }),
@@ -50,20 +49,9 @@ export default function Page({ ctx }) {
     const ok = await copyText(names.join("\n"));
     setCopied(ok ? "ok" : "fail"); setTimeout(() => setCopied(""), ok ? 1400 : 2600);
   };
-  const bulk = async (label, build) => {
-    const list = selRows();
-    if (readOnly || busy || !list.length) return;
-    if (!window.confirm(`${label} ${list.length} player${list.length > 1 ? "s" : ""}? This is logged for each.`)) return;
-    setBusy(true);
-    let failed = 0;
-    for (const r of list) {
-      try { await saveContact(build(r)); } catch (e) { failed++; }   // keep going; a failed row stays as it was
-    }
-    setBusy(false); setSel(new Set());
-    toast(failed ? `${failed} could not be saved` : "Done");
-  };
-  const markSel = () => bulk("Mark as CONTACTED today:", (r) => contactedPayload(r, snap, contactMap[ckey(r)], me));
-  const assignSel = () => assignTo && bulk(`Assign to ${assignTo}:`, (r) => assignPayload(r, snap, contactMap[ckey(r)], assignTo));
+  // One request wave and one screen update for the whole ticked list; players that failed stay ticked.
+  const { busy, canUndo, saveMany, markSel, undoSel } = useBulkContact(base, selRows, setSel);
+  const assignSel = () => assignTo && saveMany(`Assign to ${assignTo}:`, (r) => assignPayload(r, snap, contactMap[ckey(r)], assignTo));
 
   const Th = ({ k, children }) => {
     const i = sorts.findIndex((s) => s.k === k), s = i >= 0 ? sorts[i] : null;
@@ -102,6 +90,7 @@ export default function Page({ ctx }) {
           <b>{sel.size} selected</b>
           <button className="btn sm" onClick={copyNames}>{copied === "ok" ? "✓ Copied" : copied === "fail" ? "Copy blocked: open in Chrome" : "Copy usernames"}</button>
           {!readOnly && <button className="btn sm pri" disabled={busy} onClick={markSel}>{busy ? "Working…" : "✓ Mark contacted"}</button>}
+          {canUndo && <button className="btn sm" disabled={busy} onClick={undoSel} title="Take back the contact for every ticked player that has one">↩ Undo contacted</button>}
           {isAdmin && !readOnly && (
             <>
               <span style={{ flex: 1 }} /><span className="dim">Assign to</span>

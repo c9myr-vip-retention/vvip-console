@@ -1,6 +1,7 @@
 /* daily-b pages. Page-specific rules only, prefixed d2-. Shared look comes from revamp.css and daily/daily.css. */
 .d2-sub{margin-top:3px;display:flex;gap:6px;align-items:center;font-size:11.5px}
 .d2-tbl tr.br td:first-child{box-shadow:inset 4px 0 0 var(--b,transparent)}
+.d2-tbl tr.sel{background:color-mix(in srgb,var(--accent) 6%,transparent)}
 .d2-tbl td,.d2-tbl th{white-space:nowrap}
 .d2-prog{height:6px;border-radius:99px;background:var(--panel2);overflow:hidden;margin-bottom:12px}
 .d2-prog i{display:block;height:100%;background:var(--pos);transition:width .3s}
