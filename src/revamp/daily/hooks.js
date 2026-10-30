@@ -130,5 +130,3 @@ export function useDailyFilters(base, { stage = null, mine = false } = {}) {
   };
   return { f, setF, patch, setTog, clearAll, graceSt, graceErr, graceNeeded, graceOf, graceTag, env, rows, poolNoBrand };
 }
-
-export const keyOf = ckey;

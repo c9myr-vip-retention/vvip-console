@@ -2065,14 +2065,12 @@ const worker = {
     const canDelete = canDeleteAny || can("contact.delete_own");
     const NOEDIT = () => err("View-only — your account has no edit permission", 403);
     const OWNONLY = () => err("You can only work on players assigned to you", 403);
-    // Who a player is assigned to today: the day's contact row first, then the standing assignment. null = nobody (anyone may pick it up).
+    // Who a player is assigned to today: the day's contact row. null = nobody (anyone may pick it up). The Check-in roster (player_assignment)
+    // only decides who ticks login and deposit; it does not own contacts, so an agent who joined after the roster was dealt can still work those players.
     const ownerOf = async (b) => {
       const row = b.snapshot_date ? await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
         .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first() : null;
       if (row && row.assigned_to) return row.assigned_to;
-      const a = await env.DB.prepare("SELECT agent FROM player_assignment WHERE brand = ? AND player_key = ? AND active = 1 AND agent IN (SELECT username FROM users) ORDER BY (tier_segment = ?) DESC LIMIT 1")
-        .bind(b.brand, b.player_key, b.tier_segment || "").first();
-      if (a) return a.agent;
       if (b.snapshot_date) return null;
       const last = await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE player_key = ? AND brand = ? AND assigned_to IS NOT NULL ORDER BY snapshot_date DESC LIMIT 1").bind(b.player_key, b.brand).first();   // notes carry no day: use the latest contact row
       return last ? last.assigned_to : null;
