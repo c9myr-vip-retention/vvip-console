@@ -2070,7 +2070,7 @@ const worker = {
       const row = b.snapshot_date ? await env.DB.prepare("SELECT assigned_to FROM contact_log WHERE snapshot_date = ? AND player_key = ? AND brand = ? AND tier_segment = ?")
         .bind(b.snapshot_date, b.player_key, b.brand, b.tier_segment).first() : null;
       if (row && row.assigned_to) return row.assigned_to;
-      const a = await env.DB.prepare("SELECT agent FROM player_assignment WHERE brand = ? AND player_key = ? AND active = 1 ORDER BY (tier_segment = ?) DESC LIMIT 1")
+      const a = await env.DB.prepare("SELECT agent FROM player_assignment WHERE brand = ? AND player_key = ? AND active = 1 AND agent IN (SELECT username FROM users) ORDER BY (tier_segment = ?) DESC LIMIT 1")
         .bind(b.brand, b.player_key, b.tier_segment || "").first();
       if (a) return a.agent;
       if (b.snapshot_date) return null;
