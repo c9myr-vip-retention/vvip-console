@@ -53,17 +53,24 @@ export function useBulkContact(base, getRows, onDone) {
   const [busy, setBusy] = useState(false);
   const mayClear = can(me, "contact.delete") || can(me, "contact.delete_own");   // same rule as the Worker: either version of the permission
   const canUndo = !readOnly;                                            // always shown when editing; the click says why if the account may not clear
-  const finish = (r, verb) => {
+  const editAny = can(me, "contact.edit");                              // "Own only" accounts may not touch players assigned to somebody else
+  const finish = (r, verb, skipped = 0) => {
     setBusy(false);
     onDone(new Set(r.failed.map((p) => `${p.player_key}|${p.brand}|${p.tier_segment}`)));
-    toast(r.failed.length ? `${r.done.length} ${verb}, ${r.failed.length} could not be saved` : `${r.done.length} ${verb}`);
+    const parts = [`${r.done.length} ${verb}`];
+    if (r.failed.length) parts.push(`${r.failed.length} could not be saved${r.error ? ` (${r.error})` : ""}`);
+    if (skipped) parts.push(`${skipped} skipped, assigned to someone else`);
+    toast(parts.join(", "));
   };
   const saveMany = async (label, build) => {
-    const list = getRows();
-    if (readOnly || busy || !list.length) return;
-    if (!window.confirm(`${label} ${list.length} player${list.length > 1 ? "s" : ""}? This is logged for each.`)) return;
+    const all = getRows();
+    if (readOnly || busy || !all.length) return;
+    const list = editAny ? all : all.filter((r) => { const o = contactMap[ckey(r)]?.assigned_to; return !o || o === me.username; });
+    const skipped = all.length - list.length;
+    if (!list.length) { toast(`All ${skipped} ticked player${skipped > 1 ? "s are" : " is"} assigned to someone else. Your account can only work on its own players.`); return; }
+    if (!window.confirm(`${label} ${list.length} player${list.length > 1 ? "s" : ""}? This is logged for each.${skipped ? ` ${skipped} assigned to someone else will be skipped.` : ""}`)) return;
     setBusy(true);
-    finish(await saveContacts(list.map(build)), "saved");
+    finish(await saveContacts(list.map(build)), "saved", skipped);
   };
   const markSel = () => saveMany("Mark as CONTACTED today:", (r) => contactedPayload(r, snap, contactMap[ckey(r)], me));
   const undoSel = async () => {

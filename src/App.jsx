@@ -5811,12 +5811,13 @@ export default function App() {
   const pkey = (c) => `${c.snapshot_date}|${c.player_key}|${c.brand}|${c.tier_segment}`;
   async function sendMany(payloads, send) {
     const done = [], failed = [];
+    let error = "";                                                       // the server's reason for the first failure, so the toast can say why
     for (let i = 0; i < payloads.length; i += 8) {
       const part = payloads.slice(i, i + 8);
       const res = await Promise.allSettled(part.map(send));
-      res.forEach((r, j) => (r.status === "fulfilled" ? done : failed).push(part[j]));
+      res.forEach((r, j) => { if (r.status === "fulfilled") done.push(part[j]); else { failed.push(part[j]); if (!error) error = (r.reason && r.reason.message) || "error"; } });
     }
-    return { done, failed };
+    return { done, failed, error };
   }
   async function saveContacts(payloads) {
     const r = await sendMany(payloads, (p) => api("/api/rtn/contact", { method: "POST", body: JSON.stringify(p) }));
