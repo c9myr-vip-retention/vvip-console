@@ -10,7 +10,8 @@ import {
 
 const MAX_PER_CALL = 500;
 const FULL = { width: "100%", justifyContent: "space-between", padding: "8px 11px", fontSize: 13 };
-const brandOpts = () => BRAND_ORDER.map((b) => ({ value: b, label: b, dot: brandColor(b) }));
+// The team in view's brands, plus any already on the item so editing never drops one.
+const brandOpts = (list, picked = []) => [...new Set([...list, ...picked])].map((b) => ({ value: b, label: b, dot: brandColor(b) }));
 export const typeOf = (types, key) => types.find((t) => t.key === key) || { key, name: key, color: "#8B94A7" };
 export const Who = ({ names, max = 4 }) => (
   <span className="who">{names.slice(0, max).map((u) => <Avatar key={u} name={u} />)}{names.length > max && <span className="dim">+{names.length - max}</span>}</span>
@@ -46,7 +47,7 @@ export function MultiCal({ dates, month, onMonth, onPick, single }) {
 const blankEntry = (type_key = "reload") => ({ type_key, title: "", start_time: "12:00", end_time: "23:59", brands: [], who: [], note: "", repeat: "none" });
 const fromItem = (it) => ({ type_key: it.type_key, title: it.title, start_time: it.start_time || "", end_time: it.end_time || "", brands: [...it.brands], who: [...it.who], note: it.note || "", repeat: it.repeat });
 
-function EntryForm({ e, i, n, types, people, shifts, edit, onChange, onRemove }) {
+function EntryForm({ e, i, n, types, people, shifts, brands, edit, onChange, onRemove }) {
   const set = (k) => (v) => onChange({ ...e, [k]: v });
   const T = timeOptionsFor(e.start_time, e.end_time);
   const quick = (k) => {
@@ -72,7 +73,7 @@ function EntryForm({ e, i, n, types, people, shifts, edit, onChange, onRemove })
         <label>End<Select value={e.end_time} onChange={set("end_time")} options={T} /></label>
       </div>
       <div className="row2">
-        <label>Brands<MultiSelect label={e.brands.length ? "Brands" : "Any brand"} value={e.brands} onChange={set("brands")} options={brandOpts()} style={FULL} /></label>
+        <label>Brands<MultiSelect label={e.brands.length ? "Brands" : "Any brand"} value={e.brands} onChange={set("brands")} options={brandOpts(brands, e.brands)} style={FULL} /></label>
         <label>People{e.type_key === "shift" && <span className="warn"> · required</span>}
           <MultiSelect label={e.who.length ? "People" : "Anyone"} value={e.who} onChange={set("who")} options={people.map((p) => ({ value: p.username, label: p.username }))} style={FULL} /></label>
       </div>
@@ -85,7 +86,7 @@ function EntryForm({ e, i, n, types, people, shifts, edit, onChange, onRemove })
 }
 
 /** Add (many dates x many entries) or edit one item. */
-export function AddModal({ types, people, shifts = DEFAULT_SHIFTS, item, date0, type0, onClose, onDone }) {
+export function AddModal({ types, people, shifts = DEFAULT_SHIFTS, brands = BRAND_ORDER, item, date0, type0, onClose, onDone }) {
   const today = todayMyt(), edit = !!item;
   const [dates, setDates] = useState(() => new Set([item ? item.date : date0 || today]));
   const [month, setMonth] = useState(() => monthStart(item ? item.date : date0 || today));
@@ -156,7 +157,7 @@ export function AddModal({ types, people, shifts = DEFAULT_SHIFTS, item, date0, 
           </div>
           <div>
             <div className="sch-h">{edit ? "Entry" : "Entries · add as many as you need"}</div>
-            {entries.map((e, i) => <EntryForm key={i} e={e} i={i} n={entries.length} edit={edit} types={types} people={people} shifts={shifts} onChange={upd(i)} onRemove={() => setEntries((l) => l.filter((_, j) => j !== i))} />)}
+            {entries.map((e, i) => <EntryForm key={i} e={e} i={i} n={entries.length} edit={edit} types={types} people={people} shifts={shifts} brands={brands} onChange={upd(i)} onRemove={() => setEntries((l) => l.filter((_, j) => j !== i))} />)}
             {!edit && <button type="button" className="addq" style={{ width: "100%" }} onClick={() => setEntries((l) => [...l, blankEntry(l.length ? l[l.length - 1].type_key : undefined)])}>+ Add another entry</button>}
           </div>
         </div>

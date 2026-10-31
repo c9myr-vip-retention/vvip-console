@@ -5,13 +5,13 @@
 // Repeats are stored once by the Worker; this page expands them (see ../schedule/logic.js).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar, MultiSelect, Select, Seg, toast } from "../ui";
-import { BRAND_ORDER } from "../tokens.js";
 import { api } from "../schedule/api.js";
 import { useLive } from "../live.js";
 import { can } from "../perms.js";
 import { AddModal, SwapsModal, TypeModal, ViewModal } from "../schedule/forms.jsx";
 import { ManageModal } from "../schedule/manage.jsx";
 import { BulkModal } from "../schedule/bulk.jsx";
+import { TEAMS } from "../../App.jsx";
 import { Lanes, Month, WeekBoard } from "../schedule/views.jsx";
 import Roster from "../schedule/roster.jsx";
 import {
@@ -27,6 +27,7 @@ const setPref = (k, v) => { try { localStorage.setItem("revamp_sched_" + k, v); 
 export default function Schedule({ ctx }) {
   const me = ctx?.me?.username || "", admin = can(ctx?.me, "schedule.manage"), ownEdit = can(ctx?.me, "schedule.edit_own"), canSwaps = can(ctx?.me, "schedule.swaps"), canEdit = can(ctx?.me, "schedule.swap_request");
   api.setMe(ctx?.me);
+  const brands = [...new Set([...(TEAMS[ctx?.viewTeam] || []), ...Object.values(TEAMS).flat()])];   // every team's brands, the team in view first
   const today = todayMyt();
 
   const [view, setView] = useState(() => (VIEWS.some((v) => v.value === getPref("view", "")) ? getPref("view", "week") : "week"));
@@ -156,12 +157,12 @@ export default function Schedule({ ctx }) {
         : <Month month={monthFirst} today={today} occs={occs} types={types} me={me} onOpen={open} onDay={(d) => { setAnchor(d); setV("week"); }} />
       )}
 
-      {modal?.kind === "add" && <AddModal types={types} people={people} shifts={HIDE_SHIFTS ? [] : data.shifts} date0={modal.date} type0={modal.type} onClose={() => setModal(null)} onDone={done} />}
-      {modal?.kind === "edit" && <AddModal types={types} people={people} shifts={HIDE_SHIFTS ? [] : data.shifts} item={modal.item} onClose={() => setModal(null)} onDone={done} />}
+      {modal?.kind === "add" && <AddModal types={types} people={people} shifts={HIDE_SHIFTS ? [] : data.shifts} brands={brands} date0={modal.date} type0={modal.type} onClose={() => setModal(null)} onDone={done} />}
+      {modal?.kind === "edit" && <AddModal types={types} people={people} shifts={HIDE_SHIFTS ? [] : data.shifts} brands={brands} item={modal.item} onClose={() => setModal(null)} onDone={done} />}
       {modal?.kind === "view" && <ViewModal occ={modal.occ} types={types} me={me} canEdit={canEdit} swapState={swapState(modal.occ.item.id)} onClose={() => setModal(null)} onSwapped={() => done(null)} />}
       {modal?.kind === "type" && <TypeModal onClose={() => setModal(null)} onCreated={() => done(null)} />}
       {modal?.kind === "manage" && <ManageModal types={types} shifts={data.shifts} onShifts={(l) => setData((d) => ({ ...d, shifts: l }))} onClose={() => setModal(null)} onDeleted={reload} onTypes={reload} />}
-      {modal?.kind === "bulk" && <BulkModal types={types} brands={[...new Set([...(ctx?.teamBrands || []), ...BRAND_ORDER])]} onClose={() => setModal(null)} onDone={done} />}
+      {modal?.kind === "bulk" && <BulkModal types={types} brands={brands} onClose={() => setModal(null)} onDone={done} />}
       {modal?.kind === "swaps" && <SwapsModal onClose={() => setModal(null)} onChanged={reload} />}
     </>
   );
